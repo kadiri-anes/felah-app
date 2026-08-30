@@ -34,11 +34,30 @@ st.markdown("""
         color: #e65100;
         padding: 10px;
         border-radius: 8px;
-        border: 1px solid #ffe0b2;
-        font-weight: bold;
-    }
-    </style>
-""", unsafe_allow_html=True)
+        # ---------------------------------------------------------
+# Database Setup (SQLite - Auto-updating Schema)
+# ---------------------------------------------------------
+conn = sqlite3.connect('felah_database.db', check_same_thread=False)
+c = conn.cursor()
+
+# Create table with category column
+c.execute('''CREATE TABLE IF NOT EXISTS declarations 
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+              farmer_name TEXT, 
+              carte_num TEXT, 
+              wilaya TEXT, 
+              category TEXT, 
+              crop TEXT, 
+              area REAL)''')
+conn.commit()
+
+# Safe migration: Add 'category' column if running on an existing older database file
+try:
+    c.execute("ALTER TABLE declarations ADD COLUMN category TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    # Column already exists, safe to ignore
+    pass
 
 # ---------------------------------------------------------
 # Database Setup (SQLite)
