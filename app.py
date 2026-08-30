@@ -143,9 +143,13 @@ FRUIT_LIST = [
 ]
 
 def get_current_crop_area(crop_name: str) -> float:
-    res = supabase.table("declarations").select("area").eq("crop", crop_name).execute()
-    if res.data:
-        return sum(item["area"] for item in res.data if item.get("area"))
+    try:
+        res = supabase.table("declarations").select("area").eq("crop", crop_name).execute()
+        if res and res.data:
+            return sum(item["area"] for item in res.data if item.get("area") is not None)
+    except Exception as e:
+        # Prevents app crash if table is missing or DB connection hiccups
+        return 0.0
     return 0.0
 
 # ---------------------------------------------------------
@@ -377,8 +381,11 @@ if st.session_state.active_tab == "home":
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
         
-        res = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
-        alerts = res.data
+        try:
+            res = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
+            alerts = res.data
+        except Exception:
+            alerts = []
         
         if alerts:
             for item in alerts:
@@ -430,8 +437,11 @@ if st.session_state.active_tab == "home":
         st.map(suppliers_df, zoom=5)
         
         st.write("### Verified Locations & Directory")
-        res = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
-        directory = res.data
+        try:
+            res = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
+            directory = res.data
+        except Exception:
+            directory = []
         
         if directory:
             for item in directory:
@@ -540,22 +550,31 @@ elif st.session_state.active_tab == "account":
                     st.write("**Reset Specific Crop to 0 Ha:**")
                     reset_crop_target = st.selectbox("Select Crop to Reset", list(VEGETABLE_LIMITS.keys()) + FRUIT_LIST)
                     if st.button(f"Reset '{reset_crop_target}' to 0 Ha"):
-                        supabase.table("declarations").delete().eq("crop", reset_crop_target).execute()
-                        st.success(f"Successfully reset {reset_crop_target} area back to 0 Ha!")
-                        st.rerun()
+                        try:
+                            supabase.table("declarations").delete().eq("crop", reset_crop_target).execute()
+                            st.success(f"Successfully reset {reset_crop_target} area back to 0 Ha!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error resetting crop: {e}")
 
                 with col_reset2:
                     st.write("**Delete Specific Entry by ID:**")
                     entry_id_to_delete = st.number_input("Enter Entry ID", min_value=1, step=1)
                     if st.button("Delete Entry"):
-                        supabase.table("declarations").delete().eq("id", entry_id_to_delete).execute()
-                        st.success(f"Entry ID #{entry_id_to_delete} deleted!")
-                        st.rerun()
+                        try:
+                            supabase.table("declarations").delete().eq("id", entry_id_to_delete).execute()
+                            st.success(f"Entry ID #{entry_id_to_delete} deleted!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error deleting entry: {e}")
                 
                 st.write("---")
                 st.write("### Live Database Declarations")
-                res = supabase.table("declarations").select("*").execute()
-                st.dataframe(pd.DataFrame(res.data), use_container_width=True)
+                try:
+                    res = supabase.table("declarations").select("*").execute()
+                    st.dataframe(pd.DataFrame(res.data), use_container_width=True)
+                except Exception:
+                    st.info("No declarations available or table missing.")
 
             # --- ADMIN TAB 2: WEATHER ALERT MANAGER ---
             with admin_tab2:
@@ -572,27 +591,36 @@ elif st.session_state.active_tab == "account":
                 
                 if st.button("Publish Weather Alert"):
                     if alert_title.strip() and alert_msg.strip():
-                        supabase.table("weather_alerts").insert({
-                            "title": sanitize(alert_title),
-                            "region": alert_region,
-                            "severity": alert_severity,
-                            "message": sanitize(alert_msg)
-                        }).execute()
-                        st.success("Weather Alert successfully published!")
-                        st.rerun()
+                        try:
+                            supabase.table("weather_alerts").insert({
+                                "title": sanitize(alert_title),
+                                "region": alert_region,
+                                "severity": alert_severity,
+                                "message": sanitize(alert_msg)
+                            }).execute()
+                            st.success("Weather Alert successfully published!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error publishing alert: {e}")
                     else:
                         st.error("Please provide both Alert Title and Instructions.")
                         
                 st.write("---")
                 st.write("### Active Published Alerts")
-                res_alerts = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
-                st.dataframe(pd.DataFrame(res_alerts.data), use_container_width=True)
+                try:
+                    res_alerts = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
+                    st.dataframe(pd.DataFrame(res_alerts.data), use_container_width=True)
+                except Exception:
+                    st.info("No alerts found.")
                 
                 delete_alert_id = st.number_input("Enter Alert ID to Delete", min_value=1, step=1, key="del_alert")
                 if st.button("Delete Weather Alert"):
-                    supabase.table("weather_alerts").delete().eq("id", delete_alert_id).execute()
-                    st.success(f"Alert ID #{delete_alert_id} deleted!")
-                    st.rerun()
+                    try:
+                        supabase.table("weather_alerts").delete().eq("id", delete_alert_id).execute()
+                        st.success(f"Alert ID #{delete_alert_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting alert: {e}")
 
             # --- ADMIN TAB 3: MARKETS & LOCATIONS MANAGER ---
             with admin_tab3:
@@ -606,25 +634,34 @@ elif st.session_state.active_tab == "account":
                 
                 if st.button("Add Location to Public Directory"):
                     if loc_name.strip() and loc_maps_link.strip():
-                        supabase.table("suppliers_directory").insert({
-                            "name": sanitize(loc_name),
-                            "wilaya": loc_wilaya,
-                            "category": loc_category,
-                            "address": sanitize(loc_address),
-                            "maps_link": sanitize(loc_maps_link)
-                        }).execute()
-                        st.success("Location added to public directory successfully!")
-                        st.rerun()
+                        try:
+                            supabase.table("suppliers_directory").insert({
+                                "name": sanitize(loc_name),
+                                "wilaya": loc_wilaya,
+                                "category": loc_category,
+                                "address": sanitize(loc_address),
+                                "maps_link": sanitize(loc_maps_link)
+                            }).execute()
+                            st.success("Location added to public directory successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error adding location: {e}")
                     else:
                         st.error("Please fill in Location Name and Google Maps URL.")
                         
                 st.write("---")
                 st.write("### Managed Directory Locations")
-                res_suppliers = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
-                st.dataframe(pd.DataFrame(res_suppliers.data), use_container_width=True)
+                try:
+                    res_suppliers = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
+                    st.dataframe(pd.DataFrame(res_suppliers.data), use_container_width=True)
+                except Exception:
+                    st.info("No supplier locations found.")
                 
                 delete_loc_id = st.number_input("Enter Location ID to Delete", min_value=1, step=1, key="del_loc")
                 if st.button("Delete Location"):
-                    supabase.table("suppliers_directory").delete().eq("id", delete_loc_id).execute()
-                    st.success(f"Location ID #{delete_loc_id} deleted!")
-                    st.rerun()
+                    try:
+                        supabase.table("suppliers_directory").delete().eq("id", delete_loc_id).execute()
+                        st.success(f"Location ID #{delete_loc_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting location: {e}")
