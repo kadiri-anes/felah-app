@@ -1,11 +1,11 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import qrcode
 import random
 import html
 import hashlib
 from io import BytesIO
+from st_supabase_connection import SupabaseConnection
 
 # ---------------------------------------------------------
 # Security Helpers
@@ -36,78 +36,51 @@ st.markdown("""
     .promo-banner {
         background: linear-gradient(135deg, #0b8a62 0%, #1e5340 100%);
         color: white;
-        border-radius: 15px;
-        padding: 18px;
+        border-radius: 12px;
+        padding: 15px;
         text-align: center;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
         border: 2px solid #d4af37;
     }
     .alert-red {
         background-color: #ffe6e6;
         border-left: 6px solid #d9534f;
-        padding: 15px;
+        padding: 12px;
         border-radius: 8px;
         color: #a94442;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
     }
     .alert-yellow {
         background-color: #fffde6;
         border-left: 6px solid #f0ad4e;
-        padding: 15px;
+        padding: 12px;
         border-radius: 8px;
         color: #8a6d3b;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
     }
     .alert-green {
         background-color: #e6fffa;
         border-left: 6px solid #5cb85c;
-        padding: 15px;
+        padding: 12px;
         border-radius: 8px;
         color: #3c763d;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
     }
     .market-card {
         background-color: white;
         border: 1px solid #e0e0e0;
         border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 12px;
+        padding: 12px;
+        margin-bottom: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Database Setup (SQLite - Parameterized Schema & Queries)
+# Supabase Cloud Database Connection
 # ---------------------------------------------------------
-conn = sqlite3.connect('felah_database.db', check_same_thread=False)
-c = conn.cursor()
-
-c.execute('''CREATE TABLE IF NOT EXISTS declarations 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-              farmer_name TEXT, 
-              carte_num TEXT, 
-              wilaya TEXT, 
-              category TEXT, 
-              crop TEXT, 
-              area REAL)''')
-
-c.execute('''CREATE TABLE IF NOT EXISTS weather_alerts 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-              title TEXT, 
-              region TEXT, 
-              severity TEXT, 
-              message TEXT, 
-              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-
-c.execute('''CREATE TABLE IF NOT EXISTS suppliers_directory 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-              name TEXT, 
-              wilaya TEXT, 
-              category TEXT, 
-              address TEXT, 
-              maps_link TEXT)''')
-conn.commit()
+supabase = st.connection("supabase", type=SupabaseConnection)
 
 # ---------------------------------------------------------
 # 48 WILAYAS LIST
@@ -152,23 +125,27 @@ FRUIT_LIST = [
 ]
 
 def get_current_crop_area(crop_name: str) -> float:
-    c.execute("SELECT SUM(area) FROM declarations WHERE crop = ?", (crop_name,))
-    res = c.fetchone()[0]
-    return res if res else 0.0
+    res = supabase.table("declarations").select("area").eq("crop", crop_name).execute()
+    if res.data:
+        return sum(item["area"] for item in res.data if item.get("area"))
+    return 0.0
 
 # ---------------------------------------------------------
-# Session State & Security Controls
+# Session State Initialization
 # ---------------------------------------------------------
 if 'lang' not in st.session_state:
     st.session_state.lang = 'AR'
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
+if 'farmer_name' not in st.session_state:
+    st.session_state.farmer_name = ""
+if 'carte_num' not in st.session_state:
+    st.session_state.carte_num = ""
 if 'active_tab' not in st.session_state:
     st.session_state.active_tab = "home"
 if 'selected_service' not in st.session_state:
     st.session_state.selected_service = None
 
-# Brute-force rate limiting state
 if 'admin_attempts' not in st.session_state:
     st.session_state.admin_attempts = 0
 if 'admin_authenticated' not in st.session_state:
@@ -192,7 +169,7 @@ TEXTS = {
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "أسواق الجملة ونقاط الأسمدة (48 ولاية)",
+        'suppliers': "أسوق الجملة ونقاط الأسمدة (48 ولاية)",
         'admin': "لوحة تحكم المالِك (Owner Admin)"
     },
     'EN': {
@@ -212,44 +189,49 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# Sidebar - Authentication & Anti-Bot CAPTCHA
+# MOBILE-FRIENDLY TOP UTILITY BAR (Language & Login)
 # ---------------------------------------------------------
-st.sidebar.title("Language / اللغة")
-lang_choice = st.sidebar.radio("Select Language", ["العربية", "English"])
-st.session_state.lang = 'AR' if lang_choice == "العربية" else 'EN'
+top_col1, top_col2 = st.columns(2)
 
-st.sidebar.divider()
-st.sidebar.title("Account Authentication")
+with top_col1:
+    with st.expander("🌐 Language / اللغة", expanded=False):
+        selected_lang = st.radio("Select Language / اختر اللغة", ["العربية", "English"], key="lang_radio")
+        st.session_state.lang = 'AR' if selected_lang == "العربية" else 'EN'
 
-if not st.session_state.logged_in:
-    farmer_name_input = st.sidebar.text_input("Name / الاسم", placeholder="Enter your full name")
-    carte_num_input = st.sidebar.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX")
-    
-    correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
-    st.sidebar.write(f"**Security Check (CAPTCHA):**")
-    st.sidebar.caption(f"Solve: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?")
-    captcha_input = st.sidebar.text_input("Security Answer / إجابة التحقق", placeholder="Result")
+with top_col2:
+    status_label = f"🟢 {st.session_state.farmer_name}" if st.session_state.logged_in else "👤 Login / دخول"
+    with st.expander(status_label, expanded=not st.session_state.logged_in):
+        if not st.session_state.logged_in:
+            farmer_name_input = st.text_input("Name / الاسم", placeholder="Enter full name", key="top_name")
+            carte_num_input = st.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX", key="top_card")
+            
+            correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
+            st.caption(f"Security Check: Solve **{st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?**")
+            captcha_input = st.text_input("Answer", placeholder="Result", key="top_captcha")
 
-    if st.sidebar.button("Log In / دخول"):
-        if not farmer_name_input.strip() or not carte_num_input.strip():
-            st.sidebar.error("Please fill in both Name and Card Number.")
-        elif str(captcha_input).strip() != str(correct_answer):
-            st.sidebar.error("Incorrect CAPTCHA answer. Try again.")
-            generate_new_captcha()
+            if st.button("Log In / دخول", use_container_width=True, type="primary"):
+                if not farmer_name_input.strip() or not carte_num_input.strip():
+                    st.error("Please fill in both Name and Card Number.")
+                elif str(captcha_input).strip() != str(correct_answer):
+                    st.error("Incorrect CAPTCHA answer.")
+                    generate_new_captcha()
+                else:
+                    st.session_state.logged_in = True
+                    st.session_state.farmer_name = sanitize(farmer_name_input)
+                    st.session_state.carte_num = sanitize(carte_num_input)
+                    generate_new_captcha()
+                    st.rerun()
         else:
-            st.session_state.logged_in = True
-            st.session_state.farmer_name = sanitize(farmer_name_input)
-            st.session_state.carte_num = sanitize(carte_num_input)
-            generate_new_captcha()
-            st.rerun()
-else:
-    st.sidebar.success(f"Connected: {st.session_state.farmer_name}")
-    if st.sidebar.button("Log Out / خروج"):
-        st.session_state.logged_in = False
-        st.session_state.farmer_name = ""
-        st.session_state.carte_num = ""
-        st.session_state.admin_authenticated = False
-        st.rerun()
+            st.write(f"Connected as **{st.session_state.farmer_name}**")
+            st.caption(f"Card N°: `{st.session_state.carte_num}`")
+            if st.button("Log Out / خروج", use_container_width=True):
+                st.session_state.logged_in = False
+                st.session_state.farmer_name = ""
+                st.session_state.carte_num = ""
+                st.session_state.admin_authenticated = False
+                st.rerun()
+
+st.divider()
 
 # ---------------------------------------------------------
 # Main UI Header
@@ -258,8 +240,8 @@ st.markdown(f"<h2 style='text-align: center;'>{t['title']}</h2>", unsafe_allow_h
 
 st.markdown(f"""
     <div class="promo-banner">
-        <h3>{t['banner']}</h3>
-        <p>الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية</p>
+        <h4 style="margin:0;">{t['banner']}</h4>
+        <small>الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية</small>
     </div>
 """, unsafe_allow_html=True)
 
@@ -330,11 +312,16 @@ if st.session_state.active_tab == "home":
         
         if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
             if st.session_state.logged_in:
-                # Parameterized INSERT prevents SQL Injection
-                c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, category, crop, area) VALUES (?, ?, ?, ?, ?, ?)",
-                          (st.session_state.farmer_name, st.session_state.carte_num, selected_w, cat_choice, selected_c, area_ha))
-                conn.commit()
-                st.success("Declaration registered successfully in the National Database!")
+                supabase.table("declarations").insert({
+                    "farmer_name": st.session_state.farmer_name,
+                    "carte_num": st.session_state.carte_num,
+                    "wilaya": selected_w,
+                    "category": cat_choice,
+                    "crop": selected_c,
+                    "area": area_ha
+                }).execute()
+                
+                st.success("Declaration registered successfully in Supabase Cloud Database!")
                 
                 qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
                 qr = qrcode.make(qr_payload)
@@ -351,21 +338,22 @@ if st.session_state.active_tab == "home":
                     mime="image/png"
                 )
             else:
-                st.warning("Please log in from the sidebar first to submit.")
+                st.warning("Please log in using the '👤 Login' tab above first to submit.")
 
     # --- SERVICE 2: WEATHER & AG-ALERTS ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
         
-        c.execute("SELECT title, region, severity, message, created_at FROM weather_alerts ORDER BY id DESC")
-        alerts = c.fetchall()
+        res = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
+        alerts = res.data
         
         if alerts:
-            for title, region, severity, msg, created in alerts:
-                title_clean = sanitize(title)
-                region_clean = sanitize(region)
-                severity_clean = sanitize(severity)
-                msg_clean = sanitize(msg)
+            for item in alerts:
+                title_clean = sanitize(item.get("title", ""))
+                region_clean = sanitize(item.get("region", ""))
+                severity_clean = sanitize(item.get("severity", ""))
+                msg_clean = sanitize(item.get("message", ""))
+                created = item.get("created_at", "")
                 
                 if "Red" in severity_clean:
                     css_class = "alert-red"
@@ -409,18 +397,17 @@ if st.session_state.active_tab == "home":
         st.map(suppliers_df, zoom=5)
         
         st.write("### Verified Locations & Directory")
-        c.execute("SELECT name, wilaya, category, address, maps_link FROM suppliers_directory ORDER BY id DESC")
-        directory = c.fetchall()
+        res = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
+        directory = res.data
         
         if directory:
-            for name, wilaya, category, address, link in directory:
-                name_clean = sanitize(name)
-                wilaya_clean = sanitize(wilaya)
-                category_clean = sanitize(category)
-                address_clean = sanitize(address)
-                link_clean = sanitize(link)
+            for item in directory:
+                name_clean = sanitize(item.get("name", ""))
+                wilaya_clean = sanitize(item.get("wilaya", ""))
+                category_clean = sanitize(item.get("category", ""))
+                address_clean = sanitize(item.get("address", ""))
+                link_clean = sanitize(item.get("maps_link", ""))
                 
-                # Sanitize URL protocol
                 if not (link_clean.startswith("http://") or link_clean.startswith("https://")):
                     link_clean = f"https://{link_clean}"
                 
@@ -434,12 +421,6 @@ if st.session_state.active_tab == "home":
                 """, unsafe_allow_html=True)
         else:
             st.info("No custom market addresses added yet by administrator.")
-
-        st.write("---")
-        st.write("**Default Regional Hubs:**")
-        st.write("- **Wholesale Markets:** Boufarik (Blida), Attatba (Tipaza), Chelghoum Laid (Mila), Setif, Biskra, Oran.")
-        st.write("- **Fertilizer & Input Hubs:** ASMIDAL Outlets (El Oued, Adrar, Annaba).")
-        st.write("- **CCLS Silos:** OAIC Grain Storage points in Tiaret, Setif, Batna, Constantine, and Chlef.")
 
 # ---------------------------------------------------------
 # VIEW 2: CARTE FELLAH
@@ -459,7 +440,7 @@ elif st.session_state.active_tab == "card":
             </div>
         """, unsafe_allow_html=True)
     else:
-        st.warning("Please log in from the sidebar to view your digital card.")
+        st.warning("Please log in using the '👤 Login' tab at the top to view your digital card.")
 
 # ---------------------------------------------------------
 # VIEW 3: OWNER-ONLY ADMIN DASHBOARD (SECURED)
@@ -476,7 +457,6 @@ elif st.session_state.active_tab == "account":
     st.subheader(t['admin'])
     st.caption("Restricted Access: Only accessible by platform administrator.")
     
-    # Check Rate Limit Status (Max 5 Failed Attempts)
     if st.session_state.admin_attempts >= 5:
         st.error("🔒 Admin access locked due to 5 consecutive failed attempts. Please restart session.")
     else:
@@ -484,7 +464,6 @@ elif st.session_state.active_tab == "account":
             admin_pass = st.text_input("Enter Admin Password / كلمة السر للوحة التحكم", type="password")
             
             if st.button("Authenticate Admin"):
-                # Compare SHA-256 Hashes
                 target_hash = hash_password(get_admin_password())
                 input_hash = hash_password(admin_pass)
                 
@@ -497,7 +476,6 @@ elif st.session_state.active_tab == "account":
                     remaining = 5 - st.session_state.admin_attempts
                     st.error(f"Incorrect Password. Attempts remaining: {remaining}")
         
-        # Display Dashboard only if securely authenticated
         if st.session_state.admin_authenticated:
             st.success("Owner Access Granted!")
             
@@ -505,7 +483,7 @@ elif st.session_state.active_tab == "account":
                 st.session_state.admin_authenticated = False
                 st.rerun()
                 
-            admin_tab1, admin_tab2, admin_tab3 = st.tabs(["🌾 Quota & Declarations", "🚨 Weather Alerts Manager", "📍 Markets & Locations Manager"])
+            admin_tab1, admin_tab2, admin_tab3 = st.tabs(["🌾 Quotas", "🚨 Weather", "📍 Markets"])
             
             # --- ADMIN TAB 1: DECLARATION & QUOTA CONTROL ---
             with admin_tab1:
@@ -529,9 +507,7 @@ elif st.session_state.active_tab == "account":
                     st.write("**Reset Specific Crop to 0 Ha:**")
                     reset_crop_target = st.selectbox("Select Crop to Reset", list(VEGETABLE_LIMITS.keys()) + FRUIT_LIST)
                     if st.button(f"Reset '{reset_crop_target}' to 0 Ha"):
-                        # Parameterized DELETE
-                        c.execute("DELETE FROM declarations WHERE crop = ?", (reset_crop_target,))
-                        conn.commit()
+                        supabase.table("declarations").delete().eq("crop", reset_crop_target).execute()
                         st.success(f"Successfully reset {reset_crop_target} area back to 0 Ha!")
                         st.rerun()
 
@@ -539,23 +515,14 @@ elif st.session_state.active_tab == "account":
                     st.write("**Delete Specific Entry by ID:**")
                     entry_id_to_delete = st.number_input("Enter Entry ID", min_value=1, step=1)
                     if st.button("Delete Entry"):
-                        # Parameterized DELETE
-                        c.execute("DELETE FROM declarations WHERE id = ?", (entry_id_to_delete,))
-                        conn.commit()
+                        supabase.table("declarations").delete().eq("id", entry_id_to_delete).execute()
                         st.success(f"Entry ID #{entry_id_to_delete} deleted!")
                         st.rerun()
                 
                 st.write("---")
-                if st.button("⚠️ Clear Entire Declarations Database (Reset All to Zero)"):
-                    c.execute("DELETE FROM declarations")
-                    conn.commit()
-                    st.success("Entire database wiped out! All crop totals are 0 Ha.")
-                    st.rerun()
-
-                st.write("---")
                 st.write("### Live Database Declarations")
-                df = pd.read_sql_query("SELECT * FROM declarations", conn)
-                st.dataframe(df, use_container_width=True)
+                res = supabase.table("declarations").select("*").execute()
+                st.dataframe(pd.DataFrame(res.data), use_container_width=True)
 
             # --- ADMIN TAB 2: WEATHER ALERT MANAGER ---
             with admin_tab2:
@@ -572,24 +539,25 @@ elif st.session_state.active_tab == "account":
                 
                 if st.button("Publish Weather Alert"):
                     if alert_title.strip() and alert_msg.strip():
-                        # Parameterized INSERT with Sanitized Content
-                        c.execute("INSERT INTO weather_alerts (title, region, severity, message) VALUES (?, ?, ?, ?)",
-                                  (sanitize(alert_title), alert_region, alert_severity, sanitize(alert_msg)))
-                        conn.commit()
-                        st.success("Weather Alert successfully published and visible on user portal!")
+                        supabase.table("weather_alerts").insert({
+                            "title": sanitize(alert_title),
+                            "region": alert_region,
+                            "severity": alert_severity,
+                            "message": sanitize(alert_msg)
+                        }).execute()
+                        st.success("Weather Alert successfully published!")
                         st.rerun()
                     else:
                         st.error("Please provide both Alert Title and Instructions.")
                         
                 st.write("---")
                 st.write("### Active Published Alerts")
-                df_alerts = pd.read_sql_query("SELECT * FROM weather_alerts ORDER BY id DESC", conn)
-                st.dataframe(df_alerts, use_container_width=True)
+                res_alerts = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
+                st.dataframe(pd.DataFrame(res_alerts.data), use_container_width=True)
                 
                 delete_alert_id = st.number_input("Enter Alert ID to Delete", min_value=1, step=1, key="del_alert")
                 if st.button("Delete Weather Alert"):
-                    c.execute("DELETE FROM weather_alerts WHERE id = ?", (delete_alert_id,))
-                    conn.commit()
+                    supabase.table("weather_alerts").delete().eq("id", delete_alert_id).execute()
                     st.success(f"Alert ID #{delete_alert_id} deleted!")
                     st.rerun()
 
@@ -605,10 +573,13 @@ elif st.session_state.active_tab == "account":
                 
                 if st.button("Add Location to Public Directory"):
                     if loc_name.strip() and loc_maps_link.strip():
-                        # Parameterized INSERT with Sanitized Inputs
-                        c.execute("INSERT INTO suppliers_directory (name, wilaya, category, address, maps_link) VALUES (?, ?, ?, ?, ?)",
-                                  (sanitize(loc_name), loc_wilaya, loc_category, sanitize(loc_address), sanitize(loc_maps_link)))
-                        conn.commit()
+                        supabase.table("suppliers_directory").insert({
+                            "name": sanitize(loc_name),
+                            "wilaya": loc_wilaya,
+                            "category": loc_category,
+                            "address": sanitize(loc_address),
+                            "maps_link": sanitize(loc_maps_link)
+                        }).execute()
                         st.success("Location added to public directory successfully!")
                         st.rerun()
                     else:
@@ -616,12 +587,11 @@ elif st.session_state.active_tab == "account":
                         
                 st.write("---")
                 st.write("### Managed Directory Locations")
-                df_suppliers = pd.read_sql_query("SELECT * FROM suppliers_directory ORDER BY id DESC", conn)
-                st.dataframe(df_suppliers, use_container_width=True)
+                res_suppliers = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
+                st.dataframe(pd.DataFrame(res_suppliers.data), use_container_width=True)
                 
                 delete_loc_id = st.number_input("Enter Location ID to Delete", min_value=1, step=1, key="del_loc")
                 if st.button("Delete Location"):
-                    c.execute("DELETE FROM suppliers_directory WHERE id = ?", (delete_loc_id,))
-                    conn.commit()
+                    supabase.table("suppliers_directory").delete().eq("id", delete_loc_id).execute()
                     st.success(f"Location ID #{delete_loc_id} deleted!")
                     st.rerun()
