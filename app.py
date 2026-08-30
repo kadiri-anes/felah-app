@@ -349,31 +349,34 @@ if st.session_state.active_tab == "home":
         
         if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
             if st.session_state.logged_in:
-                supabase.table("declarations").insert({
-                    "farmer_name": st.session_state.farmer_name,
-                    "carte_num": st.session_state.carte_num,
-                    "wilaya": selected_w,
-                    "category": cat_choice,
-                    "crop": selected_c,
-                    "area": area_ha
-                }).execute()
-                
-                st.success("Declaration registered successfully in Supabase Cloud Database!")
-                
-                qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
-                qr = qrcode.make(qr_payload)
-                buf = BytesIO()
-                qr.save(buf, format="PNG")
-                qr_bytes = buf.getvalue()
-                
-                st.image(qr_bytes, caption="Official CCLS Aid QR Authorization Code", width=220)
-                
-                st.download_button(
-                    label="Download QR Permit (تحميل الرمز)",
-                    data=qr_bytes,
-                    file_name=f"Permit_{st.session_state.farmer_name}.png",
-                    mime="image/png"
-                )
+                try:
+                    supabase.table("declarations").insert({
+                        "farmer_name": st.session_state.farmer_name,
+                        "carte_num": st.session_state.carte_num,
+                        "wilaya": selected_w,
+                        "category": cat_choice,
+                        "crop": selected_c,
+                        "area": area_ha
+                    }).execute()
+                    
+                    st.success("Declaration registered successfully in Supabase Cloud Database!")
+                    
+                    qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
+                    qr = qrcode.make(qr_payload)
+                    buf = BytesIO()
+                    qr.save(buf, format="PNG")
+                    qr_bytes = buf.getvalue()
+                    
+                    st.image(qr_bytes, caption="Official CCLS Aid QR Authorization Code", width=220)
+                    
+                    st.download_button(
+                        label="Download QR Permit (تحميل الرمز)",
+                        data=qr_bytes,
+                        file_name=f"Permit_{st.session_state.farmer_name}.png",
+                        mime="image/png"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to record declaration in database. Please verify table permissions or run SQL setup. Error: {e}")
             else:
                 st.warning("Please open the side menu (top-left arrow ↗) and log in first.")
 
