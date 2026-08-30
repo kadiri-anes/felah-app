@@ -96,9 +96,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Supabase Cloud Database Connection
+# Supabase Cloud Database Connection (Explicit Key Fetch)
 # ---------------------------------------------------------
-supabase = st.connection("supabase", type=SupabaseConnection)
+try:
+    supabase = st.connection(
+        "supabase",
+        type=SupabaseConnection,
+        url=st.secrets["connections"]["supabase"]["SUPABASE_URL"],
+        key=st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
+    )
+except Exception:
+    # Fallback default connection attempt
+    supabase = st.connection("supabase", type=SupabaseConnection)
 
 # ---------------------------------------------------------
 # 48 WILAYAS LIST
@@ -147,8 +156,7 @@ def get_current_crop_area(crop_name: str) -> float:
         res = supabase.table("declarations").select("area").eq("crop", crop_name).execute()
         if res and res.data:
             return sum(item["area"] for item in res.data if item.get("area") is not None)
-    except Exception as e:
-        # Prevents app crash if table is missing or DB connection hiccups
+    except Exception:
         return 0.0
     return 0.0
 
@@ -376,7 +384,7 @@ if st.session_state.active_tab == "home":
                         mime="image/png"
                     )
                 except Exception as e:
-                    st.error(f"Failed to record declaration in database. Please verify table permissions or run SQL setup. Error: {e}")
+                    st.error(f"Failed to record declaration in database. Please verify table permissions or secrets configuration. Error: {e}")
             else:
                 st.warning("Please open the side menu (top-left arrow ↗) and log in first.")
 
