@@ -5,9 +5,9 @@ import qrcode
 from io import BytesIO
 
 # ---------------------------------------------------------
-# Page Configuration & Mobile CSS
+# Page Configuration & Mobile CSS Layout
 # ---------------------------------------------------------
-st.set_page_config(page_title="Felah Mobile Portal - فلاح", page_icon="🌾", layout="centered")
+st.set_page_config(page_title="Felah Mobile Portal - Algeria", page_icon="🌾", layout="centered")
 
 st.markdown("""
     <style>
@@ -21,26 +21,15 @@ st.markdown("""
         margin-bottom: 15px;
         border: 2px solid #d4af37;
     }
-    .status-badge-ok {
-        background-color: #e8f5e9;
-        color: #2e7d32;
-        padding: 10px;
-        border-radius: 8px;
-        border: 1px solid #a5d6a7;
-        font-weight: bold;
-    }
-    .status-badge-warn {
-        background-color: #fff3e0;
-        color: #e65100;
-        padding: 10px;
-        border-radius: 8px;
-        # ---------------------------------------------------------
-# Database Setup (SQLite - Auto-updating Schema)
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# Database Setup (SQLite - Auto Schema Migration)
 # ---------------------------------------------------------
 conn = sqlite3.connect('felah_database.db', check_same_thread=False)
 c = conn.cursor()
 
-# Create table with category column
 c.execute('''CREATE TABLE IF NOT EXISTS declarations 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, 
               farmer_name TEXT, 
@@ -51,23 +40,11 @@ c.execute('''CREATE TABLE IF NOT EXISTS declarations
               area REAL)''')
 conn.commit()
 
-# Safe migration: Add 'category' column if running on an existing older database file
 try:
     c.execute("ALTER TABLE declarations ADD COLUMN category TEXT")
     conn.commit()
 except sqlite3.OperationalError:
-    # Column already exists, safe to ignore
     pass
-
-# ---------------------------------------------------------
-# Database Setup (SQLite)
-# ---------------------------------------------------------
-conn = sqlite3.connect('felah_database.db', check_same_thread=False)
-c = conn.cursor()
-
-c.execute('''CREATE TABLE IF NOT EXISTS declarations 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, farmer_name TEXT, carte_num TEXT, wilaya TEXT, category TEXT, crop TEXT, area REAL)''')
-conn.commit()
 
 # ---------------------------------------------------------
 # 48 WILAYAS LIST
@@ -131,27 +108,27 @@ if 'selected_service' not in st.session_state:
 TEXTS = {
     'AR': {
         'title': "بوابة الفلاح - 48 ولاية",
-        'banner': "📢 برنامج التخطيط والتنسيق الفلاحي 2026",
+        'banner': "برنامج التخطيط والتنسيق الفلاحي 2026",
         'home': "الرئيسية",
         'card': "بطاقتي",
         'account': "حسابي",
-        'weather': "🌤️ الأحوال الجوية والتنبيهات",
-        'crop': "🌾 نصائح الزراعة والتصريح (QR)",
-        'pay': "💳 تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "📍 أسواق الجملة ونقاط الأسمدة (48 ولاية)",
-        'admin': "👑 لوحة تحكم المالِك (Owner Admin)"
+        'weather': "الأحوال الجوية والتنبيهات",
+        'crop': "نصائح الزراعة والتصريح (QR)",
+        'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
+        'suppliers': "أسواق الجملة ونقاط الأسمدة (48 ولاية)",
+        'admin': "لوحة تحكم المالِك (Owner Admin)"
     },
     'EN': {
         'title': "Felah Farmer Portal - 48 Wilayas",
-        'banner': "📢 Agricultural Planning & Coordination Program 2026",
+        'banner': "Agricultural Planning & Coordination Program 2026",
         'home': "Home",
         'card': "My Card",
         'account': "Account",
-        'weather': "🌤️ Weather & Ag-Alerts",
-        'crop': "🌾 Cultivation & QR Permit",
-        'pay': "💳 Carte Fellah Subscription",
-        'suppliers': "📍 Wholesale Markets & Fertilizer Depots",
-        'admin': "👑 Owner Admin Dashboard"
+        'weather': "Weather & Ag-Alerts",
+        'crop': "Cultivation & QR Permit",
+        'pay': "Carte Fellah Subscription",
+        'suppliers': "Wholesale Markets & Fertilizer Depots",
+        'admin': "Owner Admin Dashboard"
     }
 }
 
@@ -160,12 +137,12 @@ t = TEXTS[st.session_state.lang]
 # ---------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------
-st.sidebar.title("🌐 Language / اللغة")
+st.sidebar.title("Language / اللغة")
 lang_choice = st.sidebar.radio("Select Language", ["العربية", "English"])
 st.session_state.lang = 'AR' if lang_choice == "العربية" else 'EN'
 
 st.sidebar.divider()
-st.sidebar.title("🔐 Account Authentication")
+st.sidebar.title("Account Authentication")
 if not st.session_state.logged_in:
     farmer_name = st.sidebar.text_input("Name / الاسم", "Abdelkader Benali")
     carte_num = st.sidebar.text_input("Carte Fellah N°", "DZ-2026-88491")
@@ -194,13 +171,13 @@ st.markdown(f"""
 
 nav_col1, nav_col2, nav_col3 = st.columns(3)
 with nav_col1:
-    if st.button(f"🏠 {t['home']}", use_container_width=True):
+    if st.button(f"{t['home']}", use_container_width=True):
         st.session_state.active_tab = "home"
 with nav_col2:
-    if st.button(f"💳 {t['card']}", use_container_width=True):
+    if st.button(f"{t['card']}", use_container_width=True):
         st.session_state.active_tab = "card"
 with nav_col3:
-    if st.button(f"👤 {t['account']}", use_container_width=True):
+    if st.button(f"{t['account']}", use_container_width=True):
         st.session_state.active_tab = "account"
 
 st.divider()
@@ -217,7 +194,16 @@ if st.session_state.active_tab == "home":
             st.session_state.selected_service = "crop"
         if st.button(t['pay'], use_container_width=True):
             st.session_state.selected_service = "pay"
- # --- SERVICE 1: DECLARATION & QUOTA SYSTEM ---
+    
+    with col2:
+        if st.button(t['weather'], use_container_width=True):
+            st.session_state.selected_service = "weather"
+        if st.button(t['suppliers'], use_container_width=True):
+            st.session_state.selected_service = "suppliers"
+
+    st.divider()
+
+    # --- SERVICE 1: DECLARATION & QUOTA SYSTEM ---
     if st.session_state.selected_service == "crop":
         st.subheader(t['crop'])
         
@@ -234,9 +220,9 @@ if st.session_state.active_tab == "home":
             current_total = get_current_crop_area(selected_c)
             percentage = min((current_total / limit), 1.0)
             
-            st.write(f"📊 **National Area Quota Status ({selected_c}):**")
+            st.write(f"**National Area Quota Status ({selected_c}):**")
             st.progress(percentage)
-            st.caption(f"Registered: **{current_total:.1f} Ha** / Target Limit: **{limit:.0f} Ha** ({percentage*100:.1f}% Full)")
+            st.caption(f"Registered: {current_total:.1f} Ha / Target Limit: {limit:.0f} Ha ({percentage*100:.1f}% Full)")
             
             if current_total >= limit:
                 under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
@@ -263,26 +249,11 @@ if st.session_state.active_tab == "home":
                 st.rerun()
             else:
                 st.warning("Please log in from the sidebar first to submit.")
-        if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
-            if st.session_state.logged_in:
-                c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, category, crop, area) VALUES (?, ?, ?, ?, ?, ?)",
-                          (st.session_state.farmer_name, st.session_state.carte_num, selected_w, cat_choice, selected_c, area_ha))
-                conn.commit()
-                st.success("✅ Declaration registered successfully in the National Database!")
-                
-                qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{selected_w}|{selected_c}|{area_ha}HA"
-                qr = qrcode.make(qr_payload)
-                buf = BytesIO()
-                qr.save(buf)
-                st.image(buf.getvalue(), caption="Official CCLS Aid QR Authorization Code", width=200)
-                st.rerun()
-            else:
-                st.warning("⚠️ Please log in from the sidebar first to submit.")
 
     # --- SERVICE 2: WEATHER ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
-        st.info("☀️ **Sirocco Heatwave Alert**: High temperatures forecasted for Southern & High-Plateau Wilayas. Adjust drip irrigation to night shifts.")
+        st.info("Sirocco Heatwave Alert: High temperatures forecasted for Southern & High-Plateau Wilayas. Adjust drip irrigation to night shifts.")
 
     # --- SERVICE 3: PAYMENTS ---
     elif st.session_state.selected_service == "pay":
@@ -291,12 +262,12 @@ if st.session_state.active_tab == "home":
         card_type = st.radio("Payment Gateway:", ["EDAHABIA (الذهبية)", "CIB Card"])
         st.text_input("Card Number:", "6037 8888 1234 5678")
         if st.button("Confirm Payment (إتمام الدفع)"):
-            st.success("🎉 Carte Fellah successfully renewed for season 2026/2027!")
+            st.success("Carte Fellah successfully renewed for season 2026/2027!")
 
     # --- SERVICE 4: MAPS & SUPPLIERS ---
     elif st.session_state.selected_service == "suppliers":
         st.subheader(t['suppliers'])
-        st.write("📍 **Wholesale Produce Markets, OAIC Silos & Fertilizer Suppliers**")
+        st.write("Wholesale Produce Markets, OAIC Silos & Fertilizer Suppliers")
         
         suppliers_df = pd.DataFrame({
             'lat': [36.7538, 36.4722, 36.1911, 35.3708, 34.8516, 33.3683, 36.2642, 36.3650, 35.6969, 36.1528],
@@ -316,18 +287,16 @@ if st.session_state.active_tab == "home":
         })
         st.map(suppliers_df, zoom=5)
         
-        st.markdown("""
-        **Main National Agricultural Hubs:**
-        - 🏬 **Wholesale Markets:** Boufarik (Blida), Attatba (Tipaza), Chelghoum Laïd (Mila), Sétif, Biskra, Oran.
-        - 🏭 **Fertilizer & Input Hubs:** ASMIDAL Outlets (El Oued, Adrar, Annaba).
-        - 🌾 **CCLS Silos:** OAIC Grain Storage points in Tiaret, Sétif, Batna, Constantine, and Chlef.
-        """)
+        st.write("**Main National Agricultural Hubs:**")
+        st.write("- **Wholesale Markets:** Boufarik (Blida), Attatba (Tipaza), Chelghoum Laid (Mila), Setif, Biskra, Oran.")
+        st.write("- **Fertilizer & Input Hubs:** ASMIDAL Outlets (El Oued, Adrar, Annaba).")
+        st.write("- **CCLS Silos:** OAIC Grain Storage points in Tiaret, Setif, Batna, Constantine, and Chlef.")
 
 # ---------------------------------------------------------
 # VIEW 2: CARTE FELLAH
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "card":
-    st.subheader("💳 Digital Carte Fellah - البطاقة الفلاحية الرقمية")
+    st.subheader("Digital Carte Fellah - البطاقة الفلاحية الرقمية")
     
     if st.session_state.logged_in:
         st.markdown(f"""
@@ -347,7 +316,7 @@ elif st.session_state.active_tab == "card":
 # VIEW 3: OWNER-ONLY ADMIN (Password: greatdz)
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
-    st.subheader("👤 Account Info & Owner Dashboard")
+    st.subheader("Account Info & Owner Dashboard")
     
     if st.session_state.logged_in:
         st.write(f"Logged in as: **{st.session_state.farmer_name}**")
@@ -356,14 +325,14 @@ elif st.session_state.active_tab == "account":
     st.divider()
     
     st.subheader(t['admin'])
-    st.caption("🔒 Restricted Access: Only accessible by platform administrator.")
+    st.caption("Restricted Access: Only accessible by platform administrator.")
     
     admin_pass = st.text_input("Enter Admin Password / كلمة السر للوحة التحكم", type="password")
     
     if admin_pass == "greatdz":
-        st.success("🔓 Owner Access Granted!")
+        st.success("Owner Access Granted!")
         
-        st.write("### 📈 Live Vegetable Capacity Status")
+        st.write("### Live Vegetable Capacity Status")
         summary_data = []
         for c_name, limit_val in VEGETABLE_LIMITS.items():
             curr = get_current_crop_area(c_name)
@@ -375,7 +344,7 @@ elif st.session_state.active_tab == "account":
             })
         st.table(pd.DataFrame(summary_data))
         
-        st.write("### 🗃️ Live Database Declarations")
+        st.write("### Live Database Declarations")
         df = pd.read_sql_query("SELECT * FROM declarations", conn)
         if not df.empty:
             st.dataframe(df, use_container_width=True)
