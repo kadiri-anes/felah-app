@@ -22,16 +22,37 @@ st.markdown("""
         margin-bottom: 15px;
         border: 2px solid #d4af37;
     }
-    .captcha-box {
-        background-color: #e3ece8;
-        padding: 8px 15px;
+    .alert-red {
+        background-color: #ffe6e6;
+        border-left: 6px solid #d9534f;
+        padding: 15px;
         border-radius: 8px;
-        font-weight: bold;
-        font-size: 18px;
-        letter-spacing: 3px;
-        color: #0b8a62;
-        display: inline-block;
-        margin-bottom: 10px;
+        color: #a94442;
+        margin-bottom: 15px;
+    }
+    .alert-yellow {
+        background-color: #fffde6;
+        border-left: 6px solid #f0ad4e;
+        padding: 15px;
+        border-radius: 8px;
+        color: #8a6d3b;
+        margin-bottom: 15px;
+    }
+    .alert-green {
+        background-color: #e6fffa;
+        border-left: 6px solid #5cb85c;
+        padding: 15px;
+        border-radius: 8px;
+        color: #3c763d;
+        margin-bottom: 15px;
+    }
+    .market-card {
+        background-color: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -42,6 +63,7 @@ st.markdown("""
 conn = sqlite3.connect('felah_database.db', check_same_thread=False)
 c = conn.cursor()
 
+# Declarations Table
 c.execute('''CREATE TABLE IF NOT EXISTS declarations 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, 
               farmer_name TEXT, 
@@ -50,13 +72,25 @@ c.execute('''CREATE TABLE IF NOT EXISTS declarations
               category TEXT, 
               crop TEXT, 
               area REAL)''')
-conn.commit()
 
-try:
-    c.execute("ALTER TABLE declarations ADD COLUMN category TEXT")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass
+# Weather Alerts Table
+c.execute('''CREATE TABLE IF NOT EXISTS weather_alerts 
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+              title TEXT, 
+              region TEXT, 
+              severity TEXT, 
+              message TEXT, 
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+# Markets & Suppliers Directory Table
+c.execute('''CREATE TABLE IF NOT EXISTS suppliers_directory 
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+              name TEXT, 
+              wilaya TEXT, 
+              category TEXT, 
+              address TEXT, 
+              maps_link TEXT)''')
+conn.commit()
 
 # ---------------------------------------------------------
 # 48 WILAYAS LIST
@@ -117,7 +151,6 @@ if 'active_tab' not in st.session_state:
 if 'selected_service' not in st.session_state:
     st.session_state.selected_service = None
 
-# Initialize dynamic CAPTCHA challenge
 if 'captcha_num1' not in st.session_state:
     st.session_state.captcha_num1 = random.randint(1, 9)
     st.session_state.captcha_num2 = random.randint(1, 9)
@@ -156,7 +189,7 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# Sidebar - Authentication & Anti-Bot CAPTCHA
+# Sidebar - Authentication & CAPTCHA
 # ---------------------------------------------------------
 st.sidebar.title("Language / اللغة")
 lang_choice = st.sidebar.radio("Select Language", ["العربية", "English"])
@@ -169,7 +202,6 @@ if not st.session_state.logged_in:
     farmer_name_input = st.sidebar.text_input("Name / الاسم", placeholder="Enter your full name")
     carte_num_input = st.sidebar.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX")
     
-    # Simple Math CAPTCHA
     correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
     st.sidebar.write(f"**Security Check (CAPTCHA):**")
     st.sidebar.caption(f"Solve: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?")
@@ -246,9 +278,7 @@ if st.session_state.active_tab == "home":
         st.subheader(t['crop'])
         
         selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
-        
         cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
-        
         area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=None)
         
         if cat_choice == "Fruits (فواكه)":
@@ -298,10 +328,35 @@ if st.session_state.active_tab == "home":
             else:
                 st.warning("Please log in from the sidebar first to submit.")
 
-    # --- SERVICE 2: WEATHER ---
+    # --- SERVICE 2: WEATHER & AG-ALERTS ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
-        st.info("Sirocco Heatwave Alert: High temperatures forecasted for Southern & High-Plateau Wilayas. Adjust drip irrigation to night shifts.")
+        
+        c.execute("SELECT title, region, severity, message, created_at FROM weather_alerts ORDER BY id DESC")
+        alerts = c.fetchall()
+        
+        if alerts:
+            for title, region, severity, msg, created in alerts:
+                if "Red" in severity:
+                    css_class = "alert-red"
+                    icon = "🔴"
+                elif "Yellow" in severity:
+                    css_class = "alert-yellow"
+                    icon = "🟡"
+                else:
+                    css_class = "alert-green"
+                    icon = "🟢"
+                    
+                st.markdown(f"""
+                    <div class="{css_class}">
+                        <h4>{icon} {title}</h4>
+                        <p><b>Target Wilaya / Region:</b> {region} | <b>Severity Level:</b> {severity}</p>
+                        <p>{msg}</p>
+                        <small style="color: #666;">Issued: {created}</small>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("🟢 No severe weather warnings active. All agricultural regions report normal seasonal conditions.")
 
     # --- SERVICE 3: PAYMENTS ---
     elif st.session_state.selected_service == "pay":
@@ -312,30 +367,37 @@ if st.session_state.active_tab == "home":
         if st.button("Confirm Payment (إتمام الدفع)"):
             st.success("Carte Fellah successfully renewed for season 2026/2027!")
 
-    # --- SERVICE 4: MAPS & SUPPLIERS ---
+    # --- SERVICE 4: MAPS & MARKETS DIRECTORY ---
     elif st.session_state.selected_service == "suppliers":
         st.subheader(t['suppliers'])
         st.write("Wholesale Produce Markets, OAIC Silos & Fertilizer Suppliers")
         
+        # Display Static Map
         suppliers_df = pd.DataFrame({
             'lat': [36.7538, 36.4722, 36.1911, 35.3708, 34.8516, 33.3683, 36.2642, 36.3650, 35.6969, 36.1528],
-            'lon': [3.0588, 2.8333, 5.4092, 1.3225, 5.7280, 6.8674, 2.7539, 6.6147, -0.6331, 6.1667],
-            'name': [
-                'OAIC Central Depot - Alger', 
-                'Wholesale Market - Boufarik (Blida)', 
-                'Regional Market - Sétif', 
-                'CCLS Cereal Depot - Tiaret', 
-                'Dates Wholesale Market - Biskra', 
-                'ASMIDAL Fertilizer Hub - El Oued', 
-                'Attatba Market - Tipaza', 
-                'Chelghoum Laïd Market - Mila', 
-                'Oran Wholesale Market', 
-                'CCLS Granary - Batna'
-            ]
+            'lon': [3.0588, 2.8333, 5.4092, 1.3225, 5.7280, 6.8674, 2.7539, 6.6147, -0.6331, 6.1667]
         })
         st.map(suppliers_df, zoom=5)
         
-        st.write("**Main National Agricultural Hubs:**")
+        st.write("### Verified Locations & Directory")
+        c.execute("SELECT name, wilaya, category, address, maps_link FROM suppliers_directory ORDER BY id DESC")
+        directory = c.fetchall()
+        
+        if directory:
+            for name, wilaya, category, address, link in directory:
+                st.markdown(f"""
+                    <div class="market-card">
+                        <h4 style="margin: 0; color: #0b8a62;">📍 {name}</h4>
+                        <p style="margin: 5px 0;"><b>Wilaya:</b> {wilaya} | <b>Category:</b> {category}</p>
+                        <p style="margin: 5px 0; color: #555;">{address}</p>
+                        <a href="{link}" target="_blank" style="text-decoration: none; font-weight: bold; color: #1e5340;">🗺️ Open in Google Maps ↗</a>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No custom market addresses added yet by administrator.")
+
+        st.write("---")
+        st.write("**Default Regional Hubs:**")
         st.write("- **Wholesale Markets:** Boufarik (Blida), Attatba (Tipaza), Chelghoum Laid (Mila), Setif, Biskra, Oran.")
         st.write("- **Fertilizer & Input Hubs:** ASMIDAL Outlets (El Oued, Adrar, Annaba).")
         st.write("- **CCLS Silos:** OAIC Grain Storage points in Tiaret, Setif, Batna, Constantine, and Chlef.")
@@ -361,7 +423,7 @@ elif st.session_state.active_tab == "card":
         st.warning("Please log in from the sidebar to view your digital card.")
 
 # ---------------------------------------------------------
-# VIEW 3: OWNER-ONLY ADMIN DASHBOARD & AREA MANAGERS
+# VIEW 3: OWNER-ONLY ADMIN DASHBOARD
 # Password: greatdz
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
@@ -381,57 +443,123 @@ elif st.session_state.active_tab == "account":
     if admin_pass == "greatdz":
         st.success("Owner Access Granted!")
         
-        st.write("### Live Vegetable Capacity Status")
-        summary_data = []
-        for c_name, limit_val in VEGETABLE_LIMITS.items():
-            curr = get_current_crop_area(c_name)
-            summary_data.append({
-                "Vegetable Crop": c_name,
-                "Declared Area (Ha)": curr,
-                "Target Limit (Ha)": limit_val,
-                "Capacity Used (%)": f"{(curr/limit_val)*100:.1f}%"
-            })
-        st.table(pd.DataFrame(summary_data))
+        # TABBED ADMIN DASHBOARD
+        admin_tab1, admin_tab2, admin_tab3 = st.tabs(["🌾 Quota & Declarations", "🚨 Weather Alerts Manager", "📍 Markets & Locations Manager"])
         
-        st.write("---")
-        st.write("### 🛠️ Database Management & Hectare Reset Options")
-        
-        # Option A: Reset Specific Crop Hectares to Zero
-        st.write("**1. Reset Area for a Specific Crop back to 0 Ha:**")
-        reset_crop_target = st.selectbox("Select Crop to Reset", list(VEGETABLE_LIMITS.keys()) + FRUIT_LIST)
-        if st.button(f"Reset '{reset_crop_target}' Area to 0 Ha"):
-            c.execute("DELETE FROM declarations WHERE crop = ?", (reset_crop_target,))
-            conn.commit()
-            st.success(f"Successfully removed all declarations for {reset_crop_target}. Total area is back to 0 Ha!")
-            st.rerun()
-
-        st.write("---")
-        
-        # Option B: Remove Single Entry by ID
-        st.write("**2. Delete Specific Entry by ID:**")
-        entry_id_to_delete = st.number_input("Enter Entry ID to Remove", min_value=1, step=1)
-        if st.button("Delete Entry"):
-            c.execute("DELETE FROM declarations WHERE id = ?", (entry_id_to_delete,))
-            conn.commit()
-            st.success(f"Entry ID #{entry_id_to_delete} deleted successfully!")
-            st.rerun()
+        # --- ADMIN TAB 1: DECLARATION & QUOTA CONTROL ---
+        with admin_tab1:
+            st.write("### Live Vegetable Capacity Status")
+            summary_data = []
+            for c_name, limit_val in VEGETABLE_LIMITS.items():
+                curr = get_current_crop_area(c_name)
+                summary_data.append({
+                    "Vegetable Crop": c_name,
+                    "Declared Area (Ha)": curr,
+                    "Target Limit (Ha)": limit_val,
+                    "Capacity Used (%)": f"{(curr/limit_val)*100:.1f}%"
+                })
+            st.table(pd.DataFrame(summary_data))
             
-        st.write("---")
-        
-        # Option C: Delete All Database Data
-        st.write("**3. Clear Entire Database (Reset All Crops to Zero):**")
-        if st.button("⚠️ Reset Entire Database to Zero", type="secondary"):
-            c.execute("DELETE FROM declarations")
-            conn.commit()
-            st.success("All declarations wiped out. Entire platform reset back to 0 Ha!")
-            st.rerun()
+            st.write("---")
+            st.write("### Database Management & Reset Controls")
+            
+            col_reset1, col_reset2 = st.columns(2)
+            with col_reset1:
+                st.write("**Reset Specific Crop to 0 Ha:**")
+                reset_crop_target = st.selectbox("Select Crop to Reset", list(VEGETABLE_LIMITS.keys()) + FRUIT_LIST)
+                if st.button(f"Reset '{reset_crop_target}' to 0 Ha"):
+                    c.execute("DELETE FROM declarations WHERE crop = ?", (reset_crop_target,))
+                    conn.commit()
+                    st.success(f"Successfully reset {reset_crop_target} area back to 0 Ha!")
+                    st.rerun()
 
-        st.write("---")
-        st.write("### Live Database Declarations")
-        df = pd.read_sql_query("SELECT * FROM declarations", conn)
-        if not df.empty:
+            with col_reset2:
+                st.write("**Delete Specific Entry by ID:**")
+                entry_id_to_delete = st.number_input("Enter Entry ID", min_value=1, step=1)
+                if st.button("Delete Entry"):
+                    c.execute("DELETE FROM declarations WHERE id = ?", (entry_id_to_delete,))
+                    conn.commit()
+                    st.success(f"Entry ID #{entry_id_to_delete} deleted!")
+                    st.rerun()
+            
+            st.write("---")
+            if st.button("⚠️ Clear Entire Declarations Database (Reset All to Zero)"):
+                c.execute("DELETE FROM declarations")
+                conn.commit()
+                st.success("Entire database wiped out! All crop totals are 0 Ha.")
+                st.rerun()
+
+            st.write("---")
+            st.write("### Live Database Declarations")
+            df = pd.read_sql_query("SELECT * FROM declarations", conn)
             st.dataframe(df, use_container_width=True)
-        else:
-            st.info("No declarations registered in the database yet.")
+
+        # --- ADMIN TAB 2: WEATHER ALERT MANAGER ---
+        with admin_tab2:
+            st.write("### 🚨 Publish Weather Warning / Alert")
+            
+            alert_title = st.text_input("Alert Title / عنوان التنبيه", placeholder="e.g. Sirocco Heatwave / Frost Alert")
+            alert_region = st.selectbox("Target Wilaya / Region", ["All Wilayas (كل الولايات)"] + WILAYAS_48)
+            alert_severity = st.selectbox("Warning Severity Level / درجة الخطورة", [
+                "🔴 Red Alert (Severe Danger / خطورة عالية)",
+                "🟡 Yellow Alert (Moderate Warning / تحذير متوسط)",
+                "🟢 Green Alert (Normal Advisory / تنبيه عادي)"
+            ])
+            alert_msg = st.text_area("Detailed Instructions for Farmers", placeholder="e.g. Shift drip irrigation to night shifts to protect crops.")
+            
+            if st.button("Publish Weather Alert"):
+                if alert_title and alert_msg:
+                    c.execute("INSERT INTO weather_alerts (title, region, severity, message) VALUES (?, ?, ?, ?)",
+                              (alert_title, alert_region, alert_severity, alert_msg))
+                    conn.commit()
+                    st.success("Weather Alert successfully published and visible on user portal!")
+                    st.rerun()
+                else:
+                    st.error("Please provide both Alert Title and Instructions.")
+                    
+            st.write("---")
+            st.write("### Active Published Alerts")
+            df_alerts = pd.read_sql_query("SELECT * FROM weather_alerts ORDER BY id DESC", conn)
+            st.dataframe(df_alerts, use_container_width=True)
+            
+            delete_alert_id = st.number_input("Enter Alert ID to Delete", min_value=1, step=1, key="del_alert")
+            if st.button("Delete Weather Alert"):
+                c.execute("DELETE FROM weather_alerts WHERE id = ?", (delete_alert_id,))
+                conn.commit()
+                st.success(f"Alert ID #{delete_alert_id} deleted!")
+                st.rerun()
+
+        # --- ADMIN TAB 3: MARKETS & LOCATIONS MANAGER ---
+        with admin_tab3:
+            st.write("### 📍 Add Market, Silo, or Fertilizer Depot")
+            
+            loc_name = st.text_input("Location Name / اسم الموقع", placeholder="e.g. Boufarik Wholesale Market")
+            loc_wilaya = st.selectbox("Wilaya Location", WILAYAS_48, key="loc_w")
+            loc_category = st.selectbox("Category / النوع", ["Wholesale Produce Market", "OAIC Cereal Silo", "ASMIDAL Fertilizer Depot", "Agri-Equipment Supplier"])
+            loc_address = st.text_input("Address / Details", placeholder="e.g. RN 42, Boufarik, Blida")
+            loc_maps_link = st.text_input("Google Maps URL Link", placeholder="https://maps.google.com/?q=...")
+            
+            if st.button("Add Location to Public Directory"):
+                if loc_name and loc_maps_link:
+                    c.execute("INSERT INTO suppliers_directory (name, wilaya, category, address, maps_link) VALUES (?, ?, ?, ?, ?)",
+                              (loc_name, loc_wilaya, loc_category, loc_address, loc_maps_link))
+                    conn.commit()
+                    st.success("Location added to public directory successfully!")
+                    st.rerun()
+                else:
+                    st.error("Please fill in Location Name and Google Maps URL.")
+                    
+            st.write("---")
+            st.write("### Managed Directory Locations")
+            df_suppliers = pd.read_sql_query("SELECT * FROM suppliers_directory ORDER BY id DESC", conn)
+            st.dataframe(df_suppliers, use_container_width=True)
+            
+            delete_loc_id = st.number_input("Enter Location ID to Delete", min_value=1, step=1, key="del_loc")
+            if st.button("Delete Location"):
+                c.execute("DELETE FROM suppliers_directory WHERE id = ?", (delete_loc_id,))
+                conn.commit()
+                st.success(f"Location ID #{delete_loc_id} deleted!")
+                st.rerun()
+
     elif admin_pass != "":
         st.error("Incorrect Password.")
