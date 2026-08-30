@@ -33,6 +33,16 @@ st.set_page_config(page_title="Felah Mobile Portal - Algeria", page_icon="🌾",
 st.markdown("""
     <style>
     .stApp { background-color: #f4f7f6; }
+    .mobile-sidebar-notice {
+        background-color: #e6f4ea;
+        border: 2px dashed #0b8a62;
+        border-radius: 10px;
+        padding: 10px;
+        text-align: center;
+        margin-bottom: 15px;
+        font-weight: bold;
+        color: #0b8a62;
+    }
     .promo-banner {
         background: linear-gradient(135deg, #0b8a62 0%, #1e5340 100%);
         color: white;
@@ -41,6 +51,14 @@ st.markdown("""
         text-align: center;
         margin-bottom: 12px;
         border: 2px solid #d4af37;
+    }
+    .sidebar-card {
+        background-color: #ffffff;
+        border: 2px solid #0b8a62;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     .alert-red {
         background-color: #ffe6e6;
@@ -189,49 +207,64 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# MOBILE-FRIENDLY TOP UTILITY BAR (Language & Login)
+# HIGH-VISIBILITY SIDEBAR (Language & Login Slide)
 # ---------------------------------------------------------
-top_col1, top_col2 = st.columns(2)
+with st.sidebar:
+    st.markdown("""
+        <div style="background-color: #0b8a62; color: white; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 15px;">
+            ⚙️ MENU / القائمة
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # 1. LANGUAGE BOX
+    st.markdown("### 🌐 Language / اللغة")
+    selected_lang = st.radio("Choose Language", ["العربية", "English"], key="sb_lang", label_visibility="collapsed")
+    st.session_state.lang = 'AR' if selected_lang == "العربية" else 'EN'
+    
+    st.divider()
+    
+    # 2. LOGIN / ACCOUNT CARD
+    st.markdown("### 👤 Account / تسجيل الدخول")
+    
+    if not st.session_state.logged_in:
+        farmer_name_input = st.text_input("Name / الاسم", placeholder="Enter full name", key="sb_name")
+        carte_num_input = st.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX", key="sb_card")
+        
+        correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
+        st.write(f"**Security Check:** Solve `{st.session_state.captcha_num1} + {st.session_state.captcha_num2}` = ?")
+        captcha_input = st.text_input("Answer", placeholder="Result", key="sb_captcha", label_visibility="collapsed")
 
-with top_col1:
-    with st.expander("🌐 Language / اللغة", expanded=False):
-        selected_lang = st.radio("Select Language / اختر اللغة", ["العربية", "English"], key="lang_radio")
-        st.session_state.lang = 'AR' if selected_lang == "العربية" else 'EN'
-
-with top_col2:
-    status_label = f"🟢 {st.session_state.farmer_name}" if st.session_state.logged_in else "👤 Login / دخول"
-    with st.expander(status_label, expanded=not st.session_state.logged_in):
-        if not st.session_state.logged_in:
-            farmer_name_input = st.text_input("Name / الاسم", placeholder="Enter full name", key="top_name")
-            carte_num_input = st.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX", key="top_card")
-            
-            correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
-            st.caption(f"Security Check: Solve **{st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?**")
-            captcha_input = st.text_input("Answer", placeholder="Result", key="top_captcha")
-
-            if st.button("Log In / دخول", use_container_width=True, type="primary"):
-                if not farmer_name_input.strip() or not carte_num_input.strip():
-                    st.error("Please fill in both Name and Card Number.")
-                elif str(captcha_input).strip() != str(correct_answer):
-                    st.error("Incorrect CAPTCHA answer.")
-                    generate_new_captcha()
-                else:
-                    st.session_state.logged_in = True
-                    st.session_state.farmer_name = sanitize(farmer_name_input)
-                    st.session_state.carte_num = sanitize(carte_num_input)
-                    generate_new_captcha()
-                    st.rerun()
-        else:
-            st.write(f"Connected as **{st.session_state.farmer_name}**")
-            st.caption(f"Card N°: `{st.session_state.carte_num}`")
-            if st.button("Log Out / خروج", use_container_width=True):
-                st.session_state.logged_in = False
-                st.session_state.farmer_name = ""
-                st.session_state.carte_num = ""
-                st.session_state.admin_authenticated = False
+        if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
+            if not farmer_name_input.strip() or not carte_num_input.strip():
+                st.error("Please fill in both Name and Card Number.")
+            elif str(captcha_input).strip() != str(correct_answer):
+                st.error("Incorrect CAPTCHA answer.")
+                generate_new_captcha()
+            else:
+                st.session_state.logged_in = True
+                st.session_state.farmer_name = sanitize(farmer_name_input)
+                st.session_state.carte_num = sanitize(carte_num_input)
+                generate_new_captcha()
                 st.rerun()
+    else:
+        st.success(f"🟢 Connected:\n**{st.session_state.farmer_name}**")
+        st.caption(f"Card N°: `{st.session_state.carte_num}`")
+        if st.button("🔒 Log Out / خروج", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.farmer_name = ""
+            st.session_state.carte_num = ""
+            st.session_state.admin_authenticated = False
+            st.rerun()
 
-st.divider()
+# ---------------------------------------------------------
+# Main Mobile Top Notice Banner
+# ---------------------------------------------------------
+mobile_status = f"🟢 Connected: {st.session_state.farmer_name}" if st.session_state.logged_in else "🔴 Not Logged In — Click top-left arrow ↗ to Login"
+st.markdown(f"""
+    <div class="mobile-sidebar-notice">
+        👉 {mobile_status}
+    </div>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # Main UI Header
@@ -338,7 +371,7 @@ if st.session_state.active_tab == "home":
                     mime="image/png"
                 )
             else:
-                st.warning("Please log in using the '👤 Login' tab above first to submit.")
+                st.warning("Please open the side menu (top-left arrow ↗) and log in first.")
 
     # --- SERVICE 2: WEATHER & AG-ALERTS ---
     elif st.session_state.selected_service == "weather":
@@ -440,7 +473,7 @@ elif st.session_state.active_tab == "card":
             </div>
         """, unsafe_allow_html=True)
     else:
-        st.warning("Please log in using the '👤 Login' tab at the top to view your digital card.")
+        st.warning("Please open the side menu (top-left arrow ↗) to log in and view your digital card.")
 
 # ---------------------------------------------------------
 # VIEW 3: OWNER-ONLY ADMIN DASHBOARD (SECURED)
