@@ -217,16 +217,7 @@ if st.session_state.active_tab == "home":
             st.session_state.selected_service = "crop"
         if st.button(t['pay'], use_container_width=True):
             st.session_state.selected_service = "pay"
-    
-    with col2:
-        if st.button(t['weather'], use_container_width=True):
-            st.session_state.selected_service = "weather"
-        if st.button(t['suppliers'], use_container_width=True):
-            st.session_state.selected_service = "suppliers"
-
-    st.divider()
-
-    # --- SERVICE 1: DECLARATION & QUOTA SYSTEM ---
+ # --- SERVICE 1: DECLARATION & QUOTA SYSTEM ---
     if st.session_state.selected_service == "crop":
         st.subheader(t['crop'])
         
@@ -236,12 +227,7 @@ if st.session_state.active_tab == "home":
         
         if cat_choice == "Fruits (فواكه)":
             selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
-            st.markdown("""
-                <div class="status-badge-ok">
-                    ✅ <b>Unlimited Capacity / بدون حد أقصى</b><br>
-                    Fruit cultivation is open without national hectare restrictions.
-                </div>
-            """, unsafe_allow_html=True)
+            st.success("Unlimited Capacity / بدون حد أقصى — Fruit cultivation is open without national hectare restrictions.")
         else:
             selected_c = st.selectbox("Select Vegetable / اختر الخضار", list(VEGETABLE_LIMITS.keys()))
             limit = VEGETABLE_LIMITS[selected_c]
@@ -253,26 +239,30 @@ if st.session_state.active_tab == "home":
             st.caption(f"Registered: **{current_total:.1f} Ha** / Target Limit: **{limit:.0f} Ha** ({percentage*100:.1f}% Full)")
             
             if current_total >= limit:
-                # Find alternative under-cultivated crops
                 under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
-                st.markdown(f"""
-                    <div class="status-badge-warn">
-                        ⚠️ <b>Quota Target Exceeded / تم تجاوز الحد المستهدف!</b><br>
-                        You can still register this crop, but we strongly recommend switching to under-cultivated crops:
-                        <br>👉 <b>{', '.join(under_crops[:3])}</b>
-                    </div>
-                """, unsafe_allow_html=True)
+                recommend_str = ", ".join(under_crops[:3])
+                st.warning(f"Quota Target Exceeded / تم تجاوز الحد المستهدف! You can still register, but we strongly recommend switching to: {recommend_str}")
             else:
-                st.markdown("""
-                    <div class="status-badge-ok">
-                        ✅ <b>Quota Available / المساحة متاحة</b><br>
-                        This crop is within national production targets.
-                    </div>
-                """, unsafe_allow_html=True)
+                st.success("Quota Available / المساحة متاحة — This crop is within national production targets.")
 
         st.write("---")
         area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.5, max_value=500.0, value=5.0)
         
+        if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
+            if st.session_state.logged_in:
+                c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, category, crop, area) VALUES (?, ?, ?, ?, ?, ?)",
+                          (st.session_state.farmer_name, st.session_state.carte_num, selected_w, cat_choice, selected_c, area_ha))
+                conn.commit()
+                st.success("Declaration registered successfully in the National Database!")
+                
+                qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{selected_w}|{selected_c}|{area_ha}HA"
+                qr = qrcode.make(qr_payload)
+                buf = BytesIO()
+                qr.save(buf)
+                st.image(buf.getvalue(), caption="Official CCLS Aid QR Authorization Code", width=200)
+                st.rerun()
+            else:
+                st.warning("Please log in from the sidebar first to submit.")
         if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
             if st.session_state.logged_in:
                 c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, category, crop, area) VALUES (?, ?, ?, ?, ?, ?)",
