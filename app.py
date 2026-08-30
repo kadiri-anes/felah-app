@@ -115,7 +115,7 @@ TEXTS = {
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "أسوق الجملة ونقاط الأسمدة (48 ولاية)",
+        'suppliers': "أسواق الجملة ونقاط الأسمدة (48 ولاية)",
         'admin': "لوحة تحكم المالِك (Owner Admin)"
     },
     'EN': {
@@ -218,6 +218,9 @@ if st.session_state.active_tab == "home":
         
         cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
         
+        # Unlimited area input (max_value=None removes maximum hectare restriction)
+        area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=None)
+        
         if cat_choice == "Fruits (فواكه)":
             selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
             st.success("Unlimited Capacity / بدون حد أقصى — Fruit cultivation is open without national hectare restrictions.")
@@ -225,21 +228,22 @@ if st.session_state.active_tab == "home":
             selected_c = st.selectbox("Select Vegetable / اختر الخضار", list(VEGETABLE_LIMITS.keys()))
             limit = VEGETABLE_LIMITS[selected_c]
             current_total = get_current_crop_area(selected_c)
-            percentage = min((current_total / limit), 1.0)
+            projected_total = current_total + area_ha
+            percentage = min((projected_total / limit), 1.0)
             
             st.write(f"**National Area Quota Status ({selected_c}):**")
             st.progress(percentage)
-            st.caption(f"Registered: {current_total:.1f} Ha / Target Limit: {limit:.0f} Ha ({percentage*100:.1f}% Full)")
+            st.caption(f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha")
             
-            if current_total >= limit:
+            # Recommendation notice appears dynamically if area + entered area exceeds limit
+            if projected_total > limit:
                 under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
                 recommend_str = ", ".join(under_crops[:3])
-                st.warning(f"Quota Target Exceeded / تم تجاوز الحد المستهدف! You can still register, but we strongly recommend switching to: {recommend_str}")
+                st.warning(f"⚠️ **Quota Target Exceeded / تم تجاوز الحد المستهدف!**\n\nThe requested area ({area_ha:.1f} Ha) exceeds the national target for **{selected_c}**. You can still proceed with your declaration, but we strongly recommend switching to under-cultivated crops such as: **{recommend_str}**.")
             else:
-                st.success("Quota Available / المساحة متاحة — This crop is within national production targets.")
+                st.success("✅ **Quota Available / المساحة متاحة** — This crop is within national production targets.")
 
         st.write("---")
-        area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.5, max_value=500.0, value=5.0)
         
         if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
             if st.session_state.logged_in:
@@ -255,7 +259,7 @@ if st.session_state.active_tab == "home":
                 qr.save(buf, format="PNG")
                 qr_bytes = buf.getvalue()
                 
-                # Display QR Code (No rerun so it remains visible)
+                # Display QR Code & Download Button
                 st.image(qr_bytes, caption="Official CCLS Aid QR Authorization Code", width=220)
                 
                 st.download_button(
