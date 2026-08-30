@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import qrcode
+import random
 from io import BytesIO
 
 # ---------------------------------------------------------
@@ -20,6 +21,17 @@ st.markdown("""
         text-align: center;
         margin-bottom: 15px;
         border: 2px solid #d4af37;
+    }
+    .captcha-box {
+        background-color: #e3ece8;
+        padding: 8px 15px;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 18px;
+        letter-spacing: 3px;
+        color: #0b8a62;
+        display: inline-block;
+        margin-bottom: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -94,7 +106,7 @@ def get_current_crop_area(crop_name):
     return res if res else 0.0
 
 # ---------------------------------------------------------
-# Session State & Translations
+# Session State Setup
 # ---------------------------------------------------------
 if 'lang' not in st.session_state:
     st.session_state.lang = 'AR'
@@ -104,6 +116,15 @@ if 'active_tab' not in st.session_state:
     st.session_state.active_tab = "home"
 if 'selected_service' not in st.session_state:
     st.session_state.selected_service = None
+
+# Initialize dynamic CAPTCHA challenge
+if 'captcha_num1' not in st.session_state:
+    st.session_state.captcha_num1 = random.randint(1, 9)
+    st.session_state.captcha_num2 = random.randint(1, 9)
+
+def generate_new_captcha():
+    st.session_state.captcha_num1 = random.randint(1, 9)
+    st.session_state.captcha_num2 = random.randint(1, 9)
 
 TEXTS = {
     'AR': {
@@ -135,7 +156,7 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# Sidebar - Authentication
+# Sidebar - Authentication & Anti-Bot CAPTCHA
 # ---------------------------------------------------------
 st.sidebar.title("Language / اللغة")
 lang_choice = st.sidebar.radio("Select Language", ["العربية", "English"])
@@ -148,14 +169,24 @@ if not st.session_state.logged_in:
     farmer_name_input = st.sidebar.text_input("Name / الاسم", placeholder="Enter your full name")
     carte_num_input = st.sidebar.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX")
     
+    # Simple Math CAPTCHA
+    correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
+    st.sidebar.write(f"**Security Check (CAPTCHA):**")
+    st.sidebar.caption(f"Solve: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?")
+    captcha_input = st.sidebar.text_input("Security Answer / إجابة التحقق", placeholder="Result")
+
     if st.sidebar.button("Log In / دخول"):
-        if farmer_name_input.strip() and carte_num_input.strip():
+        if not farmer_name_input.strip() or not carte_num_input.strip():
+            st.sidebar.error("Please fill in both Name and Card Number.")
+        elif str(captcha_input).strip() != str(correct_answer):
+            st.sidebar.error("Incorrect CAPTCHA answer. Try again.")
+            generate_new_captcha()
+        else:
             st.session_state.logged_in = True
             st.session_state.farmer_name = farmer_name_input.strip()
             st.session_state.carte_num = carte_num_input.strip()
+            generate_new_captcha()
             st.rerun()
-        else:
-            st.sidebar.error("Please fill in both Name and Card Number.")
 else:
     st.sidebar.success(f"Connected: {st.session_state.farmer_name}")
     if st.sidebar.button("Log Out / خروج"):
@@ -218,7 +249,6 @@ if st.session_state.active_tab == "home":
         
         cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
         
-        # Unlimited area input (max_value=None removes maximum hectare restriction)
         area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=None)
         
         if cat_choice == "Fruits (فواكه)":
@@ -235,7 +265,6 @@ if st.session_state.active_tab == "home":
             st.progress(percentage)
             st.caption(f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha")
             
-            # Recommendation notice appears dynamically if area + entered area exceeds limit
             if projected_total > limit:
                 under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
                 recommend_str = ", ".join(under_crops[:3])
@@ -252,14 +281,12 @@ if st.session_state.active_tab == "home":
                 conn.commit()
                 st.success("Declaration registered successfully in the National Database!")
                 
-                # Generate QR Code
                 qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
                 qr = qrcode.make(qr_payload)
                 buf = BytesIO()
                 qr.save(buf, format="PNG")
                 qr_bytes = buf.getvalue()
                 
-                # Display QR Code & Download Button
                 st.image(qr_bytes, caption="Official CCLS Aid QR Authorization Code", width=220)
                 
                 st.download_button(
@@ -334,7 +361,8 @@ elif st.session_state.active_tab == "card":
         st.warning("Please log in from the sidebar to view your digital card.")
 
 # ---------------------------------------------------------
-# VIEW 3: OWNER-ONLY ADMIN (Password: greatdz)
+# VIEW 3: OWNER-ONLY ADMIN DASHBOARD & AREA MANAGERS
+# Password: greatdz
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
     st.subheader("Account Info & Owner Dashboard")
@@ -365,6 +393,40 @@ elif st.session_state.active_tab == "account":
             })
         st.table(pd.DataFrame(summary_data))
         
+        st.write("---")
+        st.write("### 🛠️ Database Management & Hectare Reset Options")
+        
+        # Option A: Reset Specific Crop Hectares to Zero
+        st.write("**1. Reset Area for a Specific Crop back to 0 Ha:**")
+        reset_crop_target = st.selectbox("Select Crop to Reset", list(VEGETABLE_LIMITS.keys()) + FRUIT_LIST)
+        if st.button(f"Reset '{reset_crop_target}' Area to 0 Ha"):
+            c.execute("DELETE FROM declarations WHERE crop = ?", (reset_crop_target,))
+            conn.commit()
+            st.success(f"Successfully removed all declarations for {reset_crop_target}. Total area is back to 0 Ha!")
+            st.rerun()
+
+        st.write("---")
+        
+        # Option B: Remove Single Entry by ID
+        st.write("**2. Delete Specific Entry by ID:**")
+        entry_id_to_delete = st.number_input("Enter Entry ID to Remove", min_value=1, step=1)
+        if st.button("Delete Entry"):
+            c.execute("DELETE FROM declarations WHERE id = ?", (entry_id_to_delete,))
+            conn.commit()
+            st.success(f"Entry ID #{entry_id_to_delete} deleted successfully!")
+            st.rerun()
+            
+        st.write("---")
+        
+        # Option C: Delete All Database Data
+        st.write("**3. Clear Entire Database (Reset All Crops to Zero):**")
+        if st.button("⚠️ Reset Entire Database to Zero", type="secondary"):
+            c.execute("DELETE FROM declarations")
+            conn.commit()
+            st.success("All declarations wiped out. Entire platform reset back to 0 Ha!")
+            st.rerun()
+
+        st.write("---")
         st.write("### Live Database Declarations")
         df = pd.read_sql_query("SELECT * FROM declarations", conn)
         if not df.empty:
