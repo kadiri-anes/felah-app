@@ -5,7 +5,7 @@ import qrcode
 from io import BytesIO
 
 # ---------------------------------------------------------
-# Page Configuration & Mobile CSS Layout
+# Page Configuration & Mobile CSS
 # ---------------------------------------------------------
 st.set_page_config(page_title="Felah Mobile Portal - فلاح", page_icon="🌾", layout="centered")
 
@@ -24,17 +24,17 @@ st.markdown("""
     .status-badge-ok {
         background-color: #e8f5e9;
         color: #2e7d32;
-        padding: 8px;
+        padding: 10px;
         border-radius: 8px;
         border: 1px solid #a5d6a7;
         font-weight: bold;
     }
     .status-badge-warn {
-        background-color: #ffebee;
-        color: #c62828;
-        padding: 8px;
+        background-color: #fff3e0;
+        color: #e65100;
+        padding: 10px;
         border-radius: 8px;
-        border: 1px solid #ef9a9a;
+        border: 1px solid #ffe0b2;
         font-weight: bold;
     }
     </style>
@@ -47,33 +47,58 @@ conn = sqlite3.connect('felah_database.db', check_same_thread=False)
 c = conn.cursor()
 
 c.execute('''CREATE TABLE IF NOT EXISTS declarations 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, farmer_name TEXT, carte_num TEXT, wilaya TEXT, crop TEXT, area REAL)''')
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, farmer_name TEXT, carte_num TEXT, wilaya TEXT, category TEXT, crop TEXT, area REAL)''')
 conn.commit()
 
 # ---------------------------------------------------------
-# Crop Hectare Limits Dictionary
+# 48 WILAYAS LIST
 # ---------------------------------------------------------
-CROP_LIMITS = {
+WILAYAS_48 = [
+    "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna", 
+    "06 - Béjaïa", "07 - Biskra", "08 - Béchar", "09 - Blida", "10 - Bouira", 
+    "11 - Tamanrasset", "12 - Tébessa", "13 - Tlemcen", "14 - Tiaret", "15 - Tizi Ouzou", 
+    "16 - Alger", "17 - Djelfa", "18 - Jijel", "19 - Sétif", "20 - Saïda", 
+    "21 - Skikda", "22 - Sidi Bel Abbès", "23 - Annaba", "24 - Guelma", "25 - Constantine", 
+    "26 - Médéa", "27 - Mostaganem", "28 - M'Sila", "29 - Mascara", "30 - Ouargla", 
+    "31 - Oran", "32 - El Bayadh", "33 - Illizi", "34 - Bordj Bou Arréridj", "35 - Boumerdès", 
+    "36 - El Tarf", "37 - Tindouf", "38 - Tissemsilt", "39 - El Oued", "40 - Khenchela", 
+    "41 - Souk Ahras", "42 - Tipaza", "43 - Mila", "44 - Aïn Defla", "45 - Naâma", 
+    "46 - Aïn Témouchent", "47 - Ghardaïa", "48 - Relizane"
+]
+
+# ---------------------------------------------------------
+# CROP CATEGORIES & QUOTAS
+# ---------------------------------------------------------
+VEGETABLE_LIMITS = {
     "Potato (بطاطس)": 1700.0,
     "Tomato (طماطم)": 1000.0,
     "Pepper (فلفل)": 800.0,
     "Carrot (جزر)": 700.0,
     "Onion (بصل)": 650.0,
     "Garlic (ثوم)": 600.0,
-    "Wheat (قمح)": 400.0,
+    "Wheat / Cereal (قمح)": 400.0,
     "Beans (فاصولياء)": 400.0,
     "Lettuce (خس)": 300.0,
     "Cucumber (خيار)": 200.0
 }
 
-# Helper: Get current total declared hectares for a crop
+FRUIT_LIST = [
+    "Dates Deglet Nour (تمور دقلة نور)",
+    "Citrus / Oranges (حمضيات / برتقال)",
+    "Apples (تفاح)",
+    "Grapes (عنب)",
+    "Olives (زيتون)",
+    "Figs (تين)",
+    "Watermelon / Melon (بطيخ)"
+]
+
 def get_current_crop_area(crop_name):
     c.execute("SELECT SUM(area) FROM declarations WHERE crop = ?", (crop_name,))
     res = c.fetchone()[0]
     return res if res else 0.0
 
 # ---------------------------------------------------------
-# Session State & Language Dictionary
+# Session State & Translations
 # ---------------------------------------------------------
 if 'lang' not in st.session_state:
     st.session_state.lang = 'AR'
@@ -86,27 +111,27 @@ if 'selected_service' not in st.session_state:
 
 TEXTS = {
     'AR': {
-        'title': "بوابة الفلاح - الجزائر (48 ولاية)",
-        'banner': "📢 التخطيط الذكي للمحاصيل 2026 - تنظيم الإنتاج والتسويق",
+        'title': "بوابة الفلاح - 48 ولاية",
+        'banner': "📢 برنامج التخطيط والتنسيق الفلاحي 2026",
         'home': "الرئيسية",
         'card': "بطاقتي",
         'account': "حسابي",
         'weather': "🌤️ الأحوال الجوية والتنبيهات",
         'crop': "🌾 نصائح الزراعة والتصريح (QR)",
         'pay': "💳 تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "📍 الموردين والأسواق المعتمدة",
+        'suppliers': "📍 أسواق الجملة ونقاط الأسمدة (48 ولاية)",
         'admin': "👑 لوحة تحكم المالِك (Owner Admin)"
     },
     'EN': {
-        'title': "Felah Farmer Portal - Algeria",
-        'banner': "📢 Smart Crop Planning 2026 - Production Capacity Control",
+        'title': "Felah Farmer Portal - 48 Wilayas",
+        'banner': "📢 Agricultural Planning & Coordination Program 2026",
         'home': "Home",
         'card': "My Card",
         'account': "Account",
         'weather': "🌤️ Weather & Ag-Alerts",
-        'crop': "🌾 Cultivation & QR Aid Permit",
-        'pay': "💳 Carte Fellah Renewal",
-        'suppliers': "📍 Fertilizer Suppliers & Markets",
+        'crop': "🌾 Cultivation & QR Permit",
+        'pay': "💳 Carte Fellah Subscription",
+        'suppliers': "📍 Wholesale Markets & Fertilizer Depots",
         'admin': "👑 Owner Admin Dashboard"
     }
 }
@@ -137,14 +162,14 @@ else:
         st.rerun()
 
 # ---------------------------------------------------------
-# Header & Navigation
+# Main UI
 # ---------------------------------------------------------
 st.markdown(f"<h2 style='text-align: center;'>{t['title']}</h2>", unsafe_allow_html=True)
 
 st.markdown(f"""
     <div class="promo-banner">
         <h3>{t['banner']}</h3>
-        <p>الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة</p>
+        <p>الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -182,57 +207,60 @@ if st.session_state.active_tab == "home":
 
     st.divider()
 
-    # --- SERVICE 1: CROP DECLARATION & QUOTA SYSTEM ---
+    # --- SERVICE 1: DECLARATION & QUOTA SYSTEM ---
     if st.session_state.selected_service == "crop":
         st.subheader(t['crop'])
         
-        wilayas = ["01 - Adrar", "07 - Biskra", "14 - Tiaret", "16 - Alger", "19 - Sétif", "25 - Constantine", "39 - El Oued", "48 - Relizane"]
-        selected_w = st.selectbox("Wilaya / الولاية", wilayas)
+        selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
         
-        crop_names = list(CROP_LIMITS.keys())
-        selected_c = st.selectbox("Select Crop / اختر المحصول", crop_names)
+        cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
         
-        # Calculate & display quota capacity bar
-        limit = CROP_LIMITS[selected_c]
-        current_total = get_current_crop_area(selected_c)
-        percentage = min((current_total / limit), 1.0)
-        
-        st.write(f"📊 **National Area Quota Status ({selected_c}):**")
-        st.progress(percentage)
-        st.caption(f"Registered: **{current_total:.1f} Ha** / Max Target: **{limit:.0f} Ha** ({percentage*100:.1f}% Full)")
-        
-        # Smart Alert & Recommendations
-        if current_total >= limit:
-            st.markdown(f"""
-                <div class="status-badge-warn">
-                    ⚠️ <b>Quota Reached / التخصيص مكتمل!</b><br>
-                    This crop has reached its maximum planned limit across Algeria. 
-                    <b>We strongly recommend switching to under-cultivated crops below:</b>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            # Find crops that haven't reached quota
-            under_crops = [c_name for c_name, l_val in CROP_LIMITS.items() if get_current_crop_area(c_name) < l_val]
-            st.info(f"💡 Recommended alternative crops with available grant quotas: **{', '.join(under_crops[:3])}**")
-        else:
-            st.markdown(f"""
+        if cat_choice == "Fruits (فواكه)":
+            selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
+            st.markdown("""
                 <div class="status-badge-ok">
-                    ✅ <b>Quota Available / المساحة متاحة</b><br>
-                    You can declare your farm area for this crop and receive government support permits.
+                    ✅ <b>Unlimited Capacity / بدون حد أقصى</b><br>
+                    Fruit cultivation is open without national hectare restrictions.
                 </div>
             """, unsafe_allow_html=True)
+        else:
+            selected_c = st.selectbox("Select Vegetable / اختر الخضار", list(VEGETABLE_LIMITS.keys()))
+            limit = VEGETABLE_LIMITS[selected_c]
+            current_total = get_current_crop_area(selected_c)
+            percentage = min((current_total / limit), 1.0)
+            
+            st.write(f"📊 **National Area Quota Status ({selected_c}):**")
+            st.progress(percentage)
+            st.caption(f"Registered: **{current_total:.1f} Ha** / Target Limit: **{limit:.0f} Ha** ({percentage*100:.1f}% Full)")
+            
+            if current_total >= limit:
+                # Find alternative under-cultivated crops
+                under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
+                st.markdown(f"""
+                    <div class="status-badge-warn">
+                        ⚠️ <b>Quota Target Exceeded / تم تجاوز الحد المستهدف!</b><br>
+                        You can still register this crop, but we strongly recommend switching to under-cultivated crops:
+                        <br>👉 <b>{', '.join(under_crops[:3])}</b>
+                    </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                    <div class="status-badge-ok">
+                        ✅ <b>Quota Available / المساحة متاحة</b><br>
+                        This crop is within national production targets.
+                    </div>
+                """, unsafe_allow_html=True)
 
         st.write("---")
         area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.5, max_value=500.0, value=5.0)
         
         if st.button("Submit & Generate QR Permit (تصريح وإنشاء الرمز)"):
             if st.session_state.logged_in:
-                c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, crop, area) VALUES (?, ?, ?, ?, ?)",
-                          (st.session_state.farmer_name, st.session_state.carte_num, selected_w, selected_c, area_ha))
+                c.execute("INSERT INTO declarations (farmer_name, carte_num, wilaya, category, crop, area) VALUES (?, ?, ?, ?, ?, ?)",
+                          (st.session_state.farmer_name, st.session_state.carte_num, selected_w, cat_choice, selected_c, area_ha))
                 conn.commit()
                 st.success("✅ Declaration registered successfully in the National Database!")
                 
-                # Generate QR Code
                 qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{selected_w}|{selected_c}|{area_ha}HA"
                 qr = qrcode.make(qr_payload)
                 buf = BytesIO()
@@ -245,7 +273,7 @@ if st.session_state.active_tab == "home":
     # --- SERVICE 2: WEATHER ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
-        st.info("☀️ **Sirocco Alert**: High temperatures forecasted for Southern Wilayas (Biskra, El Oued, Adrar). Recommended to irrigate during night hours.")
+        st.info("☀️ **Sirocco Heatwave Alert**: High temperatures forecasted for Southern & High-Plateau Wilayas. Adjust drip irrigation to night shifts.")
 
     # --- SERVICE 3: PAYMENTS ---
     elif st.session_state.selected_service == "pay":
@@ -256,23 +284,34 @@ if st.session_state.active_tab == "home":
         if st.button("Confirm Payment (إتمام الدفع)"):
             st.success("🎉 Carte Fellah successfully renewed for season 2026/2027!")
 
-    # --- SERVICE 4: SUPPLIERS & MARKETS MAP ---
+    # --- SERVICE 4: MAPS & SUPPLIERS ---
     elif st.session_state.selected_service == "suppliers":
         st.subheader(t['suppliers'])
-        st.write("📍 **Official OAIC/CCLS Fertilizer Points & Wholesale Produce Markets**")
+        st.write("📍 **Wholesale Produce Markets, OAIC Silos & Fertilizer Suppliers**")
         
         suppliers_df = pd.DataFrame({
-            'lat': [36.7538, 36.1911, 35.3708, 34.8516, 33.3683, 36.2642],
-            'lon': [3.0588, 5.4092, 1.3225, 5.7280, 6.8674, 2.7539],
-            'name': ['OAIC Central Depot - Alger', 'CCLS Granary - Sétif', 'CCLS Cereal Hub - Tiaret', 'Wholesale Market - Biskra', 'Fertilizer Supply Hub - El Oued', 'Boufarik Produce Market - Blida']
+            'lat': [36.7538, 36.4722, 36.1911, 35.3708, 34.8516, 33.3683, 36.2642, 36.3650, 35.6969, 36.1528],
+            'lon': [3.0588, 2.8333, 5.4092, 1.3225, 5.7280, 6.8674, 2.7539, 6.6147, -0.6331, 6.1667],
+            'name': [
+                'OAIC Central Depot - Alger', 
+                'Wholesale Market - Boufarik (Blida)', 
+                'Regional Market - Sétif', 
+                'CCLS Cereal Depot - Tiaret', 
+                'Dates Wholesale Market - Biskra', 
+                'ASMIDAL Fertilizer Hub - El Oued', 
+                'Attatba Market - Tipaza', 
+                'Chelghoum Laïd Market - Mila', 
+                'Oran Wholesale Market', 
+                'CCLS Granary - Batna'
+            ]
         })
         st.map(suppliers_df, zoom=5)
         
         st.markdown("""
-        **Key Distribution Hubs:**
-        - 🏭 **Alger / Blida:** Central Inputs Depot & Boufarik Wholesale Market
-        - 🌾 **Sétif / Tiaret:** CCLS Cereal Seeds & Fertilizer Distribution
-        - 🌴 **Biskra / El Oued:** Regional Vegetable & Date Markets
+        **Main National Agricultural Hubs:**
+        - 🏬 **Wholesale Markets:** Boufarik (Blida), Attatba (Tipaza), Chelghoum Laïd (Mila), Sétif, Biskra, Oran.
+        - 🏭 **Fertilizer & Input Hubs:** ASMIDAL Outlets (El Oued, Adrar, Annaba).
+        - 🌾 **CCLS Silos:** OAIC Grain Storage points in Tiaret, Sétif, Batna, Constantine, and Chlef.
         """)
 
 # ---------------------------------------------------------
@@ -296,7 +335,7 @@ elif st.session_state.active_tab == "card":
         st.warning("Please log in from the sidebar to view your digital card.")
 
 # ---------------------------------------------------------
-# VIEW 3: OWNER-ONLY ADMIN & DATABASE CONTROL
+# VIEW 3: OWNER-ONLY ADMIN (Password: greatdz)
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
     st.subheader("👤 Account Info & Owner Dashboard")
@@ -307,33 +346,31 @@ elif st.session_state.active_tab == "account":
     
     st.divider()
     
-    # OWNER ADMIN LOCK
     st.subheader(t['admin'])
     st.caption("🔒 Restricted Access: Only accessible by platform administrator.")
     
     admin_pass = st.text_input("Enter Admin Password / كلمة السر للوحة التحكم", type="password")
     
-    if admin_pass == "admin123":
+    if admin_pass == "greatdz":
         st.success("🔓 Owner Access Granted!")
         
-        # Summary Statistics
-        st.write("### 📈 Live Crop Hectare Totals")
+        st.write("### 📈 Live Vegetable Capacity Status")
         summary_data = []
-        for c_name, limit_val in CROP_LIMITS.items():
+        for c_name, limit_val in VEGETABLE_LIMITS.items():
             curr = get_current_crop_area(c_name)
             summary_data.append({
-                "Crop": c_name,
+                "Vegetable Crop": c_name,
                 "Declared Area (Ha)": curr,
                 "Target Limit (Ha)": limit_val,
                 "Capacity Used (%)": f"{(curr/limit_val)*100:.1f}%"
             })
         st.table(pd.DataFrame(summary_data))
         
-        st.write("### 🗃️ Complete Declarations Database")
+        st.write("### 🗃️ Live Database Declarations")
         df = pd.read_sql_query("SELECT * FROM declarations", conn)
         if not df.empty:
             st.dataframe(df, use_container_width=True)
         else:
-            st.info("No declarations in database yet.")
+            st.info("No declarations registered in the database yet.")
     elif admin_pass != "":
         st.error("Incorrect Password.")
