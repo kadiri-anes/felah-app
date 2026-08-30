@@ -115,7 +115,7 @@ TEXTS = {
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "أسواق الجملة ونقاط الأسمدة (48 ولاية)",
+        'suppliers': "أسوق الجملة ونقاط الأسمدة (48 ولاية)",
         'admin': "لوحة تحكم المالِك (Owner Admin)"
     },
     'EN': {
@@ -135,7 +135,7 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# Sidebar
+# Sidebar - Authentication
 # ---------------------------------------------------------
 st.sidebar.title("Language / اللغة")
 lang_choice = st.sidebar.radio("Select Language", ["العربية", "English"])
@@ -143,22 +143,29 @@ st.session_state.lang = 'AR' if lang_choice == "العربية" else 'EN'
 
 st.sidebar.divider()
 st.sidebar.title("Account Authentication")
+
 if not st.session_state.logged_in:
-    farmer_name = st.sidebar.text_input("Name / الاسم", "Abdelkader Benali")
-    carte_num = st.sidebar.text_input("Carte Fellah N°", "DZ-2026-88491")
+    farmer_name_input = st.sidebar.text_input("Name / الاسم", placeholder="Enter your full name")
+    carte_num_input = st.sidebar.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX")
+    
     if st.sidebar.button("Log In / دخول"):
-        st.session_state.logged_in = True
-        st.session_state.farmer_name = farmer_name
-        st.session_state.carte_num = carte_num
-        st.rerun()
+        if farmer_name_input.strip() and carte_num_input.strip():
+            st.session_state.logged_in = True
+            st.session_state.farmer_name = farmer_name_input.strip()
+            st.session_state.carte_num = carte_num_input.strip()
+            st.rerun()
+        else:
+            st.sidebar.error("Please fill in both Name and Card Number.")
 else:
     st.sidebar.success(f"Connected: {st.session_state.farmer_name}")
     if st.sidebar.button("Log Out / خروج"):
         st.session_state.logged_in = False
+        st.session_state.farmer_name = ""
+        st.session_state.carte_num = ""
         st.rerun()
 
 # ---------------------------------------------------------
-# Main UI
+# Main UI Header
 # ---------------------------------------------------------
 st.markdown(f"<h2 style='text-align: center;'>{t['title']}</h2>", unsafe_allow_html=True)
 
@@ -241,12 +248,22 @@ if st.session_state.active_tab == "home":
                 conn.commit()
                 st.success("Declaration registered successfully in the National Database!")
                 
-                qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{selected_w}|{selected_c}|{area_ha}HA"
+                # Generate QR Code
+                qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
                 qr = qrcode.make(qr_payload)
                 buf = BytesIO()
-                qr.save(buf)
-                st.image(buf.getvalue(), caption="Official CCLS Aid QR Authorization Code", width=200)
-                st.rerun()
+                qr.save(buf, format="PNG")
+                qr_bytes = buf.getvalue()
+                
+                # Display QR Code (No rerun so it remains visible)
+                st.image(qr_bytes, caption="Official CCLS Aid QR Authorization Code", width=220)
+                
+                st.download_button(
+                    label="Download QR Permit (تحميل الرمز)",
+                    data=qr_bytes,
+                    file_name=f"Permit_{st.session_state.farmer_name}.png",
+                    mime="image/png"
+                )
             else:
                 st.warning("Please log in from the sidebar first to submit.")
 
@@ -260,7 +277,7 @@ if st.session_state.active_tab == "home":
         st.subheader(t['pay'])
         st.write("Annual Subscription Fee: **2,500 DZD**")
         card_type = st.radio("Payment Gateway:", ["EDAHABIA (الذهبية)", "CIB Card"])
-        st.text_input("Card Number:", "6037 8888 1234 5678")
+        st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
         if st.button("Confirm Payment (إتمام الدفع)"):
             st.success("Carte Fellah successfully renewed for season 2026/2027!")
 
