@@ -442,11 +442,9 @@ if st.session_state.active_tab == "home":
                 region = sanitize(item.get("region", "All Wilayas"))
                 message = sanitize(item.get("message", ""))
                 
-                # Fetch warning level (Defaults to yellow if missing/unrecognized)
                 raw_level = str(item.get("severity", "yellow")).lower().strip()
                 style = ALERT_STYLES.get(raw_level, ALERT_STYLES["yellow"])
 
-                # Render dynamic colored banner matching warning threat level
                 st.markdown(f"""
                     <div style="
                         background-color: {style['bg_color']};
@@ -490,7 +488,6 @@ if st.session_state.active_tab == "home":
         st.subheader("🗺️ خريطة الموزعين وأسوق الجملة ونقاط CCLS")
         st.caption("Interactive Map — Click any marker on the map to get direct Google Maps navigation.")
         
-        # Combine Database Entries with Default Algerian Locations
         try:
             res = supabase_client.table("suppliers_directory").select("*").execute()
             db_locations = res.data if res.data else []
@@ -499,7 +496,6 @@ if st.session_state.active_tab == "home":
             
         all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
 
-        # Filter Options
         categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
         selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
 
@@ -508,10 +504,8 @@ if st.session_state.active_tab == "home":
         else:
             filtered_locs = all_locations
 
-        # Folium Map Centered over Algeria
         m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
 
-        # Marker Colors Map
         color_map = {
             "Wholesale Produce Market": "green",
             "OAIC Cereal Silo (CCLS)": "cadetblue",
@@ -526,7 +520,6 @@ if st.session_state.active_tab == "home":
             cat = loc.get("category", "")
             maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
 
-            # HTML Popup containing explicit Google Maps link
             popup_html = f"""
             <div style="font-family: Arial; width: 210px;">
                 <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
@@ -554,7 +547,6 @@ if st.session_state.active_tab == "home":
                 icon=folium.Icon(color=icon_color, icon="info-sign")
             ).add_to(m)
 
-        # Render Folium Map in Streamlit
         st_folium(m, width=700, height=480)
 
         st.divider()
@@ -591,7 +583,7 @@ elif st.session_state.active_tab == "card":
         st.warning("Please log in to view your digital card.")
 
 # ---------------------------------------------------------
-# VIEW 3: OWNER-ONLY ADMIN DASHBOARD
+# VIEW 3: OWNER-ONLY ADMIN DASHBOARD (SLIDE-TAB CONTROL PANEL)
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
     st.subheader("Account Info & Owner Dashboard")
@@ -614,50 +606,198 @@ elif st.session_state.active_tab == "account":
             st.session_state.admin_authenticated = False
             st.rerun()
 
-        # Admin tool 1: Add new map pins
-        st.write("### 📍 Add New Location Pin to Map")
-        m_name = st.text_input("Location Name")
-        m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w")
-        m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
-        m_lat = st.number_input("Latitude (خط العرض)", value=36.7323, format="%.4f")
-        m_lon = st.number_input("Longitude (خط الطول)", value=3.1678, format="%.4f")
-        
-        if st.button("Add Location to Live Map"):
-            if m_name.strip():
-                try:
-                    maps_auto_url = f"https://maps.google.com/?q={m_lat},{m_lon}"
-                    supabase_client.table("suppliers_directory").insert({
-                        "name": sanitize(m_name),
-                        "wilaya": m_wil,
-                        "category": m_cat,
-                        "lat": m_lat,
-                        "lon": m_lon,
-                        "maps_link": maps_auto_url
-                    }).execute()
-                    st.success("Location added live to interactive map!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding location: {e}")
-
         st.divider()
 
-        # Admin tool 2: Publish Weather Alerts with Color Selection
-        st.write("### 🌩️ Publish Weather Alert")
-        w_title = st.text_input("Alert Title", placeholder="e.g. Sirocco / High Wind Alert")
-        w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg")
-        w_severity = st.selectbox("Warning Severity Level (Color)", ["yellow", "orange", "red"], format_func=lambda x: f"{x.upper()} Threat Level")
-        w_msg = st.text_area("Alert Message details...")
+        # SLIDE CONTROL PANEL USING TABBED SLIDES
+        tab_w, tab_m, tab_n, tab_s, tab_d = st.tabs([
+            "🌩️ Weather Alerts", 
+            "📍 Map Pins", 
+            "📢 News", 
+            "📋 Support Demands", 
+            "🌱 Declarations"
+        ])
 
-        if st.button("Publish Weather Alert Live"):
-            if w_title.strip() and w_msg.strip():
-                try:
-                    supabase_client.table("weather_alerts").insert({
-                        "title": sanitize(w_title),
-                        "region": w_region,
-                        "severity": w_severity,
-                        "message": sanitize(w_msg)
-                    }).execute()
-                    st.success(f"Weather alert published in {w_severity.upper()} level color banner!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to publish alert: {e}")
+        # --- SLIDE 1: WEATHER ALERTS ---
+        with tab_w:
+            st.write("### 🌩️ Weather Warning Management")
+            w_title = st.text_input("Alert Title", placeholder="e.g. Sirocco / Extreme Heat")
+            w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg_admin")
+            w_severity = st.selectbox("Warning Severity Level (Color)", ["yellow", "orange", "red"], format_func=lambda x: f"{x.upper()} Threat Level")
+            w_msg = st.text_area("Alert Message details...")
+
+            if st.button("Publish Weather Alert Live", type="primary"):
+                if w_title.strip() and w_msg.strip():
+                    try:
+                        supabase_client.table("weather_alerts").insert({
+                            "title": sanitize(w_title),
+                            "region": w_region,
+                            "severity": w_severity,
+                            "message": sanitize(w_msg)
+                        }).execute()
+                        st.success(f"Weather alert published in {w_severity.upper()} level color!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to publish alert: {e}")
+
+            st.divider()
+            st.write("#### 📜 Active Weather Alerts Database")
+            try:
+                w_res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
+                w_list = w_res.data if w_res.data else []
+            except Exception:
+                w_list = []
+
+            if w_list:
+                df_w = pd.DataFrame(w_list)
+                st.dataframe(df_w, use_container_width=True)
+
+                w_del_id = st.number_input("Enter Weather Alert ID to Delete:", min_value=1, step=1, key="del_w_id")
+                if st.button("Delete Weather Alert", type="primary", key="btn_del_w"):
+                    try:
+                        supabase_client.table("weather_alerts").delete().eq("id", w_del_id).execute()
+                        st.success(f"Weather alert ID {w_del_id} deleted successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting record: {e}")
+            else:
+                st.info("No weather alerts recorded in database.")
+
+        # --- SLIDE 2: MAP LOCATIONS ---
+        with tab_m:
+            st.write("### 📍 Add New Map Location Pin")
+            m_name = st.text_input("Location Name")
+            m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w_admin")
+            m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
+            m_lat = st.number_input("Latitude", value=36.7323, format="%.4f")
+            m_lon = st.number_input("Longitude", value=3.1678, format="%.4f")
+            
+            if st.button("Add Pin to Map Live", type="primary"):
+                if m_name.strip():
+                    try:
+                        maps_auto_url = f"https://maps.google.com/?q={m_lat},{m_lon}"
+                        supabase_client.table("suppliers_directory").insert({
+                            "name": sanitize(m_name),
+                            "wilaya": m_wil,
+                            "category": m_cat,
+                            "lat": m_lat,
+                            "lon": m_lon,
+                            "maps_link": maps_auto_url
+                        }).execute()
+                        st.success("Location added live to map!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error adding location: {e}")
+
+            st.divider()
+            st.write("#### 📜 Map Locations Database")
+            try:
+                m_res = supabase_client.table("suppliers_directory").select("*").order("id", desc=True).execute()
+                m_list = m_res.data if m_res.data else []
+            except Exception:
+                m_list = []
+
+            if m_list:
+                df_m = pd.DataFrame(m_list)
+                st.dataframe(df_m, use_container_width=True)
+
+                m_del_id = st.number_input("Enter Map Location ID to Delete:", min_value=1, step=1, key="del_m_id")
+                if st.button("Delete Location Pin", type="primary", key="btn_del_m"):
+                    try:
+                        supabase_client.table("suppliers_directory").delete().eq("id", m_del_id).execute()
+                        st.success(f"Map Location ID {m_del_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting location: {e}")
+            else:
+                st.info("No custom map pins recorded in database.")
+
+        # --- SLIDE 3: NEWS & ANNOUNCEMENTS ---
+        with tab_n:
+            st.write("### 📢 Publish Official News Announcement")
+            n_title = st.text_input("News Title")
+            n_cat = st.selectbox("Category", ["Official Notice", "Subsidies", "Weather", "Export/Import", "General"])
+            n_content = st.text_area("Content Details")
+
+            if st.button("Publish News Release", type="primary"):
+                if n_title.strip() and n_content.strip():
+                    try:
+                        supabase_client.table("portal_news").insert({
+                            "title": sanitize(n_title),
+                            "category": n_cat,
+                            "content": sanitize(n_content)
+                        }).execute()
+                        st.success("News published live!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to publish news: {e}")
+
+            st.divider()
+            st.write("#### 📜 Published News Database")
+            try:
+                n_res = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
+                n_list = n_res.data if n_res.data else []
+            except Exception:
+                n_list = []
+
+            if n_list:
+                df_n = pd.DataFrame(n_list)
+                st.dataframe(df_n, use_container_width=True)
+
+                n_del_id = st.number_input("Enter News ID to Delete:", min_value=1, step=1, key="del_n_id")
+                if st.button("Delete News Entry", type="primary", key="btn_del_n"):
+                    try:
+                        supabase_client.table("portal_news").delete().eq("id", n_del_id).execute()
+                        st.success(f"News entry ID {n_del_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting news: {e}")
+            else:
+                st.info("No news entries found in database.")
+
+        # --- SLIDE 4: SUPPORT DEMANDS ---
+        with tab_s:
+            st.write("### 📋 Submitted Farmer Support Demands")
+            try:
+                s_res = supabase_client.table("support_requests").select("*").order("id", desc=True).execute()
+                s_list = s_res.data if s_res.data else []
+            except Exception:
+                s_list = []
+
+            if s_list:
+                df_s = pd.DataFrame(s_list)
+                st.dataframe(df_s, use_container_width=True)
+
+                s_del_id = st.number_input("Enter Support Demand ID to Delete:", min_value=1, step=1, key="del_s_id")
+                if st.button("Delete Support Demand", type="primary", key="btn_del_s"):
+                    try:
+                        supabase_client.table("support_requests").delete().eq("id", s_del_id).execute()
+                        st.success(f"Support Request ID {s_del_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting request: {e}")
+            else:
+                st.info("No support demands submitted yet.")
+
+        # --- SLIDE 5: DECLARATIONS ---
+        with tab_d:
+            st.write("### 🌱 Crop Area Declarations Database")
+            try:
+                d_res = supabase_client.table("declarations").select("*").order("id", desc=True).execute()
+                d_list = d_res.data if d_res.data else []
+            except Exception:
+                d_list = []
+
+            if d_list:
+                df_d = pd.DataFrame(d_list)
+                st.dataframe(df_d, use_container_width=True)
+
+                d_del_id = st.number_input("Enter Declaration ID to Delete:", min_value=1, step=1, key="del_d_id")
+                if st.button("Delete Declaration", type="primary", key="btn_del_d"):
+                    try:
+                        supabase_client.table("declarations").delete().eq("id", d_del_id).execute()
+                        st.success(f"Declaration ID {d_del_id} deleted!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting declaration: {e}")
+            else:
+                st.info("No declarations recorded in database.")
