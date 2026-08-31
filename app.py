@@ -81,7 +81,7 @@ except Exception:
 supabase_client = conn.client
 
 # ---------------------------------------------------------
-# PRESET ALGERIAN AGRICULTURAL LOCATIONS
+# PRESET ALGERIAN AGRICULTURAL LOCATIONS & DATA
 # ---------------------------------------------------------
 DEFAULT_AGRI_LOCATIONS = [
     {"name": "Wholesale Market (EPLFM MAGRO)", "wilaya": "16 - Alger", "category": "Wholesale Produce Market", "lat": 36.7323, "lon": 3.1678, "maps_link": "https://maps.google.com/?q=36.7323,3.1678"},
@@ -126,6 +126,36 @@ SUPPORT_SECTORS = {
     "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزع معتمد)", "Exploitation Certificate (شهادة استغلال فلاحي)"]
 }
 
+ALERT_STYLES = {
+    "yellow": {
+        "bg_color": "#fff9c4",
+        "border_color": "#fbc02d",
+        "text_color": "#574200",
+        "badge_bg": "#fbc02d",
+        "badge_text": "#000000",
+        "icon": "⚠️",
+        "label": "Yellow / Vigilance (يقظة)"
+    },
+    "orange": {
+        "bg_color": "#ffe0b2",
+        "border_color": "#f57c00",
+        "text_color": "#4a2400",
+        "badge_bg": "#f57c00",
+        "badge_text": "#ffffff",
+        "icon": "🍊",
+        "label": "Orange / High Alert (حذر شديد)"
+    },
+    "red": {
+        "bg_color": "#ffcdd2",
+        "border_color": "#d32f2f",
+        "text_color": "#490c0c",
+        "badge_bg": "#d32f2f",
+        "badge_text": "#ffffff",
+        "icon": "🚨",
+        "label": "Red / Extreme Danger (خطر أقصى)"
+    }
+}
+
 def get_current_crop_area(crop_name: str) -> float:
     try:
         res = supabase_client.table("declarations").select("area").eq("crop", crop_name).execute()
@@ -136,7 +166,7 @@ def get_current_crop_area(crop_name: str) -> float:
     return 0.0
 
 # ---------------------------------------------------------
-# Session State Init
+# Session State Initializer
 # ---------------------------------------------------------
 if 'lang' not in st.session_state: st.session_state.lang = 'AR'
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
@@ -336,7 +366,7 @@ if st.session_state.active_tab == "home":
         st.subheader(t['news'])
         try:
             res_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
-            news_items = res_news.data
+            news_items = res_news.data if res_news.data else []
         except Exception:
             news_items = []
 
@@ -396,20 +426,56 @@ if st.session_state.active_tab == "home":
             else:
                 st.warning("Please log in first.")
 
-    # --- SERVICE 4: WEATHER ALERTS ---
+    # --- SERVICE 4: WEATHER ALERTS (SEVERITY MATCHED COLORING) ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
+        
         try:
             res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
-            alerts = res.data
+            alerts = res.data if res.data else []
         except Exception: 
             alerts = []
         
         if alerts:
             for item in alerts:
-                st.warning(f"**{item.get('title')}** ({item.get('region')}):\n{item.get('message')}")
+                title = sanitize(item.get("title", "Weather Notice"))
+                region = sanitize(item.get("region", "All Wilayas"))
+                message = sanitize(item.get("message", ""))
+                
+                # Fetch warning level (Defaults to yellow if missing/unrecognized)
+                raw_level = str(item.get("severity", "yellow")).lower().strip()
+                style = ALERT_STYLES.get(raw_level, ALERT_STYLES["yellow"])
+
+                # Render dynamic colored banner matching warning threat level
+                st.markdown(f"""
+                    <div style="
+                        background-color: {style['bg_color']};
+                        border-left: 6px solid {style['border_color']};
+                        border-radius: 8px;
+                        padding: 14px 16px;
+                        margin-bottom: 14px;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                        color: {style['text_color']};
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <span style="font-weight: bold; font-size: 1.05em;">
+                                {style['icon']} {title} — <small style="font-weight: normal;">({region})</small>
+                            </span>
+                            <span style="
+                                background-color: {style['badge_bg']};
+                                color: {style['badge_text']};
+                                padding: 3px 8px;
+                                border-radius: 4px;
+                                font-size: 0.75em;
+                                font-weight: bold;
+                                text-transform: uppercase;
+                            ">{style['label']}</span>
+                        </div>
+                        <p style="margin: 0; font-size: 0.95em; line-height: 1.4;">{message}</p>
+                    </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("🟢 No severe weather warnings active.")
+            st.info("🟢 No severe weather warnings active across the 48 wilayas.")
 
     # --- SERVICE 5: PAYMENTS ---
     elif st.session_state.selected_service == "pay":
@@ -433,7 +499,7 @@ if st.session_state.active_tab == "home":
             
         all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
 
-        # Filter by Category
+        # Filter Options
         categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
         selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
 
@@ -442,10 +508,10 @@ if st.session_state.active_tab == "home":
         else:
             filtered_locs = all_locations
 
-        # Centered over Algeria map view
+        # Folium Map Centered over Algeria
         m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
 
-        # Color scheme for map pins
+        # Marker Colors Map
         color_map = {
             "Wholesale Produce Market": "green",
             "OAIC Cereal Silo (CCLS)": "cadetblue",
@@ -460,7 +526,7 @@ if st.session_state.active_tab == "home":
             cat = loc.get("category", "")
             maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
 
-            # HTML Popup with explicit Google Maps redirect button
+            # HTML Popup containing explicit Google Maps link
             popup_html = f"""
             <div style="font-family: Arial; width: 210px;">
                 <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
@@ -488,7 +554,7 @@ if st.session_state.active_tab == "home":
                 icon=folium.Icon(color=icon_color, icon="info-sign")
             ).add_to(m)
 
-        # Render Map on Streamlit
+        # Render Folium Map in Streamlit
         st_folium(m, width=700, height=480)
 
         st.divider()
@@ -548,8 +614,8 @@ elif st.session_state.active_tab == "account":
             st.session_state.admin_authenticated = False
             st.rerun()
 
-        # Admin add new location with Lat/Lon coordinates
-        st.write("### Add New Location Pin to Map")
+        # Admin tool 1: Add new map pins
+        st.write("### 📍 Add New Location Pin to Map")
         m_name = st.text_input("Location Name")
         m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w")
         m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
@@ -572,3 +638,26 @@ elif st.session_state.active_tab == "account":
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error adding location: {e}")
+
+        st.divider()
+
+        # Admin tool 2: Publish Weather Alerts with Color Selection
+        st.write("### 🌩️ Publish Weather Alert")
+        w_title = st.text_input("Alert Title", placeholder="e.g. Sirocco / High Wind Alert")
+        w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg")
+        w_severity = st.selectbox("Warning Severity Level (Color)", ["yellow", "orange", "red"], format_func=lambda x: f"{x.upper()} Threat Level")
+        w_msg = st.text_area("Alert Message details...")
+
+        if st.button("Publish Weather Alert Live"):
+            if w_title.strip() and w_msg.strip():
+                try:
+                    supabase_client.table("weather_alerts").insert({
+                        "title": sanitize(w_title),
+                        "region": w_region,
+                        "severity": w_severity,
+                        "message": sanitize(w_msg)
+                    }).execute()
+                    st.success(f"Weather alert published in {w_severity.upper()} level color banner!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to publish alert: {e}")
