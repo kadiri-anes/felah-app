@@ -77,14 +77,17 @@ st.markdown("""
 # Database Client Initializer
 # ---------------------------------------------------------
 try:
-    supabase = st.connection(
+    conn = st.connection(
         "supabase",
         type=SupabaseConnection,
         url=st.secrets["connections"]["supabase"]["SUPABASE_URL"],
         key=st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
     )
 except Exception:
-    supabase = st.connection("supabase", type=SupabaseConnection)
+    conn = st.connection("supabase", type=SupabaseConnection)
+
+# Native Supabase Python client instance:
+supabase_client = conn.client
 
 # ---------------------------------------------------------
 # CONSTANTS & CONFIGURATIONS
@@ -136,14 +139,14 @@ SUPPORT_SECTORS = {
     ],
     "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": [
         "Fellah Card (بطاقة الفلاح)",
-        "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزع معتمد)",
+        "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزر معتمد)",
         "Exploitation Certificate (شهادة استغلال فلاحي)"
     ]
 }
 
 def get_current_crop_area(crop_name: str) -> float:
     try:
-        res = supabase.table("declarations").select("area").eq("crop", crop_name).execute()
+        res = supabase_client.table("declarations").select("area").eq("crop", crop_name).execute()
         if res and res.data:
             return sum(item["area"] for item in res.data if item.get("area") is not None)
     except Exception:
@@ -329,11 +332,12 @@ if st.session_state.active_tab == "home":
                                 file_path = f"support_docs/{clean_filename}"
                                 file_bytes = file_obj.read()
                                 
-                                res = supabase.storage.from_("agricultural-docs").upload(file_path, file_bytes)
+                                # Access storage through the underlying native client
+                                res = supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
                                 public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
                                 uploaded_links[doc_name] = public_url
 
-                            supabase.table("support_requests").insert({
+                            supabase_client.table("support_requests").insert({
                                 "farmer_name": st.session_state.farmer_name,
                                 "carte_num": st.session_state.carte_num,
                                 "wilaya": selected_w_sup,
@@ -352,7 +356,7 @@ if st.session_state.active_tab == "home":
         st.caption("Official press releases, ministerial updates, and sector announcements.")
         
         try:
-            res_news = supabase.table("portal_news").select("*").order("id", desc=True).execute()
+            res_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
             news_items = res_news.data
         except Exception:
             news_items = []
@@ -406,7 +410,7 @@ if st.session_state.active_tab == "home":
         if st.button("Submit & Generate QR Permit"):
             if st.session_state.logged_in:
                 try:
-                    supabase.table("declarations").insert({
+                    supabase_client.table("declarations").insert({
                         "farmer_name": st.session_state.farmer_name,
                         "carte_num": st.session_state.carte_num,
                         "wilaya": selected_w,
@@ -433,7 +437,7 @@ if st.session_state.active_tab == "home":
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
         try:
-            res = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
+            res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
             alerts = res.data
         except Exception: 
             alerts = []
@@ -463,7 +467,7 @@ if st.session_state.active_tab == "home":
     elif st.session_state.selected_service == "suppliers":
         st.subheader(t['suppliers'])
         try:
-            res = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
+            res = supabase_client.table("suppliers_directory").select("*").order("id", desc=True).execute()
             directory = res.data
         except Exception: 
             directory = []
@@ -542,7 +546,7 @@ elif st.session_state.active_tab == "account":
                     summary_data.append({"Vegetable": c_name, "Declared (Ha)": curr, "Target Limit": limit_val, "Used": f"{(curr/limit_val)*100:.1f}%"})
                 st.table(pd.DataFrame(summary_data))
                 try:
-                    res_dec = supabase.table("declarations").select("*").execute()
+                    res_dec = supabase_client.table("declarations").select("*").execute()
                     st.dataframe(pd.DataFrame(res_dec.data), use_container_width=True)
                 except Exception: st.info("No declarations available.")
 
@@ -550,7 +554,7 @@ elif st.session_state.active_tab == "account":
             with admin_tab2:
                 st.write("### 📂 Review Submitted Support Demands & Attached Documents")
                 try:
-                    res_sup = supabase.table("support_requests").select("*").order("id", desc=True).execute()
+                    res_sup = supabase_client.table("support_requests").select("*").order("id", desc=True).execute()
                     reqs = res_sup.data
                 except Exception: reqs = []
 
@@ -584,7 +588,7 @@ elif st.session_state.active_tab == "account":
                 if st.button("Publish News Release", type="primary"):
                     if news_title.strip() and news_content.strip():
                         try:
-                            supabase.table("portal_news").insert({
+                            supabase_client.table("portal_news").insert({
                                 "title": sanitize(news_title),
                                 "category": news_cat,
                                 "content": sanitize(news_content)
@@ -597,14 +601,14 @@ elif st.session_state.active_tab == "account":
                 st.divider()
                 st.write("### Managed News Items")
                 try:
-                    res_all_news = supabase.table("portal_news").select("*").order("id", desc=True).execute()
+                    res_all_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
                     st.dataframe(pd.DataFrame(res_all_news.data), use_container_width=True)
                 except Exception: st.info("No news found.")
                 
                 del_news_id = st.number_input("Enter News ID to Delete", min_value=1, step=1, key="del_news_n")
                 if st.button("Delete News Entry"):
                     try:
-                        supabase.table("portal_news").delete().eq("id", del_news_id).execute()
+                        supabase_client.table("portal_news").delete().eq("id", del_news_id).execute()
                         st.success(f"News ID #{del_news_id} deleted!")
                         st.rerun()
                     except Exception as e:
@@ -619,7 +623,7 @@ elif st.session_state.active_tab == "account":
                 w_msg = st.text_area("Instructions")
                 if st.button("Publish Alert"):
                     try:
-                        supabase.table("weather_alerts").insert({
+                        supabase_client.table("weather_alerts").insert({
                             "title": sanitize(w_title),
                             "region": w_reg,
                             "severity": w_sev,
@@ -641,7 +645,7 @@ elif st.session_state.active_tab == "account":
                 if st.button("Add Location"):
                     if m_name.strip():
                         try:
-                            supabase.table("suppliers_directory").insert({
+                            supabase_client.table("suppliers_directory").insert({
                                 "name": sanitize(m_name),
                                 "wilaya": m_wil,
                                 "category": m_cat,
