@@ -2,3 +2,5 @@ streamlit
 pandas
 qrcode
 st-supabase-connection
+folium
+streamlit-folium
