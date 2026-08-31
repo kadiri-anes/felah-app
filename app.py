@@ -6,6 +6,8 @@ import html
 import hashlib
 from io import BytesIO
 from st_supabase_connection import SupabaseConnection
+import folium
+from streamlit_folium import st_folium
 
 # ---------------------------------------------------------
 # Security & Helper Functions
@@ -59,16 +61,6 @@ st.markdown("""
         margin-bottom: 12px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.06);
     }
-    .support-card {
-        background-color: #f9fbf9;
-        border: 1px solid #d0e7da;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
-    }
-    .alert-red { background-color: #ffe6e6; border-left: 6px solid #d9534f; padding: 12px; border-radius: 8px; color: #a94442; margin-bottom: 12px; }
-    .alert-yellow { background-color: #fffde6; border-left: 6px solid #f0ad4e; padding: 12px; border-radius: 8px; color: #8a6d3b; margin-bottom: 12px; }
-    .alert-green { background-color: #e6fffa; border-left: 6px solid #5cb85c; padding: 12px; border-radius: 8px; color: #3c763d; margin-bottom: 12px; }
     .market-card { background-color: white; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
@@ -86,12 +78,22 @@ try:
 except Exception:
     conn = st.connection("supabase", type=SupabaseConnection)
 
-# Native Supabase Python client instance:
 supabase_client = conn.client
 
 # ---------------------------------------------------------
-# CONSTANTS & CONFIGURATIONS
+# PRESET ALGERIAN AGRICULTURAL LOCATIONS
 # ---------------------------------------------------------
+DEFAULT_AGRI_LOCATIONS = [
+    {"name": "Wholesale Market (EPLFM MAGRO)", "wilaya": "16 - Alger", "category": "Wholesale Produce Market", "lat": 36.7323, "lon": 3.1678, "maps_link": "https://maps.google.com/?q=36.7323,3.1678"},
+    {"name": "CCLS Silo & Grain Point", "wilaya": "19 - Sétif", "category": "OAIC Cereal Silo (CCLS)", "lat": 36.1911, "lon": 5.4137, "maps_link": "https://maps.google.com/?q=36.1911,5.4137"},
+    {"name": "Asmidal Fertilizer Depot", "wilaya": "23 - Annaba", "category": "ASMIDAL Fertilizer Depot", "lat": 36.9000, "lon": 7.7667, "maps_link": "https://maps.google.com/?q=36.9000,7.7667"},
+    {"name": "Wholesale Market (Attaf)", "wilaya": "44 - Aïn Defla", "category": "Wholesale Produce Market", "lat": 36.2238, "lon": 1.9682, "maps_link": "https://maps.google.com/?q=36.2238,1.9682"},
+    {"name": "CCLS Cereal Storage Depot", "wilaya": "14 - Tiaret", "category": "OAIC Cereal Silo (CCLS)", "lat": 35.3710, "lon": 1.3169, "maps_link": "https://maps.google.com/?q=35.3710,1.3169"},
+    {"name": "Wholesale Dates Market", "wilaya": "07 - Biskra", "category": "Wholesale Produce Market", "lat": 34.8502, "lon": 5.7281, "maps_link": "https://maps.google.com/?q=34.8502,5.7281"},
+    {"name": "CCLS Grain Point El Oued", "wilaya": "39 - El Oued", "category": "OAIC Cereal Silo (CCLS)", "lat": 33.3683, "lon": 6.8674, "maps_link": "https://maps.google.com/?q=33.3683,6.8674"},
+    {"name": "Fertilizer & Seed Point (OAIC)", "wilaya": "25 - Constantine", "category": "ASMIDAL Fertilizer Depot", "lat": 36.3650, "lon": 6.6147, "maps_link": "https://maps.google.com/?q=36.3650,6.6147"}
+]
+
 WILAYAS_48 = [
     "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna", 
     "06 - Béjaïa", "07 - Biskra", "08 - Béchar", "09 - Blida", "10 - Bouira", 
@@ -117,31 +119,11 @@ FRUIT_LIST = [
 ]
 
 SUPPORT_SECTORS = {
-    "Geomembrane Water Basin (حوض الجيو-ممبران)": [
-        "Fellah Card (بطاقة الفلاح)",
-        "Land Ownership or Lease Contract (عقد الملكية أو الامتياز)",
-        "Technical Study / Supplier Proforma Invoice (دراسة تقنية / فاتورة شكلية)"
-    ],
-    "Well & Water Drilling (حفر الآبار الفلاحية)": [
-        "Fellah Card (بطاقة الفلاح)",
-        "Water Drilling Authorization Permit (رخصة حفر البئر من الموارد المائية)",
-        "Land Title / Lease Agreement (عقد الملكية أو الامتياز)"
-    ],
-    "Modern Drip/Sprinkler Irrigation (أنظمة الري الحديثة)": [
-        "Fellah Card (بطاقة الفلاح)",
-        "Proforma Invoice for Equipment (فاتورة شكلية للعتاد)",
-        "Land Topography Plan (مخطط طبوغرافي للأرض)"
-    ],
-    "Solar Energy for Agricultural Pumps (الطاقة الشمسية للمزارع)": [
-        "Fellah Card (بطاقة الفلاح)",
-        "Solar Installation Technical Quote (عرض سعر للنظام الشمسي)",
-        "Well Authorization / Water Source Proof (اثبات وجود مورد مائي)"
-    ],
-    "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": [
-        "Fellah Card (بطاقة الفلاح)",
-        "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزر معتمد)",
-        "Exploitation Certificate (شهادة استغلال فلاحي)"
-    ]
+    "Geomembrane Water Basin (حوض الجيو-ممبران)": ["Fellah Card (بطاقة الفلاح)", "Land Ownership or Lease Contract (عقد الملكية أو الامتياز)", "Technical Study / Supplier Proforma Invoice (دراسة تقنية / فاتورة شكلية)"],
+    "Well & Water Drilling (حفر الآبار الفلاحية)": ["Fellah Card (بطاقة الفلاح)", "Water Drilling Authorization Permit (رخصة حفر البئر من الموارد المائية)", "Land Title / Lease Agreement (عقد الملكية أو الامتياز)"],
+    "Modern Drip/Sprinkler Irrigation (أنظمة الري الحديثة)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice for Equipment (فاتورة شكلية للعتاد)", "Land Topography Plan (مخطط طبوغرافي للأرض)"],
+    "Solar Energy for Agricultural Pumps (الطاقة الشمسية للمزارع)": ["Fellah Card (بطاقة الفلاح)", "Solar Installation Technical Quote (عرض سعر للنظام الشمسي)", "Well Authorization / Water Source Proof (اثبات وجود مورد مائي)"],
+    "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزع معتمد)", "Exploitation Certificate (شهادة استغلال فلاحي)"]
 }
 
 def get_current_crop_area(crop_name: str) -> float:
@@ -182,7 +164,7 @@ TEXTS = {
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "أسوق الجملة ونقاط الأسمدة (48 ولاية)",
+        'suppliers': "خريطة أسواق الجملة، نقاط CCLS والأسمدة",
         'support': "طلب دعم الدولة (الدعم الفلاحي)",
         'news': "الأخبار والإعلانات الرسمية",
         'admin': "لوحة تحكم المالِك (Owner Admin)"
@@ -196,7 +178,7 @@ TEXTS = {
         'weather': "Weather & Ag-Alerts",
         'crop': "Cultivation & QR Permit",
         'pay': "Carte Fellah Subscription",
-        'suppliers': "Wholesale Markets & Depots",
+        'suppliers': "Wholesale Markets, CCLS & Fertilizer Map",
         'support': "Government Agricultural Support",
         'news': "News & Official Announcements",
         'admin': "Owner Admin Dashboard"
@@ -332,7 +314,6 @@ if st.session_state.active_tab == "home":
                                 file_path = f"support_docs/{clean_filename}"
                                 file_bytes = file_obj.read()
                                 
-                                # Access storage through the underlying native client
                                 res = supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
                                 public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
                                 uploaded_links[doc_name] = public_url
@@ -346,15 +327,13 @@ if st.session_state.active_tab == "home":
                                 "files_json": uploaded_links
                             }).execute()
 
-                            st.success("🎉 Your Agricultural Support demand has been submitted successfully to Ministry Administrators!")
+                            st.success("🎉 Your Agricultural Support demand has been submitted successfully!")
                     except Exception as e:
                         st.error(f"Error submitting request: {e}")
 
     # --- SERVICE 2: NEWS & ANNOUNCEMENTS ---
     elif st.session_state.selected_service == "news":
         st.subheader(t['news'])
-        st.caption("Official press releases, ministerial updates, and sector announcements.")
-        
         try:
             res_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
             news_items = res_news.data
@@ -363,17 +342,11 @@ if st.session_state.active_tab == "home":
 
         if news_items:
             for n in news_items:
-                title_c = sanitize(n.get("title", ""))
-                cat_c = sanitize(n.get("category", "General"))
-                content_c = sanitize(n.get("content", ""))
-                date_c = sanitize(str(n.get("created_at", "")))
-                
                 st.markdown(f"""
                     <div class="news-card">
-                        <span style="background: #0b8a62; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{cat_c}</span>
-                        <small style="color: #666; float: right;">{date_c[:10]}</small>
-                        <h4 style="margin: 8px 0 5px 0; color: #1e5340;">📢 {title_c}</h4>
-                        <p style="margin: 0; color: #333; line-height: 1.5;">{content_c}</p>
+                        <span style="background: #0b8a62; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
+                        <h4 style="margin: 8px 0 5px 0; color: #1e5340;">📢 {sanitize(n.get("title",""))}</h4>
+                        <p style="margin: 0; color: #333;">{sanitize(n.get("content",""))}</p>
                     </div>
                 """, unsafe_allow_html=True)
         else:
@@ -399,13 +372,6 @@ if st.session_state.active_tab == "home":
             st.write(f"**National Area Quota Status ({selected_c}):**")
             st.progress(percentage)
             st.caption(f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha")
-            
-            if projected_total > limit:
-                under_crops = [c_n for c_n, l_v in VEGETABLE_LIMITS.items() if get_current_crop_area(c_n) < l_v]
-                recommend_str = ", ".join(under_crops[:3])
-                st.warning(f"⚠️ Quota Target Exceeded! We recommend: **{recommend_str}**.")
-            else:
-                st.success("✅ Quota Available — Within national targets.")
 
         if st.button("Submit & Generate QR Permit"):
             if st.session_state.logged_in:
@@ -424,10 +390,7 @@ if st.session_state.active_tab == "home":
                     qr = qrcode.make(qr_payload)
                     buf = BytesIO()
                     qr.save(buf, format="PNG")
-                    qr_bytes = buf.getvalue()
-                    
-                    st.image(qr_bytes, caption="Official QR Permit", width=220)
-                    st.download_button("Download QR Permit", data=qr_bytes, file_name=f"Permit_{st.session_state.farmer_name}.png", mime="image/png")
+                    st.image(buf.getvalue(), caption="Official QR Permit", width=220)
                 except Exception as e:
                     st.error(f"Failed to record declaration: {e}")
             else:
@@ -444,14 +407,7 @@ if st.session_state.active_tab == "home":
         
         if alerts:
             for item in alerts:
-                css_class = "alert-red" if "Red" in item.get("severity","") else ("alert-yellow" if "Yellow" in item.get("severity","") else "alert-green")
-                st.markdown(f"""
-                    <div class="{css_class}">
-                        <h4>{item.get('title')}</h4>
-                        <p><b>Wilaya:</b> {item.get('region')} | <b>Severity:</b> {item.get('severity')}</p>
-                        <p>{item.get('message')}</p>
-                    </div>
-                """, unsafe_allow_html=True)
+                st.warning(f"**{item.get('title')}** ({item.get('region')}):\n{item.get('message')}")
         else:
             st.info("🟢 No severe weather warnings active.")
 
@@ -463,26 +419,91 @@ if st.session_state.active_tab == "home":
         st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
         if st.button("Confirm Payment"): st.success("Carte Fellah renewed for season 2026/2027!")
 
-    # --- SERVICE 6: MARKETS DIRECTORY ---
+    # --- SERVICE 6: MAPS DIRECTORY FOR MARKETS, CCLS & FERTILIZER DEPOTS ---
     elif st.session_state.selected_service == "suppliers":
-        st.subheader(t['suppliers'])
-        try:
-            res = supabase_client.table("suppliers_directory").select("*").order("id", desc=True).execute()
-            directory = res.data
-        except Exception: 
-            directory = []
+        st.subheader("🗺️ خريطة الموزعين وأسوق الجملة ونقاط CCLS")
+        st.caption("Interactive Map — Click any marker on the map to get direct Google Maps navigation.")
         
-        if directory:
-            for item in directory:
-                link = item.get("maps_link", "")
-                if not (link.startswith("http://") or link.startswith("https://")): link = f"https://{link}"
-                st.markdown(f"""
-                    <div class="market-card">
-                        <h4 style="margin: 0; color: #0b8a62;">📍 {item.get('name')}</h4>
-                        <p><b>Wilaya:</b> {item.get('wilaya')} | <b>Type:</b> {item.get('category')}</p>
-                        <a href="{link}" target="_blank">🗺️ Open in Google Maps ↗</a>
-                    </div>
-                """, unsafe_allow_html=True)
+        # Combine Database Entries with Default Algerian Locations
+        try:
+            res = supabase_client.table("suppliers_directory").select("*").execute()
+            db_locations = res.data if res.data else []
+        except Exception:
+            db_locations = []
+            
+        all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
+
+        # Filter by Category
+        categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
+        selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
+
+        if selected_cat != "All":
+            filtered_locs = [loc for loc in all_locations if loc.get("category") == selected_cat]
+        else:
+            filtered_locs = all_locations
+
+        # Centered over Algeria map view
+        m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
+
+        # Color scheme for map pins
+        color_map = {
+            "Wholesale Produce Market": "green",
+            "OAIC Cereal Silo (CCLS)": "cadetblue",
+            "ASMIDAL Fertilizer Depot": "orange"
+        }
+
+        for loc in filtered_locs:
+            lat = float(loc.get("lat", 36.7323))
+            lon = float(loc.get("lon", 3.1678))
+            name = loc.get("name", "Agricultural Point")
+            wilaya = loc.get("wilaya", "")
+            cat = loc.get("category", "")
+            maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
+
+            # HTML Popup with explicit Google Maps redirect button
+            popup_html = f"""
+            <div style="font-family: Arial; width: 210px;">
+                <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
+                <p style="margin:0; font-size:12px;"><b>Category:</b> {cat}</p>
+                <p style="margin:0 0 8px 0; font-size:12px;"><b>Wilaya:</b> {wilaya}</p>
+                <a href="{maps_url}" target="_blank" style="
+                    display: inline-block;
+                    background-color: #4285F4;
+                    color: white;
+                    padding: 6px 12px;
+                    text-decoration: none;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-weight: bold;
+                ">🗺️ Open in Google Maps ↗</a>
+            </div>
+            """
+            
+            icon_color = color_map.get(cat, "blue")
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(popup_html, max_width=250),
+                tooltip=f"{name} ({wilaya})",
+                icon=folium.Icon(color=icon_color, icon="info-sign")
+            ).add_to(m)
+
+        # Render Map on Streamlit
+        st_folium(m, width=700, height=480)
+
+        st.divider()
+        st.write("### Directory List / القائمة التفصيلية")
+        for loc in filtered_locs:
+            lat = float(loc.get("lat", 36.7323))
+            lon = float(loc.get("lon", 3.1678))
+            maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
+            st.markdown(f"""
+                <div class="market-card">
+                    <h4 style="margin: 0; color: #0b8a62;">📍 {loc.get('name')}</h4>
+                    <p style="margin: 2px 0;"><b>Wilaya:</b> {loc.get('wilaya')} | <b>Category:</b> {loc.get('category')}</p>
+                    <a href="{maps_url}" target="_blank" style="color: #1a73e8; font-weight: bold;">🗺️ Open Location in Google Maps ↗</a>
+                </div>
+            """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # VIEW 2: CARTE FELLAH
@@ -513,148 +534,41 @@ elif st.session_state.active_tab == "account":
     st.divider()
     
     st.subheader(t['admin'])
-    if st.session_state.admin_attempts >= 5:
-        st.error("🔒 Admin access locked due to failed attempts.")
-    else:
-        if not st.session_state.admin_authenticated:
-            admin_pass = st.text_input("Enter Admin Password", type="password")
-            if st.button("Authenticate Admin"):
-                if hash_password(admin_pass) == hash_password(get_admin_password()):
-                    st.session_state.admin_authenticated = True
-                    st.session_state.admin_attempts = 0
-                    st.rerun()
-                else:
-                    st.session_state.admin_attempts += 1
-                    st.error("Incorrect Password.")
-        
-        if st.session_state.admin_authenticated:
-            st.success("Owner Access Granted!")
-            if st.button("🔒 Lock Admin Session"):
-                st.session_state.admin_authenticated = False
+    if not st.session_state.admin_authenticated:
+        admin_pass = st.text_input("Enter Admin Password", type="password")
+        if st.button("Authenticate Admin"):
+            if hash_password(admin_pass) == hash_password(get_admin_password()):
+                st.session_state.admin_authenticated = True
                 st.rerun()
-                
-            admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = st.tabs([
-                "🌾 Quotas", "📂 Support Requests", "📢 Post News", "🚨 Weather", "📍 Markets"
-            ])
-            
-            # --- ADMIN TAB 1: CROP QUOTAS ---
-            with admin_tab1:
-                st.write("### Live Vegetable Capacity Status")
-                summary_data = []
-                for c_name, limit_val in VEGETABLE_LIMITS.items():
-                    curr = get_current_crop_area(c_name)
-                    summary_data.append({"Vegetable": c_name, "Declared (Ha)": curr, "Target Limit": limit_val, "Used": f"{(curr/limit_val)*100:.1f}%"})
-                st.table(pd.DataFrame(summary_data))
+            else:
+                st.error("Incorrect Password.")
+    else:
+        st.success("Owner Access Granted!")
+        if st.button("🔒 Lock Admin Session"):
+            st.session_state.admin_authenticated = False
+            st.rerun()
+
+        # Admin add new location with Lat/Lon coordinates
+        st.write("### Add New Location Pin to Map")
+        m_name = st.text_input("Location Name")
+        m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w")
+        m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
+        m_lat = st.number_input("Latitude (خط العرض)", value=36.7323, format="%.4f")
+        m_lon = st.number_input("Longitude (خط الطول)", value=3.1678, format="%.4f")
+        
+        if st.button("Add Location to Live Map"):
+            if m_name.strip():
                 try:
-                    res_dec = supabase_client.table("declarations").select("*").execute()
-                    st.dataframe(pd.DataFrame(res_dec.data), use_container_width=True)
-                except Exception: st.info("No declarations available.")
-
-            # --- ADMIN TAB 2: REVIEW AGRICULTURAL SUPPORT REQUESTS ---
-            with admin_tab2:
-                st.write("### 📂 Review Submitted Support Demands & Attached Documents")
-                try:
-                    res_sup = supabase_client.table("support_requests").select("*").order("id", desc=True).execute()
-                    reqs = res_sup.data
-                except Exception: reqs = []
-
-                if reqs:
-                    for req in reqs:
-                        with st.expander(f"Demand #{req['id']} - {req['farmer_name']} ({req['sector']}) - {req['wilaya']}"):
-                            st.write(f"**Farmer Name:** {req['farmer_name']}")
-                            st.write(f"**Carte Fellah N°:** {req['carte_num']}")
-                            st.write(f"**Wilaya:** {req['wilaya']}")
-                            st.write(f"**Subsidized Sector:** {req['sector']}")
-                            st.write(f"**Notes:** {req.get('description', 'N/A')}")
-                            st.write(f"**Submitted Date:** {req.get('created_at')}")
-                            
-                            st.write("#### 📎 Inserted Documents & Papers:")
-                            files_map = req.get("files_json", {})
-                            if isinstance(files_map, dict):
-                                for doc_title, file_url in files_map.items():
-                                    st.markdown(f"👉 **{doc_title}:** [Download/View File ↗]({file_url})")
-                            else:
-                                st.caption("No file links formatted.")
-                else:
-                    st.info("No agricultural support demands received yet.")
-
-            # --- ADMIN TAB 3: PUBLISH NEWS & ANNOUNCEMENTS ---
-            with admin_tab3:
-                st.write("### 📢 Publish Official News & Press Release")
-                news_title = st.text_input("News Title / عنوان الخبر")
-                news_cat = st.selectbox("Category", ["Official Subsidy Announcement", "Ministerial Decree", "Seed & Fertilizer Release", "General News"])
-                news_content = st.text_area("News Details & Announcement Body")
-                
-                if st.button("Publish News Release", type="primary"):
-                    if news_title.strip() and news_content.strip():
-                        try:
-                            supabase_client.table("portal_news").insert({
-                                "title": sanitize(news_title),
-                                "category": news_cat,
-                                "content": sanitize(news_content)
-                            }).execute()
-                            st.success("News release published live!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error publishing news: {e}")
-
-                st.divider()
-                st.write("### Managed News Items")
-                try:
-                    res_all_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
-                    st.dataframe(pd.DataFrame(res_all_news.data), use_container_width=True)
-                except Exception: st.info("No news found.")
-                
-                del_news_id = st.number_input("Enter News ID to Delete", min_value=1, step=1, key="del_news_n")
-                if st.button("Delete News Entry"):
-                    try:
-                        supabase_client.table("portal_news").delete().eq("id", del_news_id).execute()
-                        st.success(f"News ID #{del_news_id} deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting news: {e}")
-
-            # --- ADMIN TAB 4: WEATHER ---
-            with admin_tab4:
-                st.write("### Publish Weather Warning")
-                w_title = st.text_input("Alert Title")
-                w_reg = st.selectbox("Target Wilaya", ["All Wilayas"] + WILAYAS_48)
-                w_sev = st.selectbox("Severity", ["🔴 Red Alert", "🟡 Yellow Alert", "🟢 Green Alert"])
-                w_msg = st.text_area("Instructions")
-                if st.button("Publish Alert"):
-                    try:
-                        supabase_client.table("weather_alerts").insert({
-                            "title": sanitize(w_title),
-                            "region": w_reg,
-                            "severity": w_sev,
-                            "message": sanitize(w_msg)
-                        }).execute()
-                        st.success("Alert published!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-            # --- ADMIN TAB 5: MARKETS ---
-            with admin_tab5:
-                st.write("### Add Market or Depot")
-                m_name = st.text_input("Location Name")
-                m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w")
-                m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo", "ASMIDAL Fertilizer Depot", "Agri-Equipment Supplier"])
-                m_addr = st.text_input("Address")
-                m_link = st.text_input("Google Maps URL")
-                if st.button("Add Location"):
-                    if m_name.strip():
-                        try:
-                            supabase_client.table("suppliers_directory").insert({
-                                "name": sanitize(m_name),
-                                "wilaya": m_wil,
-                                "category": m_cat,
-                                "address": sanitize(m_addr),
-                                "maps_link": sanitize(m_link)
-                            }).execute()
-                            st.success("Market location added!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error adding market location: {e}")
-                    else:
-                        st.error("Location Name cannot be empty.")
+                    maps_auto_url = f"https://maps.google.com/?q={m_lat},{m_lon}"
+                    supabase_client.table("suppliers_directory").insert({
+                        "name": sanitize(m_name),
+                        "wilaya": m_wil,
+                        "category": m_cat,
+                        "lat": m_lat,
+                        "lon": m_lon,
+                        "maps_link": maps_auto_url
+                    }).execute()
+                    st.success("Location added live to interactive map!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error adding location: {e}")
