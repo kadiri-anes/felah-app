@@ -17,9 +17,8 @@ def sanitize(text: str) -> str:
     return html.escape(text.strip())
 
 def hash_password(password: str) -> str:
-    """Hash password using SHA-256 with a salt."""
-    salt = "FelahPortalAlgeria2026SecureSalt"
-    return hashlib.sha256((salt + password).encode('utf-8')).hexdigest()
+    """Hash password using SHA-256."""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def get_admin_password() -> str:
     """Retrieve admin password securely from secrets or fallback."""
@@ -291,7 +290,7 @@ if st.session_state.active_tab == "home":
 
     st.divider()
 
-    # --- SERVICE 1: AGRICULTURAL SUPPORT DEMAND (جديد: طلب دعم الدولة) ---
+    # --- SERVICE 1: AGRICULTURAL SUPPORT DEMAND ---
     if st.session_state.selected_service == "support":
         st.subheader(t['support'])
         st.write("Submit official requests for Ministry subsidies (Geomembrane basins, well digging, solar, drip irrigation).")
@@ -330,12 +329,10 @@ if st.session_state.active_tab == "home":
                                 file_path = f"support_docs/{clean_filename}"
                                 file_bytes = file_obj.read()
                                 
-                                # Upload file bytes directly into Supabase Storage
                                 res = supabase.storage.from_("agricultural-docs").upload(file_path, file_bytes)
                                 public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
                                 uploaded_links[doc_name] = public_url
 
-                            # Save demand record into database
                             supabase.table("support_requests").insert({
                                 "farmer_name": st.session_state.farmer_name,
                                 "carte_num": st.session_state.carte_num,
@@ -349,7 +346,7 @@ if st.session_state.active_tab == "home":
                     except Exception as e:
                         st.error(f"Error submitting request: {e}")
 
-    # --- SERVICE 2: NEWS & ANNOUNCEMENTS (جديد: الأخبار والإعلانات) ---
+    # --- SERVICE 2: NEWS & ANNOUNCEMENTS ---
     elif st.session_state.selected_service == "news":
         st.subheader(t['news'])
         st.caption("Official press releases, ministerial updates, and sector announcements.")
@@ -438,7 +435,8 @@ if st.session_state.active_tab == "home":
         try:
             res = supabase.table("weather_alerts").select("*").order("id", desc=True).execute()
             alerts = res.data
-        except Exception: alerts = []
+        except Exception: 
+            alerts = []
         
         if alerts:
             for item in alerts:
@@ -467,7 +465,8 @@ if st.session_state.active_tab == "home":
         try:
             res = supabase.table("suppliers_directory").select("*").order("id", desc=True).execute()
             directory = res.data
-        except Exception: directory = []
+        except Exception: 
+            directory = []
         
         if directory:
             for item in directory:
@@ -547,7 +546,7 @@ elif st.session_state.active_tab == "account":
                     st.dataframe(pd.DataFrame(res_dec.data), use_container_width=True)
                 except Exception: st.info("No declarations available.")
 
-            # --- ADMIN TAB 2: REVIEW AGRICULTURAL SUPPORT REQUESTS (جديد: فحص طلبات الدعم والوثائق) ---
+            # --- ADMIN TAB 2: REVIEW AGRICULTURAL SUPPORT REQUESTS ---
             with admin_tab2:
                 st.write("### 📂 Review Submitted Support Demands & Attached Documents")
                 try:
@@ -575,7 +574,7 @@ elif st.session_state.active_tab == "account":
                 else:
                     st.info("No agricultural support demands received yet.")
 
-            # --- ADMIN TAB 3: PUBLISH NEWS & ANNOUNCEMENTS (جديد: نشر الأخبار) ---
+            # --- ADMIN TAB 3: PUBLISH NEWS & ANNOUNCEMENTS ---
             with admin_tab3:
                 st.write("### 📢 Publish Official News & Press Release")
                 news_title = st.text_input("News Title / عنوان الخبر")
@@ -620,10 +619,16 @@ elif st.session_state.active_tab == "account":
                 w_msg = st.text_area("Instructions")
                 if st.button("Publish Alert"):
                     try:
-                        supabase.table("weather_alerts").insert({"title": sanitize(w_title), "region": w_reg, "severity": w_sev, "message": sanitize(w_msg)}).execute()
+                        supabase.table("weather_alerts").insert({
+                            "title": sanitize(w_title),
+                            "region": w_reg,
+                            "severity": w_sev,
+                            "message": sanitize(w_msg)
+                        }).execute()
                         st.success("Alert published!")
                         st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
             # --- ADMIN TAB 5: MARKETS ---
             with admin_tab5:
@@ -634,8 +639,18 @@ elif st.session_state.active_tab == "account":
                 m_addr = st.text_input("Address")
                 m_link = st.text_input("Google Maps URL")
                 if st.button("Add Location"):
-                    try:
-                        supabase.table("suppliers_directory").insert({"name": sanitize(m_name), "wilaya": m_wil, "category": m_cat, "address": sanitize(m_addr), "maps_link": sanitize(m_link)}).execute()
-                        st.success("Location added!")
-                        st.rerun()
-                    except Exception as e: st.error(f"Error: {e}")
+                    if m_name.strip():
+                        try:
+                            supabase.table("suppliers_directory").insert({
+                                "name": sanitize(m_name),
+                                "wilaya": m_wil,
+                                "category": m_cat,
+                                "address": sanitize(m_addr),
+                                "maps_link": sanitize(m_link)
+                            }).execute()
+                            st.success("Market location added!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error adding market location: {e}")
+                    else:
+                        st.error("Location Name cannot be empty.")
