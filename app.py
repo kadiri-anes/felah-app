@@ -4,6 +4,7 @@ import qrcode
 import random
 import html
 import hashlib
+from datetime import date
 from io import BytesIO
 from st_supabase_connection import SupabaseConnection
 import folium
@@ -382,12 +383,15 @@ if st.session_state.active_tab == "home":
         else:
             st.info("📰 No official news releases published today.")
 
-    # --- SERVICE 3: DECLARATION & QUOTA SYSTEM ---
+    # --- SERVICE 3: DECLARATION & QUOTA SYSTEM (WITH CULTIVATION START DATE) ---
     elif st.session_state.selected_service == "crop":
         st.subheader(t['crop'])
         selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
         cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
         area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=10000.0)
+        
+        # New Field: Date of Starting Cultivation
+        start_date = st.date_input("Date of Starting Cultivation / تاريخ بداية الزراعة", value=date.today())
         
         if cat_choice == "Fruits (فواكه)":
             selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
@@ -412,21 +416,22 @@ if st.session_state.active_tab == "home":
                         "wilaya": selected_w,
                         "category": cat_choice,
                         "crop": selected_c,
-                        "area": area_ha
+                        "area": area_ha,
+                        "start_date": str(start_date)
                     }).execute()
                     
                     st.success("Declaration registered successfully!")
-                    qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA"
+                    qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA|START:{start_date}"
                     qr = qrcode.make(qr_payload)
                     buf = BytesIO()
                     qr.save(buf, format="PNG")
-                    st.image(buf.getvalue(), caption="Official QR Permit", width=220)
+                    st.image(buf.getvalue(), caption=f"Official QR Permit (Start Date: {start_date})", width=220)
                 except Exception as e:
                     st.error(f"Failed to record declaration: {e}")
             else:
                 st.warning("Please log in first.")
 
-    # --- SERVICE 4: WEATHER ALERTS (SEVERITY MATCHED COLORING) ---
+    # --- SERVICE 4: WEATHER ALERTS ---
     elif st.session_state.selected_service == "weather":
         st.subheader(t['weather'])
         
@@ -778,7 +783,7 @@ elif st.session_state.active_tab == "account":
             else:
                 st.info("No support demands submitted yet.")
 
-        # --- SLIDE 5: DECLARATIONS ---
+        # --- SLIDE 5: DECLARATIONS (INCLUDES CULTIVATION START DATE) ---
         with tab_d:
             st.write("### 🌱 Crop Area Declarations Database")
             try:
