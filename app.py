@@ -231,15 +231,20 @@ with st.sidebar:
     if not st.session_state.logged_in:
         auth_choice = st.radio("Action:", ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password (نسيان كلمة السر)"], key="sb_auth_choice")
         
-        # LOG IN
+        # LOG IN WITH CAPTCHA CHECKBOX
         if "Log In" in auth_choice:
             login_email = st.text_input("Email / البريد الإلكتروني", key="sb_l_email")
             login_pass = st.text_input("Password / كلمة السر", type="password", key="sb_l_pass")
             
+            # CAPTCHA "I'm not a robot" Checkbox
+            captcha_check = st.checkbox("🤖 I'm not a robot / أنا لست روبوت", key="sb_captcha")
+            
             if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
-                if login_email and login_pass:
+                if not captcha_check:
+                    st.error("⚠️ Please check the CAPTCHA box to confirm you are not a robot.")
+                elif login_email and login_pass:
                     try:
-                        # 1. Authenticate with Supabase Auth
+                        # Authenticate with Supabase Auth
                         auth_res = supabase_client.auth.sign_in_with_password({
                             "email": login_email.strip(),
                             "password": login_pass
@@ -247,7 +252,7 @@ with st.sidebar:
                         
                         if auth_res.user:
                             user_id = auth_res.user.id
-                            # 2. Retrieve additional profile metadata
+                            # Retrieve user profile from farmer_profiles table
                             res = supabase_client.table("farmer_profiles").select("*").eq("id", user_id).execute()
                             
                             if res and res.data:
@@ -261,11 +266,15 @@ with st.sidebar:
                             else:
                                 st.error("User profile data not found.")
                     except Exception as e:
-                        st.error(f"Login failed: {e}")
+                        err_str = str(e)
+                        if "Email not confirmed" in err_str:
+                            st.error("❌ Login failed: Email not confirmed! Please check your inbox and confirm your email address.")
+                        else:
+                            st.error(f"Login failed: {e}")
                 else:
                     st.warning("Please fill all fields.")
         
-        # REGISTER NEW FARMER (OPTION B IMPLEMENTATION)
+        # REGISTER NEW FARMER WITH EMAIL CONFIRMATION NOTIFICATION
         elif "Register" in auth_choice:
             reg_name = st.text_input("Full Name / الاسم الكامل", key="sb_r_name")
             reg_email = st.text_input("Email / البريد الإلكتروني", key="sb_r_email")
@@ -279,7 +288,7 @@ with st.sidebar:
                         clean_name = sanitize(reg_name)
                         clean_card = sanitize(reg_card)
 
-                        # Step 1: Create the Auth User in Supabase
+                        # Step 1: Register in Supabase Auth
                         auth_response = supabase_client.auth.sign_up({
                             "email": clean_email,
                             "password": reg_pass
@@ -288,7 +297,7 @@ with st.sidebar:
                         if auth_response.user:
                             user_id = auth_response.user.id
                             
-                            # Step 2: Insert into farmer_profiles using the matching auth user_id
+                            # Step 2: Save profile data into farmer_profiles table
                             supabase_client.table("farmer_profiles").insert({
                                 "id": user_id,
                                 "email": clean_email,
@@ -296,12 +305,16 @@ with st.sidebar:
                                 "carte_num": clean_card
                             }).execute()
 
-                            st.session_state.logged_in = True
-                            st.session_state.farmer_name = clean_name
-                            st.session_state.farmer_email = clean_email
-                            st.session_state.carte_num = clean_card
-                            st.success("Registration completed successfully!")
-                            st.rerun()
+                            # Check if session exists (If email confirmation is enabled, session will be None)
+                            if auth_response.session is None:
+                                st.info(f"📩 **Confirmation Email Sent!**\n\nWe sent a verification link to `{clean_email}`. Please open your inbox and confirm your email address before logging in.")
+                            else:
+                                st.session_state.logged_in = True
+                                st.session_state.farmer_name = clean_name
+                                st.session_state.farmer_email = clean_email
+                                st.session_state.carte_num = clean_card
+                                st.success("Registration completed successfully!")
+                                st.rerun()
                         else:
                             st.error("Failed to generate Auth user account.")
                     except Exception as e:
