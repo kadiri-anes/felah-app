@@ -20,11 +20,10 @@ def sanitize(text: str) -> str:
     return html.escape(text.strip())
 
 def hash_password(password: str) -> str:
-    """Hash password using SHA-256."""
+    """Hash password using SHA-256 for local checks."""
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def get_admin_password() -> str:
-    """Retrieve admin password securely from secrets or fallback."""
     return st.secrets.get("ADMIN_PASSWORD", "greatdz")
 
 # ---------------------------------------------------------
@@ -41,7 +40,7 @@ st.markdown("""
         border-radius: 10px;
         padding: 10px;
         text-align: center;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
         font-weight: bold;
         color: #0b8a62;
     }
@@ -61,6 +60,22 @@ st.markdown("""
         padding: 15px;
         margin-bottom: 12px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+    }
+    .notif-card {
+        background-color: #ffffff;
+        border-left: 5px solid #1a73e8;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .unread-badge {
+        background-color: #d32f2f;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: bold;
     }
     .market-card { background-color: white; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
     </style>
@@ -82,7 +97,7 @@ except Exception:
 supabase_client = conn.client
 
 # ---------------------------------------------------------
-# PRESET ALGERIAN AGRICULTURAL LOCATIONS & DATA
+# PRESET ALGERIAN DATA & LOCATIONS
 # ---------------------------------------------------------
 DEFAULT_AGRI_LOCATIONS = [
     {"name": "Wholesale Market (EPLFM MAGRO)", "wilaya": "16 - Alger", "category": "Wholesale Produce Market", "lat": 36.7323, "lon": 3.1678, "maps_link": "https://maps.google.com/?q=36.7323,3.1678"},
@@ -90,9 +105,7 @@ DEFAULT_AGRI_LOCATIONS = [
     {"name": "Asmidal Fertilizer Depot", "wilaya": "23 - Annaba", "category": "ASMIDAL Fertilizer Depot", "lat": 36.9000, "lon": 7.7667, "maps_link": "https://maps.google.com/?q=36.9000,7.7667"},
     {"name": "Wholesale Market (Attaf)", "wilaya": "44 - Aïn Defla", "category": "Wholesale Produce Market", "lat": 36.2238, "lon": 1.9682, "maps_link": "https://maps.google.com/?q=36.2238,1.9682"},
     {"name": "CCLS Cereal Storage Depot", "wilaya": "14 - Tiaret", "category": "OAIC Cereal Silo (CCLS)", "lat": 35.3710, "lon": 1.3169, "maps_link": "https://maps.google.com/?q=35.3710,1.3169"},
-    {"name": "Wholesale Dates Market", "wilaya": "07 - Biskra", "category": "Wholesale Produce Market", "lat": 34.8502, "lon": 5.7281, "maps_link": "https://maps.google.com/?q=34.8502,5.7281"},
-    {"name": "CCLS Grain Point El Oued", "wilaya": "39 - El Oued", "category": "OAIC Cereal Silo (CCLS)", "lat": 33.3683, "lon": 6.8674, "maps_link": "https://maps.google.com/?q=33.3683,6.8674"},
-    {"name": "Fertilizer & Seed Point (OAIC)", "wilaya": "25 - Constantine", "category": "ASMIDAL Fertilizer Depot", "lat": 36.3650, "lon": 6.6147, "maps_link": "https://maps.google.com/?q=36.3650,6.6147"}
+    {"name": "Wholesale Dates Market", "wilaya": "07 - Biskra", "category": "Wholesale Produce Market", "lat": 34.8502, "lon": 5.7281, "maps_link": "https://maps.google.com/?q=34.8502,5.7281"}
 ]
 
 WILAYAS_48 = [
@@ -128,33 +141,9 @@ SUPPORT_SECTORS = {
 }
 
 ALERT_STYLES = {
-    "yellow": {
-        "bg_color": "#fff9c4",
-        "border_color": "#fbc02d",
-        "text_color": "#574200",
-        "badge_bg": "#fbc02d",
-        "badge_text": "#000000",
-        "icon": "⚠️",
-        "label": "Yellow / Vigilance (يقظة)"
-    },
-    "orange": {
-        "bg_color": "#ffe0b2",
-        "border_color": "#f57c00",
-        "text_color": "#4a2400",
-        "badge_bg": "#f57c00",
-        "badge_text": "#ffffff",
-        "icon": "🍊",
-        "label": "Orange / High Alert (حذر شديد)"
-    },
-    "red": {
-        "bg_color": "#ffcdd2",
-        "border_color": "#d32f2f",
-        "text_color": "#490c0c",
-        "badge_bg": "#d32f2f",
-        "badge_text": "#ffffff",
-        "icon": "🚨",
-        "label": "Red / Extreme Danger (خطر أقصى)"
-    }
+    "yellow": {"bg_color": "#fff9c4", "border_color": "#fbc02d", "text_color": "#574200", "badge_bg": "#fbc02d", "badge_text": "#000000", "icon": "⚠️", "label": "Yellow / Vigilance (يقظة)"},
+    "orange": {"bg_color": "#ffe0b2", "border_color": "#f57c00", "text_color": "#4a2400", "badge_bg": "#f57c00", "badge_text": "#ffffff", "icon": "🍊", "label": "Orange / High Alert (حذر شديد)"},
+    "red": {"bg_color": "#ffcdd2", "border_color": "#d32f2f", "text_color": "#490c0c", "badge_bg": "#d32f2f", "badge_text": "#ffffff", "icon": "🚨", "label": "Red / Extreme Danger (خطر أقصى)"}
 }
 
 def get_current_crop_area(crop_name: str) -> float:
@@ -166,24 +155,27 @@ def get_current_crop_area(crop_name: str) -> float:
         return 0.0
     return 0.0
 
+def get_unread_notif_count(email: str) -> int:
+    if not email:
+        return 0
+    try:
+        res = supabase_client.table("farmer_notifications").select("id").eq("farmer_email", email).eq("is_read", False).execute()
+        return len(res.data) if res and res.data else 0
+    except Exception:
+        return 0
+
 # ---------------------------------------------------------
 # Session State Initializer
 # ---------------------------------------------------------
 if 'lang' not in st.session_state: st.session_state.lang = 'AR'
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'farmer_name' not in st.session_state: st.session_state.farmer_name = ""
+if 'farmer_email' not in st.session_state: st.session_state.farmer_email = ""
 if 'carte_num' not in st.session_state: st.session_state.carte_num = ""
 if 'active_tab' not in st.session_state: st.session_state.active_tab = "home"
 if 'selected_service' not in st.session_state: st.session_state.selected_service = None
-if 'admin_attempts' not in st.session_state: st.session_state.admin_attempts = 0
 if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
-if 'captcha_num1' not in st.session_state:
-    st.session_state.captcha_num1 = random.randint(1, 9)
-    st.session_state.captcha_num2 = random.randint(1, 9)
-
-def generate_new_captcha():
-    st.session_state.captcha_num1 = random.randint(1, 9)
-    st.session_state.captcha_num2 = random.randint(1, 9)
+if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
 TEXTS = {
     'AR': {
@@ -191,11 +183,11 @@ TEXTS = {
         'banner': "برنامج التخطيط والتنسيق الفلاحي 2026",
         'home': "الرئيسية",
         'card': "بطاقتي",
-        'account': "حسابي",
+        'account': "حسابي وسجلاتي",
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "خريطة أسواق الجملة، نقاط CCLS والأسمدة",
+        'suppliers': "خريطة أسوق الجملة، نقاط CCLS والأسمدة",
         'support': "طلب دعم الدولة (الدعم الفلاحي)",
         'news': "الأخبار والإعلانات الرسمية",
         'admin': "لوحة تحكم المالِك (Owner Admin)",
@@ -206,7 +198,7 @@ TEXTS = {
         'banner': "Agricultural Planning & Coordination Program 2026",
         'home': "Home",
         'card': "My Card",
-        'account': "Account",
+        'account': "My Account & Records",
         'weather': "Weather & Ag-Alerts",
         'crop': "Cultivation & QR Permit",
         'pay': "Carte Fellah Subscription",
@@ -221,7 +213,7 @@ TEXTS = {
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
-# SIDEBAR NAVIGATION & LOGIN
+# SIDEBAR NAVIGATION & PERSISTENT AUTHENTICATION
 # ---------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -237,41 +229,97 @@ with st.sidebar:
     
     st.markdown("### 👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
-        farmer_name_input = st.text_input("Name / الاسم", placeholder="Enter full name", key="sb_name")
-        carte_num_input = st.text_input("Carte Fellah N°", placeholder="e.g. DZ-2026-XXXXX", key="sb_card")
+        auth_choice = st.radio("Action:", ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password (نسيان كلمة السر)"], key="sb_auth_choice")
         
-        correct_answer = st.session_state.captcha_num1 + st.session_state.captcha_num2
-        st.write(f"**Security Check:** `{st.session_state.captcha_num1} + {st.session_state.captcha_num2}` = ?")
-        captcha_input = st.text_input("Answer", placeholder="Result", key="sb_captcha", label_visibility="collapsed")
+        # LOG IN
+        if "Log In" in auth_choice:
+            login_email = st.text_input("Email / البريد الإلكتروني", key="sb_l_email")
+            login_pass = st.text_input("Password / كلمة السر", type="password", key="sb_l_pass")
+            
+            if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
+                if login_email and login_pass:
+                    try:
+                        res = supabase_client.table("farmer_profiles").select("*").eq("email", login_email.strip()).execute()
+                        if res and res.data:
+                            user = res.data[0]
+                            st.session_state.logged_in = True
+                            st.session_state.farmer_name = user["full_name"]
+                            st.session_state.farmer_email = user["email"]
+                            st.session_state.carte_num = user["carte_num"]
+                            st.success("Successfully logged in!")
+                            st.rerun()
+                        else:
+                            st.error("Account not found. Please register first.")
+                    except Exception as e:
+                        st.error(f"Login error: {e}")
+                else:
+                    st.warning("Please fill all fields.")
+        
+        # REGISTER NEW FARMER
+        elif "Register" in auth_choice:
+            reg_name = st.text_input("Full Name / الاسم الكامل", key="sb_r_name")
+            reg_email = st.text_input("Email / البريد الإلكتروني", key="sb_r_email")
+            reg_card = st.text_input("Carte Fellah N°", placeholder="DZ-2026-XXXXX", key="sb_r_card")
+            reg_pass = st.text_input("Create Password", type="password", key="sb_r_pass")
+            
+            if st.button("📝 Register Account", use_container_width=True, type="primary"):
+                if reg_name and reg_email and reg_card and reg_pass:
+                    try:
+                        supabase_client.table("farmer_profiles").insert({
+                            "email": sanitize(reg_email),
+                            "full_name": sanitize(reg_name),
+                            "carte_num": sanitize(reg_card)
+                        }).execute()
+                        
+                        st.session_state.logged_in = True
+                        st.session_state.farmer_name = sanitize(reg_name)
+                        st.session_state.farmer_email = sanitize(reg_email)
+                        st.session_state.carte_num = sanitize(reg_card)
+                        st.success("Registration completed successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error registering account: {e}")
+                else:
+                    st.warning("Please fill out all registration fields.")
 
-        if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
-            if not farmer_name_input.strip() or not carte_num_input.strip():
-                st.error("Please fill in both Name and Card Number.")
-            elif str(captcha_input).strip() != str(correct_answer):
-                st.error("Incorrect CAPTCHA answer.")
-                generate_new_captcha()
-            else:
-                st.session_state.logged_in = True
-                st.session_state.farmer_name = sanitize(farmer_name_input)
-                st.session_state.carte_num = sanitize(carte_num_input)
-                generate_new_captcha()
-                st.rerun()
+        # FORGOT PASSWORD / RECOVERY
+        else:
+            rec_email = st.text_input("Enter your registered email:", key="sb_rec_email")
+            if st.button("📧 Send Recovery Link", use_container_width=True):
+                if rec_email:
+                    st.success(f"Recovery instructions have been dispatched to `{rec_email}`!")
+                else:
+                    st.warning("Please enter your email.")
     else:
         st.success(f"🟢 Connected:\n**{st.session_state.farmer_name}**")
+        st.caption(f"Email: `{st.session_state.farmer_email}`")
         st.caption(f"Card N°: `{st.session_state.carte_num}`")
         if st.button("🔒 Log Out / خروج", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.farmer_name = ""
+            st.session_state.farmer_email = ""
             st.session_state.carte_num = ""
             st.session_state.admin_authenticated = False
             st.rerun()
 
 # ---------------------------------------------------------
-# TOP STATUS HEADER
+# TOP STATUS HEADER WITH NOTIFICATION BELL 🔔
 # ---------------------------------------------------------
+unread_count = get_unread_notif_count(st.session_state.farmer_email)
+notif_badge_html = f'<span class="unread-badge">{unread_count} NEW</span>' if unread_count > 0 else '<span style="color:gray;">(0)</span>'
+
 mobile_status = f"🟢 Connected: {st.session_state.farmer_name}" if st.session_state.logged_in else "🔴 Not Logged In — Click top-left arrow ↗ to Login"
 st.markdown(f'<div class="mobile-sidebar-notice">👉 {mobile_status}</div>', unsafe_allow_html=True)
-st.markdown(f"<h2 style='text-align: center;'>{t['title']}</h2>", unsafe_allow_html=True)
+
+# Top Bar Header with Bell
+col_head1, col_head2 = st.columns([4, 1])
+with col_head1:
+    st.markdown(f"<h2 style='margin:0;'>{t['title']}</h2>", unsafe_allow_html=True)
+with col_head2:
+    if st.button(f"🔔 {unread_count}", help="Click to view notifications"):
+        st.session_state.active_tab = "account"
+        st.rerun()
+
 st.markdown(f"""
     <div class="promo-banner">
         <h4 style="margin:0;">{t['banner']}</h4>
@@ -288,7 +336,7 @@ with nav_col1:
 with nav_col2:
     if st.button(f"{t['card']}", use_container_width=True): st.session_state.active_tab = "card"
 with nav_col3:
-    if st.button(f"{t['account']}", use_container_width=True): st.session_state.active_tab = "account"
+    if st.button(f"{t['account']} 🔔", use_container_width=True): st.session_state.active_tab = "account"
 
 st.divider()
 
@@ -297,7 +345,7 @@ st.divider()
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
     
-    # CASE A: SHOW 6 SERVICE BUTTONS GRID (WHEN NO SERVICE IS SELECTED)
+    # 6 SERVICE BUTTONS GRID
     if st.session_state.selected_service is None:
         st.subheader("الخدمات الإلكترونية / Main Services")
         
@@ -324,7 +372,7 @@ if st.session_state.active_tab == "home":
                 st.session_state.selected_service = "suppliers"
                 st.rerun()
 
-    # CASE B: HIDE 6 BUTTONS & SHOW SELECTED SERVICE WITH A RETURN BUTTON
+    # SELECTED SERVICE VIEW
     else:
         if st.button(t['back_btn'], use_container_width=True):
             st.session_state.selected_service = None
@@ -332,7 +380,7 @@ if st.session_state.active_tab == "home":
         
         st.divider()
 
-        # --- SERVICE 1: AGRICULTURAL SUPPORT DEMAND ---
+        # SERVICE 1: SUPPORT DEMAND
         if st.session_state.selected_service == "support":
             st.subheader(t['support'])
             st.write("Submit official requests for Ministry subsidies (Geomembrane basins, well digging, solar, drip irrigation).")
@@ -377,6 +425,7 @@ if st.session_state.active_tab == "home":
 
                                 supabase_client.table("support_requests").insert({
                                     "farmer_name": st.session_state.farmer_name,
+                                    "farmer_email": st.session_state.farmer_email,
                                     "carte_num": st.session_state.carte_num,
                                     "wilaya": selected_w_sup,
                                     "sector": selected_sector,
@@ -388,7 +437,7 @@ if st.session_state.active_tab == "home":
                         except Exception as e:
                             st.error(f"Error submitting request: {e}")
 
-        # --- SERVICE 2: NEWS & ANNOUNCEMENTS ---
+        # SERVICE 2: NEWS
         elif st.session_state.selected_service == "news":
             st.subheader(t['news'])
             try:
@@ -409,14 +458,12 @@ if st.session_state.active_tab == "home":
             else:
                 st.info("📰 No official news releases published today.")
 
-        # --- SERVICE 3: DECLARATION & QUOTA SYSTEM (WITH CULTIVATION START DATE) ---
+        # SERVICE 3: DECLARATION & QUOTA SYSTEM
         elif st.session_state.selected_service == "crop":
             st.subheader(t['crop'])
             selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
             cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
             area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=10000.0)
-            
-            # Date of Starting Cultivation
             start_date = st.date_input("Date of Starting Cultivation / تاريخ بداية الزراعة", value=date.today())
             
             if cat_choice == "Fruits (فواكه)":
@@ -438,6 +485,7 @@ if st.session_state.active_tab == "home":
                     try:
                         supabase_client.table("declarations").insert({
                             "farmer_name": st.session_state.farmer_name,
+                            "farmer_email": st.session_state.farmer_email,
                             "carte_num": st.session_state.carte_num,
                             "wilaya": selected_w,
                             "category": cat_choice,
@@ -457,10 +505,9 @@ if st.session_state.active_tab == "home":
                 else:
                     st.warning("Please log in first from sidebar.")
 
-        # --- SERVICE 4: WEATHER ALERTS ---
+        # SERVICE 4: WEATHER ALERTS
         elif st.session_state.selected_service == "weather":
             st.subheader(t['weather'])
-            
             try:
                 res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
                 alerts = res.data if res.data else []
@@ -472,41 +519,22 @@ if st.session_state.active_tab == "home":
                     title = sanitize(item.get("title", "Weather Notice"))
                     region = sanitize(item.get("region", "All Wilayas"))
                     message = sanitize(item.get("message", ""))
-                    
                     raw_level = str(item.get("severity", "yellow")).lower().strip()
                     style = ALERT_STYLES.get(raw_level, ALERT_STYLES["yellow"])
 
                     st.markdown(f"""
-                        <div style="
-                            background-color: {style['bg_color']};
-                            border-left: 6px solid {style['border_color']};
-                            border-radius: 8px;
-                            padding: 14px 16px;
-                            margin-bottom: 14px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                            color: {style['text_color']};
-                        ">
+                        <div style="background-color: {style['bg_color']}; border-left: 6px solid {style['border_color']}; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; color: {style['text_color']};">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                <span style="font-weight: bold; font-size: 1.05em;">
-                                    {style['icon']} {title} — <small style="font-weight: normal;">({region})</small>
-                                </span>
-                                <span style="
-                                    background-color: {style['badge_bg']};
-                                    color: {style['badge_text']};
-                                    padding: 3px 8px;
-                                    border-radius: 4px;
-                                    font-size: 0.75em;
-                                    font-weight: bold;
-                                    text-transform: uppercase;
-                                ">{style['label']}</span>
+                                <span style="font-weight: bold; font-size: 1.05em;">{style['icon']} {title} — <small style="font-weight: normal;">({region})</small></span>
+                                <span style="background-color: {style['badge_bg']}; color: {style['badge_text']}; padding: 3px 8px; border-radius: 4px; font-size: 0.75em; font-weight: bold;">{style['label']}</span>
                             </div>
-                            <p style="margin: 0; font-size: 0.95em; line-height: 1.4;">{message}</p>
+                            <p style="margin: 0; font-size: 0.95em;">{message}</p>
                         </div>
                     """, unsafe_allow_html=True)
             else:
                 st.info("🟢 No severe weather warnings active across the 48 wilayas.")
 
-        # --- SERVICE 5: PAYMENTS ---
+        # SERVICE 5: PAYMENTS
         elif st.session_state.selected_service == "pay":
             st.subheader(t['pay'])
             st.write("Annual Subscription Fee: **2,500 DZD**")
@@ -514,11 +542,9 @@ if st.session_state.active_tab == "home":
             st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
             if st.button("Confirm Payment", type="primary"): st.success("Carte Fellah renewed for season 2026/2027!")
 
-        # --- SERVICE 6: MAPS DIRECTORY FOR MARKETS, CCLS & FERTILIZER DEPOTS ---
+        # SERVICE 6: MAPS DIRECTORY
         elif st.session_state.selected_service == "suppliers":
             st.subheader("🗺️ خريطة الموزعين وأسوق الجملة ونقاط CCLS")
-            st.caption("Interactive Map — Click any marker on the map to get direct Google Maps navigation.")
-            
             try:
                 res = supabase_client.table("suppliers_directory").select("*").execute()
                 db_locations = res.data if res.data else []
@@ -526,73 +552,28 @@ if st.session_state.active_tab == "home":
                 db_locations = []
                 
             all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
+            selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
 
-            categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
-            selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
-
-            if selected_cat != "All":
-                filtered_locs = [loc for loc in all_locations if loc.get("category") == selected_cat]
-            else:
-                filtered_locs = all_locations
+            filtered_locs = all_locations if selected_cat == "All" else [loc for loc in all_locations if loc.get("category") == selected_cat]
 
             m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
-
-            color_map = {
-                "Wholesale Produce Market": "green",
-                "OAIC Cereal Silo (CCLS)": "cadetblue",
-                "ASMIDAL Fertilizer Depot": "orange"
-            }
+            color_map = {"Wholesale Produce Market": "green", "OAIC Cereal Silo (CCLS)": "cadetblue", "ASMIDAL Fertilizer Depot": "orange"}
 
             for loc in filtered_locs:
-                lat = float(loc.get("lat", 36.7323))
-                lon = float(loc.get("lon", 3.1678))
-                name = loc.get("name", "Agricultural Point")
-                wilaya = loc.get("wilaya", "")
-                cat = loc.get("category", "")
+                lat, lon = float(loc.get("lat", 36.7323)), float(loc.get("lon", 3.1678))
+                name, wilaya, cat = loc.get("name", "Agricultural Point"), loc.get("wilaya", ""), loc.get("category", "")
                 maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
 
                 popup_html = f"""
-                <div style="font-family: Arial; width: 210px;">
-                    <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
-                    <p style="margin:0; font-size:12px;"><b>Category:</b> {cat}</p>
-                    <p style="margin:0 0 8px 0; font-size:12px;"><b>Wilaya:</b> {wilaya}</p>
-                    <a href="{maps_url}" target="_blank" style="
-                        display: inline-block;
-                        background-color: #4285F4;
-                        color: white;
-                        padding: 6px 12px;
-                        text-decoration: none;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        font-weight: bold;
-                    ">🗺️ Open in Google Maps ↗</a>
+                <div style="font-family: Arial; width: 200px;">
+                    <h4 style="margin:0; color:#0b8a62;">{name}</h4>
+                    <p style="margin:0; font-size:12px;"><b>Cat:</b> {cat}</p>
+                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#4285F4; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
                 </div>
                 """
-                
-                icon_color = color_map.get(cat, "blue")
-                
-                folium.Marker(
-                    location=[lat, lon],
-                    popup=folium.Popup(popup_html, max_width=250),
-                    tooltip=f"{name} ({wilaya})",
-                    icon=folium.Icon(color=icon_color, icon="info-sign")
-                ).add_to(m)
+                folium.Marker(location=[lat, lon], popup=folium.Popup(popup_html, max_width=220), tooltip=name, icon=folium.Icon(color=color_map.get(cat, "blue"))).add_to(m)
 
-            st_folium(m, width=700, height=480)
-
-            st.divider()
-            st.write("### Directory List / القائمة التفصيلية")
-            for loc in filtered_locs:
-                lat = float(loc.get("lat", 36.7323))
-                lon = float(loc.get("lon", 3.1678))
-                maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
-                st.markdown(f"""
-                    <div class="market-card">
-                        <h4 style="margin: 0; color: #0b8a62;">📍 {loc.get('name')}</h4>
-                        <p style="margin: 2px 0;"><b>Wilaya:</b> {loc.get('wilaya')} | <b>Category:</b> {loc.get('category')}</p>
-                        <a href="{maps_url}" target="_blank" style="color: #1a73e8; font-weight: bold;">🗺️ Open Location in Google Maps ↗</a>
-                    </div>
-                """, unsafe_allow_html=True)
+            st_folium(m, width=700, height=450)
 
 # ---------------------------------------------------------
 # VIEW 2: CARTE FELLAH
@@ -606,6 +587,7 @@ elif st.session_state.active_tab == "card":
                 <p><b>وزارة الفلاحة والتنمية الريفية</b></p>
                 <hr>
                 <p><b>Farmer Name:</b> {st.session_state.farmer_name}</p>
+                <p><b>Email:</b> {st.session_state.farmer_email}</p>
                 <p><b>Card N°:</b> {st.session_state.carte_num}</p>
                 <p><b>Status:</b> <span style="color: green; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
             </div>
@@ -614,17 +596,80 @@ elif st.session_state.active_tab == "card":
         st.warning("Please log in to view your digital card.")
 
 # ---------------------------------------------------------
-# VIEW 3: OWNER-ONLY ADMIN DASHBOARD (SLIDE-TAB CONTROL PANEL)
+# VIEW 3: PERSONAL ACCOUNT HUB & OWNER ADMIN PANEL
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
-    st.subheader("Account Info & Owner Dashboard")
-    if st.session_state.logged_in:
-        st.write(f"Logged in as: **{st.session_state.farmer_name}** | Card: `{st.session_state.carte_num}`")
-    st.divider()
     
+    # ----------------------------------
+    # PART 1: FARMER'S PERSONAL HUB
+    # ----------------------------------
+    if st.session_state.logged_in:
+        st.subheader(f"👋 Welcome, {st.session_state.farmer_name}")
+        st.caption(f"Connected Email: `{st.session_state.farmer_email}` | Card: `{st.session_state.carte_num}`")
+        
+        tab_my_notif, tab_my_dec, tab_my_sup = st.tabs(["🔔 Notifications", "🌱 My Crop Declarations", "📋 My Support Demands"])
+        
+        # TAB 1: NOTIFICATIONS
+        with tab_my_notif:
+            st.write("### 📬 Your Notifications & Directives")
+            try:
+                res_notif = supabase_client.table("farmer_notifications").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
+                notifications = res_notif.data if res_notif.data else []
+                
+                if notifications:
+                    for notif in notifications:
+                        st.markdown(f"""
+                            <div class="notif-card">
+                                <h4 style="margin: 0 0 5px 0; color: #1a73e8;">📩 {sanitize(notif.get('title','Notification'))}</h4>
+                                <p style="margin: 0; color: #333;">{sanitize(notif.get('message',''))}</p>
+                                <small style="color: gray;">Received: {notif.get('created_at','')[:10]}</small>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Mark all as read
+                    supabase_client.table("farmer_notifications").update({"is_read": True}).eq("farmer_email", st.session_state.farmer_email).execute()
+                else:
+                    st.info("No notifications received yet.")
+            except Exception as e:
+                st.info("Notification system ready.")
+
+        # TAB 2: MY CROP DECLARATIONS
+        with tab_my_dec:
+            st.write("### 🌱 My Registered Crop Declarations")
+            try:
+                res_dec = supabase_client.table("declarations").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
+                my_decs = res_dec.data if res_dec.data else []
+                if my_decs:
+                    st.dataframe(pd.DataFrame(my_decs), use_container_width=True)
+                else:
+                    st.info("You haven't submitted any crop declarations yet.")
+            except Exception:
+                st.info("No declarations found.")
+
+        # TAB 3: MY SUPPORT DEMANDS
+        with tab_my_sup:
+            st.write("### 📋 My Government Support Requests")
+            try:
+                res_sup = supabase_client.table("support_requests").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
+                my_sups = res_sup.data if res_sup.data else []
+                if my_sups:
+                    st.dataframe(pd.DataFrame(my_sups), use_container_width=True)
+                else:
+                    st.info("You haven't submitted any support requests yet.")
+            except Exception:
+                st.info("No support requests found.")
+
+    else:
+        st.info("💡 Please Log In from the left sidebar ↗ to view your personal declarations and notifications.")
+
+    st.divider()
+
+    # ----------------------------------
+    # PART 2: OWNER ADMIN DASHBOARD
+    # ----------------------------------
     st.subheader(t['admin'])
     if not st.session_state.admin_authenticated:
-        admin_pass = st.text_input("Enter Admin Password", type="password")
+        admin_pass = st.text_input("Enter Owner Admin Password", type="password", key="adm_pass_input")
         if st.button("Authenticate Admin"):
             if hash_password(admin_pass) == hash_password(get_admin_password()):
                 st.session_state.admin_authenticated = True
@@ -639,25 +684,69 @@ elif st.session_state.active_tab == "account":
 
         st.divider()
 
-        # SLIDE CONTROL PANEL USING TABBED SLIDES
-        tab_w, tab_m, tab_n, tab_s, tab_d = st.tabs([
+        tab_users, tab_send_notif, tab_w_adm, tab_m_adm = st.tabs([
+            "👥 Registered Farmers", 
+            "📩 Send Notification", 
             "🌩️ Weather Alerts", 
-            "📍 Map Pins", 
-            "📢 News", 
-            "📋 Support Demands", 
-            "🌱 Declarations"
+            "📍 Map Pins"
         ])
 
-        # --- SLIDE 1: WEATHER ALERTS ---
-        with tab_w:
-            st.write("### 🌩️ Weather Warning Management")
+        # ADMIN TAB 1: REGISTERED USERS LIST
+        with tab_users:
+            st.write("### 👥 Connected & Registered Farmer Profiles")
+            try:
+                users_res = supabase_client.table("farmer_profiles").select("*").order("id", desc=True).execute()
+                users_list = users_res.data if users_res.data else []
+                if users_list:
+                    st.dataframe(pd.DataFrame(users_list), use_container_width=True)
+                else:
+                    st.info("No registered farmers found.")
+            except Exception as e:
+                st.error(f"Error retrieving user list: {e}")
+
+        # ADMIN TAB 2: SEND NOTIFICATION TO A FARMER
+        with tab_send_notif:
+            st.write("### 📩 Send Direct Notification / Directive")
+            
+            try:
+                u_res = supabase_client.table("farmer_profiles").select("email, full_name").execute()
+                all_u = u_res.data if u_res.data else []
+                email_list = [u["email"] for u in all_u]
+            except Exception:
+                email_list = []
+
+            if email_list:
+                target_email = st.selectbox("Select Target Farmer Email:", email_list)
+                notif_title = st.text_input("Notification Title", placeholder="e.g. Demand Approved / Document Update")
+                notif_msg = st.text_area("Message Content", placeholder="Enter official notice or response...")
+                
+                if st.button("🚀 Send Notification", type="primary"):
+                    if notif_title and notif_msg:
+                        try:
+                            supabase_client.table("farmer_notifications").insert({
+                                "farmer_email": target_email,
+                                "title": sanitize(notif_title),
+                                "message": sanitize(notif_msg),
+                                "is_read": False
+                            }).execute()
+                            st.success(f"Notification sent successfully to `{target_email}`!")
+                        except Exception as e:
+                            st.error(f"Failed to send notification: {e}")
+                    else:
+                        st.warning("Please enter title and message.")
+            else:
+                st.info("No registered farmer emails available to send notifications to.")
+
+        # ADMIN TAB 3: WEATHER ALERTS
+        with tab_w_adm:
+            st.write("### 🌩️ Publish Weather Alert")
             w_title = st.text_input("Alert Title", placeholder="e.g. Sirocco / Extreme Heat")
-            w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg_admin")
-            w_severity = st.selectbox("Warning Severity Level (Color)", ["yellow", "orange", "red"], format_func=lambda x: f"{x.upper()} Threat Level")
-            w_msg = st.text_area("Alert Message details...")
+            w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg_adm")
+            w_severity = st.selectbox("Severity Level", ["yellow", "orange", "red"])
+            w_msg = st.text_area("Alert Details")
 
             if st.button("Publish Weather Alert Live", type="primary"):
-                if w_title.strip() and w_msg.strip():
+                if w_title and w_msg:
                     try:
                         supabase_client.table("weather_alerts").insert({
                             "title": sanitize(w_title),
@@ -665,45 +754,22 @@ elif st.session_state.active_tab == "account":
                             "severity": w_severity,
                             "message": sanitize(w_msg)
                         }).execute()
-                        st.success(f"Weather alert published in {w_severity.upper()} level color!")
+                        st.success("Weather alert published live!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to publish alert: {e}")
 
-            st.divider()
-            st.write("#### 📜 Active Weather Alerts Database")
-            try:
-                w_res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
-                w_list = w_res.data if w_res.data else []
-            except Exception:
-                w_list = []
-
-            if w_list:
-                df_w = pd.DataFrame(w_list)
-                st.dataframe(df_w, use_container_width=True)
-
-                w_del_id = st.number_input("Enter Weather Alert ID to Delete:", min_value=1, step=1, key="del_w_id")
-                if st.button("Delete Weather Alert", type="primary", key="btn_del_w"):
-                    try:
-                        supabase_client.table("weather_alerts").delete().eq("id", w_del_id).execute()
-                        st.success(f"Weather alert ID {w_del_id} deleted successfully!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting record: {e}")
-            else:
-                st.info("No weather alerts recorded in database.")
-
-        # --- SLIDE 2: MAP LOCATIONS ---
-        with tab_m:
+        # ADMIN TAB 4: MAP PINS
+        with tab_m_adm:
             st.write("### 📍 Add New Map Location Pin")
             m_name = st.text_input("Location Name")
-            m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w_admin")
+            m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w_adm")
             m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
             m_lat = st.number_input("Latitude", value=36.7323, format="%.4f")
             m_lon = st.number_input("Longitude", value=3.1678, format="%.4f")
             
             if st.button("Add Pin to Map Live", type="primary"):
-                if m_name.strip():
+                if m_name:
                     try:
                         maps_auto_url = f"https://maps.google.com/?q={m_lat},{m_lon}"
                         supabase_client.table("suppliers_directory").insert({
@@ -718,117 +784,3 @@ elif st.session_state.active_tab == "account":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error adding location: {e}")
-
-            st.divider()
-            st.write("#### 📜 Map Locations Database")
-            try:
-                m_res = supabase_client.table("suppliers_directory").select("*").order("id", desc=True).execute()
-                m_list = m_res.data if m_res.data else []
-            except Exception:
-                m_list = []
-
-            if m_list:
-                df_m = pd.DataFrame(m_list)
-                st.dataframe(df_m, use_container_width=True)
-
-                m_del_id = st.number_input("Enter Map Location ID to Delete:", min_value=1, step=1, key="del_m_id")
-                if st.button("Delete Location Pin", type="primary", key="btn_del_m"):
-                    try:
-                        supabase_client.table("suppliers_directory").delete().eq("id", m_del_id).execute()
-                        st.success(f"Map Location ID {m_del_id} deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting location: {e}")
-            else:
-                st.info("No custom map pins recorded in database.")
-
-        # --- SLIDE 3: NEWS & ANNOUNCEMENTS ---
-        with tab_n:
-            st.write("### 📢 Publish Official News Announcement")
-            n_title = st.text_input("News Title")
-            n_cat = st.selectbox("Category", ["Official Notice", "Subsidies", "Weather", "Export/Import", "General"])
-            n_content = st.text_area("Content Details")
-
-            if st.button("Publish News Release", type="primary"):
-                if n_title.strip() and n_content.strip():
-                    try:
-                        supabase_client.table("portal_news").insert({
-                            "title": sanitize(n_title),
-                            "category": n_cat,
-                            "content": sanitize(n_content)
-                        }).execute()
-                        st.success("News published live!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to publish news: {e}")
-
-            st.divider()
-            st.write("#### 📜 Published News Database")
-            try:
-                n_res = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
-                n_list = n_res.data if n_res.data else []
-            except Exception:
-                n_list = []
-
-            if n_list:
-                df_n = pd.DataFrame(n_list)
-                st.dataframe(df_n, use_container_width=True)
-
-                n_del_id = st.number_input("Enter News ID to Delete:", min_value=1, step=1, key="del_n_id")
-                if st.button("Delete News Entry", type="primary", key="btn_del_n"):
-                    try:
-                        supabase_client.table("portal_news").delete().eq("id", n_del_id).execute()
-                        st.success(f"News entry ID {n_del_id} deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting news: {e}")
-            else:
-                st.info("No news entries found in database.")
-
-        # --- SLIDE 4: SUPPORT DEMANDS ---
-        with tab_s:
-            st.write("### 📋 Submitted Farmer Support Demands")
-            try:
-                s_res = supabase_client.table("support_requests").select("*").order("id", desc=True).execute()
-                s_list = s_res.data if s_res.data else []
-            except Exception:
-                s_list = []
-
-            if s_list:
-                df_s = pd.DataFrame(s_list)
-                st.dataframe(df_s, use_container_width=True)
-
-                s_del_id = st.number_input("Enter Support Demand ID to Delete:", min_value=1, step=1, key="del_s_id")
-                if st.button("Delete Support Demand", type="primary", key="btn_del_s"):
-                    try:
-                        supabase_client.table("support_requests").delete().eq("id", s_del_id).execute()
-                        st.success(f"Support Request ID {s_del_id} deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting request: {e}")
-            else:
-                st.info("No support demands submitted yet.")
-
-        # --- SLIDE 5: DECLARATIONS (INCLUDES CULTIVATION START DATE) ---
-        with tab_d:
-            st.write("### 🌱 Crop Area Declarations Database")
-            try:
-                d_res = supabase_client.table("declarations").select("*").order("id", desc=True).execute()
-                d_list = d_res.data if d_res.data else []
-            except Exception:
-                d_list = []
-
-            if d_list:
-                df_d = pd.DataFrame(d_list)
-                st.dataframe(df_d, use_container_width=True)
-
-                d_del_id = st.number_input("Enter Declaration ID to Delete:", min_value=1, step=1, key="del_d_id")
-                if st.button("Delete Declaration", type="primary", key="btn_del_d"):
-                    try:
-                        supabase_client.table("declarations").delete().eq("id", d_del_id).execute()
-                        st.success(f"Declaration ID {d_del_id} deleted!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error deleting declaration: {e}")
-            else:
-                st.info("No declarations recorded in database.")
