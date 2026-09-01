@@ -306,12 +306,10 @@ with st.sidebar:
 # TOP STATUS HEADER WITH NOTIFICATION BELL 🔔
 # ---------------------------------------------------------
 unread_count = get_unread_notif_count(st.session_state.farmer_email)
-notif_badge_html = f'<span class="unread-badge">{unread_count} NEW</span>' if unread_count > 0 else '<span style="color:gray;">(0)</span>'
 
 mobile_status = f"🟢 Connected: {st.session_state.farmer_name}" if st.session_state.logged_in else "🔴 Not Logged In — Click top-left arrow ↗ to Login"
 st.markdown(f'<div class="mobile-sidebar-notice">👉 {mobile_status}</div>', unsafe_allow_html=True)
 
-# Top Bar Header with Bell
 col_head1, col_head2 = st.columns([4, 1])
 with col_head1:
     st.markdown(f"<h2 style='margin:0;'>{t['title']}</h2>", unsafe_allow_html=True)
@@ -345,7 +343,6 @@ st.divider()
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
     
-    # 6 SERVICE BUTTONS GRID
     if st.session_state.selected_service is None:
         st.subheader("الخدمات الإلكترونية / Main Services")
         
@@ -372,7 +369,6 @@ if st.session_state.active_tab == "home":
                 st.session_state.selected_service = "suppliers"
                 st.rerun()
 
-    # SELECTED SERVICE VIEW
     else:
         if st.button(t['back_btn'], use_container_width=True):
             st.session_state.selected_service = None
@@ -419,13 +415,12 @@ if st.session_state.active_tab == "home":
                                     file_path = f"support_docs/{clean_filename}"
                                     file_bytes = file_obj.read()
                                     
-                                    res = supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
+                                    supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
                                     public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
                                     uploaded_links[doc_name] = public_url
 
                                 supabase_client.table("support_requests").insert({
                                     "farmer_name": st.session_state.farmer_name,
-                                    "farmer_email": st.session_state.farmer_email,
                                     "carte_num": st.session_state.carte_num,
                                     "wilaya": selected_w_sup,
                                     "sector": selected_sector,
@@ -485,7 +480,6 @@ if st.session_state.active_tab == "home":
                     try:
                         supabase_client.table("declarations").insert({
                             "farmer_name": st.session_state.farmer_name,
-                            "farmer_email": st.session_state.farmer_email,
                             "carte_num": st.session_state.carte_num,
                             "wilaya": selected_w,
                             "category": cat_choice,
@@ -600,187 +594,194 @@ elif st.session_state.active_tab == "card":
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
     
-    # ----------------------------------
     # PART 1: FARMER'S PERSONAL HUB
-    # ----------------------------------
     if st.session_state.logged_in:
         st.subheader(f"👋 Welcome, {st.session_state.farmer_name}")
-        st.caption(f"Connected Email: `{st.session_state.farmer_email}` | Card: `{st.session_state.carte_num}`")
+        st.caption(f"Connected Email: `{st.session_state.farmer_email}` | Card N°: `{st.session_state.carte_num}`")
         
-        tab_my_notif, tab_my_dec, tab_my_sup = st.tabs(["🔔 Notifications", "🌱 My Crop Declarations", "📋 My Support Demands"])
+        acc_tab1, acc_tab2, acc_tab3 = st.tabs(["🔔 Notifications", "📜 My Crop Declarations", "📄 My Subsidies Requests"])
         
-        # TAB 1: NOTIFICATIONS
-        with tab_my_notif:
-            st.write("### 📬 Your Notifications & Directives")
+        with acc_tab1:
+            st.subheader("Your Official Notifications")
             try:
                 res_notif = supabase_client.table("farmer_notifications").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
-                notifications = res_notif.data if res_notif.data else []
+                notifs = res_notif.data if res_notif.data else []
                 
-                if notifications:
-                    for notif in notifications:
+                if notifs:
+                    for n in notifs:
                         st.markdown(f"""
                             <div class="notif-card">
-                                <h4 style="margin: 0 0 5px 0; color: #1a73e8;">📩 {sanitize(notif.get('title','Notification'))}</h4>
-                                <p style="margin: 0; color: #333;">{sanitize(notif.get('message',''))}</p>
-                                <small style="color: gray;">Received: {notif.get('created_at','')[:10]}</small>
+                                <b>📩 {sanitize(n.get('title',''))}</b>
+                                <p style="margin:4px 0;">{sanitize(n.get('message',''))}</p>
+                                <small style="color:gray;">{n.get('created_at','')[:10]}</small>
                             </div>
                         """, unsafe_allow_html=True)
                     
-                    # Mark all as read
-                    supabase_client.table("farmer_notifications").update({"is_read": True}).eq("farmer_email", st.session_state.farmer_email).execute()
+                    if st.button("Mark All Notifications as Read"):
+                        supabase_client.table("farmer_notifications").update({"is_read": True}).eq("farmer_email", st.session_state.farmer_email).execute()
+                        st.success("Notifications updated.")
+                        st.rerun()
                 else:
-                    st.info("No notifications received yet.")
+                    st.info("No personal notifications at this moment.")
             except Exception as e:
-                st.info("Notification system ready.")
+                st.error(f"Error reading notifications: {e}")
 
-        # TAB 2: MY CROP DECLARATIONS
-        with tab_my_dec:
-            st.write("### 🌱 My Registered Crop Declarations")
+        with acc_tab2:
+            st.subheader("Submitted Crop Declarations")
             try:
-                res_dec = supabase_client.table("declarations").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
-                my_decs = res_dec.data if res_dec.data else []
-                if my_decs:
-                    st.dataframe(pd.DataFrame(my_decs), use_container_width=True)
+                res_dec = supabase_client.table("declarations").select("*").eq("carte_num", st.session_state.carte_num).execute()
+                if res_dec.data:
+                    df_dec = pd.DataFrame(res_dec.data)
+                    st.dataframe(df_dec[["crop", "category", "area", "wilaya", "start_date"]], use_container_width=True)
                 else:
-                    st.info("You haven't submitted any crop declarations yet.")
-            except Exception:
-                st.info("No declarations found.")
+                    st.info("No crop declarations on file.")
+            except Exception as e:
+                st.error(f"Error fetching declarations: {e}")
 
-        # TAB 3: MY SUPPORT DEMANDS
-        with tab_my_sup:
-            st.write("### 📋 My Government Support Requests")
+        with acc_tab3:
+            st.subheader("Subsidies & Equipment Applications")
             try:
-                res_sup = supabase_client.table("support_requests").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
-                my_sups = res_sup.data if res_sup.data else []
-                if my_sups:
-                    st.dataframe(pd.DataFrame(my_sups), use_container_width=True)
+                res_sup = supabase_client.table("support_requests").select("*").eq("carte_num", st.session_state.carte_num).execute()
+                if res_sup.data:
+                    df_sup = pd.DataFrame(res_sup.data)
+                    st.dataframe(df_sup[["sector", "wilaya", "status", "created_at"]], use_container_width=True)
                 else:
-                    st.info("You haven't submitted any support requests yet.")
-            except Exception:
-                st.info("No support requests found.")
-
-    else:
-        st.info("💡 Please Log In from the left sidebar ↗ to view your personal declarations and notifications.")
-
-    st.divider()
-
-    # ----------------------------------
-    # PART 2: OWNER ADMIN DASHBOARD
-    # ----------------------------------
-    st.subheader(t['admin'])
-    if not st.session_state.admin_authenticated:
-        admin_pass = st.text_input("Enter Owner Admin Password", type="password", key="adm_pass_input")
-        if st.button("Authenticate Admin"):
-            if hash_password(admin_pass) == hash_password(get_admin_password()):
-                st.session_state.admin_authenticated = True
-                st.rerun()
-            else:
-                st.error("Incorrect Password.")
-    else:
-        st.success("Owner Access Granted!")
-        if st.button("🔒 Lock Admin Session"):
-            st.session_state.admin_authenticated = False
-            st.rerun()
-
+                    st.info("No active subsidy applications on file.")
+            except Exception as e:
+                st.error(f"Error fetching subsidy demands: {e}")
+                
         st.divider()
 
-        tab_users, tab_send_notif, tab_w_adm, tab_m_adm = st.tabs([
-            "👥 Registered Farmers", 
-            "📩 Send Notification", 
-            "🌩️ Weather Alerts", 
-            "📍 Map Pins"
+    else:
+        st.info("👈 Please log in from the left sidebar menu to see your personal records and notifications.")
+        st.divider()
+
+    # PART 2: OWNER ADMIN DASHBOARD MANAGEMENT
+    st.subheader("🔐 Owner / Portal Admin Management Console")
+    
+    if not st.session_state.admin_authenticated:
+        admin_input_pass = st.text_input("Enter Admin Security Secret Code", type="password", key="admin_pwd")
+        if st.button("Unlock Admin Panel", type="primary"):
+            if admin_input_pass == get_admin_password():
+                st.session_state.admin_authenticated = True
+                st.success("Access Granted to Portal Admin Console.")
+                st.rerun()
+            else:
+                st.error("Invalid Secret Key.")
+    else:
+        st.success("🔓 Authenticated as System Administrator")
+        
+        adm_tab1, adm_tab2, adm_tab3, adm_tab4 = st.tabs([
+            "📢 Post News & Alerts", 
+            "📨 Send Farmer Notifications", 
+            "📍 Add Map Location", 
+            "📊 View All Database Records"
         ])
 
-        # ADMIN TAB 1: REGISTERED USERS LIST
-        with tab_users:
-            st.write("### 👥 Connected & Registered Farmer Profiles")
+        # ADMIN TAB 1: NEWS AND ALERTS
+        with adm_tab1:
+            st.markdown("#### Post Weather Alert")
+            al_title = st.text_input("Alert Title", placeholder="e.g. Sirocco Heatwave Warning")
+            al_region = st.selectbox("Target Wilaya", ["All Wilayas"] + WILAYAS_48)
+            al_severity = st.selectbox("Severity Level", ["yellow", "orange", "red"])
+            al_msg = st.text_area("Alert Message Body")
+            
+            if st.button("Broadcast Weather Alert"):
+                try:
+                    supabase_client.table("weather_alerts").insert({
+                        "title": sanitize(al_title),
+                        "region": al_region,
+                        "severity": al_severity,
+                        "message": sanitize(al_msg)
+                    }).execute()
+                    st.success("Weather Alert Published!")
+                except Exception as e:
+                    st.error(f"Failed to post alert: {e}")
+
+            st.divider()
+            st.markdown("#### Post Portal News Release")
+            news_title = st.text_input("Article Title")
+            news_cat = st.selectbox("News Category", ["General", "Subsidies", "Weather", "Market Prices"])
+            news_body = st.text_area("Article Content Body")
+            
+            if st.button("Publish News Release"):
+                try:
+                    supabase_client.table("portal_news").insert({
+                        "title": sanitize(news_title),
+                        "category": news_cat,
+                        "content": sanitize(news_body)
+                    }).execute()
+                    st.success("Official News Article Published!")
+                except Exception as e:
+                    st.error(f"Failed to publish news: {e}")
+
+        # ADMIN TAB 2: DIRECT NOTIFICATIONS
+        with adm_tab2:
+            st.markdown("#### Send Targeted Notification to Farmer")
+            target_email = st.text_input("Target Farmer Email", placeholder="farmer@domain.dz")
+            notif_title = st.text_input("Notification Subject Title")
+            notif_body = st.text_area("Message Body Text")
+            
+            if st.button("Dispatch Direct Notification"):
+                try:
+                    supabase_client.table("farmer_notifications").insert({
+                        "farmer_email": sanitize(target_email),
+                        "title": sanitize(notif_title),
+                        "message": sanitize(notif_body),
+                        "is_read": False
+                    }).execute()
+                    st.success(f"Notification dispatched to {target_email}!")
+                except Exception as e:
+                    st.error(f"Dispatch failed: {e}")
+
+        # ADMIN TAB 3: ADD DIRECTORY LOCATION
+        with adm_tab3:
+            st.markdown("#### Add Location to Map Directory")
+            loc_name = st.text_input("Facility Name")
+            loc_wilaya = st.selectbox("Wilaya Location", WILAYAS_48, key="adm_w_dir")
+            loc_cat = st.selectbox("Facility Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
+            loc_lat = st.number_input("Latitude coordinate", value=36.7323, format="%.4f")
+            loc_lon = st.number_input("Longitude coordinate", value=3.1678, format="%.4f")
+            loc_address = st.text_input("Address details")
+            loc_maps = st.text_input("Google Maps URL link")
+
+            if st.button("Save New Location"):
+                try:
+                    supabase_client.table("suppliers_directory").insert({
+                        "name": sanitize(loc_name),
+                        "wilaya": loc_wilaya,
+                        "category": loc_cat,
+                        "lat": loc_lat,
+                        "lon": loc_lon,
+                        "address": sanitize(loc_address),
+                        "maps_link": sanitize(loc_maps)
+                    }).execute()
+                    st.success("Location added to public directory!")
+                except Exception as e:
+                    st.error(f"Failed to insert map point: {e}")
+
+        # ADMIN TAB 4: DATABASE TABLES INSPECTION
+        with adm_tab4:
+            st.markdown("#### System Database Inspector")
+            table_choice = st.selectbox("Select Database Table to Inspect", [
+                "farmer_profiles",
+                "declarations",
+                "support_requests",
+                "farmer_notifications",
+                "weather_alerts",
+                "portal_news",
+                "suppliers_directory"
+            ])
+            
             try:
-                users_res = supabase_client.table("farmer_profiles").select("*").order("id", desc=True).execute()
-                users_list = users_res.data if users_res.data else []
-                if users_list:
-                    st.dataframe(pd.DataFrame(users_list), use_container_width=True)
+                res_all = supabase_client.table(table_choice).select("*").execute()
+                if res_all.data:
+                    st.dataframe(pd.DataFrame(res_all.data), use_container_width=True)
                 else:
-                    st.info("No registered farmers found.")
+                    st.info(f"Table `{table_choice}` is currently empty.")
             except Exception as e:
-                st.error(f"Error retrieving user list: {e}")
+                st.error(f"Failed to query table: {e}")
 
-        # ADMIN TAB 2: SEND NOTIFICATION TO A FARMER
-        with tab_send_notif:
-            st.write("### 📩 Send Direct Notification / Directive")
-            
-            try:
-                u_res = supabase_client.table("farmer_profiles").select("email, full_name").execute()
-                all_u = u_res.data if u_res.data else []
-                email_list = [u["email"] for u in all_u]
-            except Exception:
-                email_list = []
-
-            if email_list:
-                target_email = st.selectbox("Select Target Farmer Email:", email_list)
-                notif_title = st.text_input("Notification Title", placeholder="e.g. Demand Approved / Document Update")
-                notif_msg = st.text_area("Message Content", placeholder="Enter official notice or response...")
-                
-                if st.button("🚀 Send Notification", type="primary"):
-                    if notif_title and notif_msg:
-                        try:
-                            supabase_client.table("farmer_notifications").insert({
-                                "farmer_email": target_email,
-                                "title": sanitize(notif_title),
-                                "message": sanitize(notif_msg),
-                                "is_read": False
-                            }).execute()
-                            st.success(f"Notification sent successfully to `{target_email}`!")
-                        except Exception as e:
-                            st.error(f"Failed to send notification: {e}")
-                    else:
-                        st.warning("Please enter title and message.")
-            else:
-                st.info("No registered farmer emails available to send notifications to.")
-
-        # ADMIN TAB 3: WEATHER ALERTS
-        with tab_w_adm:
-            st.write("### 🌩️ Publish Weather Alert")
-            w_title = st.text_input("Alert Title", placeholder="e.g. Sirocco / Extreme Heat")
-            w_region = st.selectbox("Wilaya / Region", WILAYAS_48, key="w_reg_adm")
-            w_severity = st.selectbox("Severity Level", ["yellow", "orange", "red"])
-            w_msg = st.text_area("Alert Details")
-
-            if st.button("Publish Weather Alert Live", type="primary"):
-                if w_title and w_msg:
-                    try:
-                        supabase_client.table("weather_alerts").insert({
-                            "title": sanitize(w_title),
-                            "region": w_region,
-                            "severity": w_severity,
-                            "message": sanitize(w_msg)
-                        }).execute()
-                        st.success("Weather alert published live!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to publish alert: {e}")
-
-        # ADMIN TAB 4: MAP PINS
-        with tab_m_adm:
-            st.write("### 📍 Add New Map Location Pin")
-            m_name = st.text_input("Location Name")
-            m_wil = st.selectbox("Wilaya", WILAYAS_48, key="m_w_adm")
-            m_cat = st.selectbox("Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"])
-            m_lat = st.number_input("Latitude", value=36.7323, format="%.4f")
-            m_lon = st.number_input("Longitude", value=3.1678, format="%.4f")
-            
-            if st.button("Add Pin to Map Live", type="primary"):
-                if m_name:
-                    try:
-                        maps_auto_url = f"https://maps.google.com/?q={m_lat},{m_lon}"
-                        supabase_client.table("suppliers_directory").insert({
-                            "name": sanitize(m_name),
-                            "wilaya": m_wil,
-                            "category": m_cat,
-                            "lat": m_lat,
-                            "lon": m_lon,
-                            "maps_link": maps_auto_url
-                        }).execute()
-                        st.success("Location added live to map!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error adding location: {e}")
+        if st.button("🔒 Lock Admin Console"):
+            st.session_state.admin_authenticated = False
+            st.rerun()
