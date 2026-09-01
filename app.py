@@ -198,7 +198,8 @@ TEXTS = {
         'suppliers': "خريطة أسواق الجملة، نقاط CCLS والأسمدة",
         'support': "طلب دعم الدولة (الدعم الفلاحي)",
         'news': "الأخبار والإعلانات الرسمية",
-        'admin': "لوحة تحكم المالِك (Owner Admin)"
+        'admin': "لوحة تحكم المالِك (Owner Admin)",
+        'back_btn': "🔙 الرجوع لبرنامج الخدمات الرئيسي"
     },
     'EN': {
         'title': "Felah Farmer Portal - 48 Wilayas",
@@ -212,7 +213,8 @@ TEXTS = {
         'suppliers': "Wholesale Markets, CCLS & Fertilizer Map",
         'support': "Government Agricultural Support",
         'news': "News & Official Announcements",
-        'admin': "Owner Admin Dashboard"
+        'admin': "Owner Admin Dashboard",
+        'back_btn': "🔙 Back to Main Services Menu"
     }
 }
 
@@ -279,7 +281,10 @@ st.markdown(f"""
 
 nav_col1, nav_col2, nav_col3 = st.columns(3)
 with nav_col1:
-    if st.button(f"{t['home']}", use_container_width=True): st.session_state.active_tab = "home"
+    if st.button(f"{t['home']}", use_container_width=True): 
+        st.session_state.active_tab = "home"
+        st.session_state.selected_service = None
+        st.rerun()
 with nav_col2:
     if st.button(f"{t['card']}", use_container_width=True): st.session_state.active_tab = "card"
 with nav_col3:
@@ -291,282 +296,303 @@ st.divider()
 # VIEW 1: HOME DASHBOARD & SERVICES
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
-    st.subheader("الخدمات الإلكترونية / Main Services")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button(t['crop'], use_container_width=True, type="primary"): st.session_state.selected_service = "crop"
-        if st.button(t['support'], use_container_width=True): st.session_state.selected_service = "support"
-        if st.button(t['pay'], use_container_width=True): st.session_state.selected_service = "pay"
-    
-    with col2:
-        if st.button(t['news'], use_container_width=True): st.session_state.selected_service = "news"
-        if st.button(t['weather'], use_container_width=True): st.session_state.selected_service = "weather"
-        if st.button(t['suppliers'], use_container_width=True): st.session_state.selected_service = "suppliers"
-
-    st.divider()
-
-    # --- SERVICE 1: AGRICULTURAL SUPPORT DEMAND ---
-    if st.session_state.selected_service == "support":
-        st.subheader(t['support'])
-        st.write("Submit official requests for Ministry subsidies (Geomembrane basins, well digging, solar, drip irrigation).")
+    # CASE A: SHOW 6 SERVICE BUTTONS GRID (WHEN NO SERVICE IS SELECTED)
+    if st.session_state.selected_service is None:
+        st.subheader("الخدمات الإلكترونية / Main Services")
         
-        if not st.session_state.logged_in:
-            st.warning("⚠️ Please log in from the left menu ↗ to submit a support demand.")
-        else:
-            selected_w_sup = st.selectbox("Wilaya / الولاية", WILAYAS_48, key="sup_w")
-            selected_sector = st.selectbox("Select Subsidized Sector / اختر مجال الدعم", list(SUPPORT_SECTORS.keys()))
-            
-            st.markdown(f"#### 📄 Required Documents for `{selected_sector}`:")
-            req_docs = SUPPORT_SECTORS[selected_sector]
-            for doc in req_docs:
-                st.write(f"• **{doc}**")
-            
-            st.divider()
-            st.write("### Attach Your Files & Papers (رفع الملفات والوثائق)")
-            uploaded_files = {}
-            
-            for idx, doc in enumerate(req_docs):
-                up_file = st.file_uploader(f"Upload: {doc}", type=["pdf", "jpg", "jpeg", "png"], key=f"file_{idx}")
-                if up_file:
-                    uploaded_files[doc] = up_file
-            
-            additional_notes = st.text_area("Additional Notes / ملاحظات إضافية", placeholder="Describe your farm capacity or specific project details...")
-
-            if st.button("Submit Support Demand (إرسال طلب الدعم)", type="primary", use_container_width=True):
-                if len(uploaded_files) < len(req_docs):
-                    st.error(f"Please upload all {len(req_docs)} required documents before submitting.")
-                else:
-                    uploaded_links = {}
-                    try:
-                        with st.spinner("Uploading documents securely to Supabase Storage..."):
-                            for doc_name, file_obj in uploaded_files.items():
-                                clean_filename = f"{st.session_state.carte_num}_{random.randint(1000,9999)}_{file_obj.name}"
-                                file_path = f"support_docs/{clean_filename}"
-                                file_bytes = file_obj.read()
-                                
-                                res = supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
-                                public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
-                                uploaded_links[doc_name] = public_url
-
-                            supabase_client.table("support_requests").insert({
-                                "farmer_name": st.session_state.farmer_name,
-                                "carte_num": st.session_state.carte_num,
-                                "wilaya": selected_w_sup,
-                                "sector": selected_sector,
-                                "description": sanitize(additional_notes),
-                                "files_json": uploaded_links
-                            }).execute()
-
-                            st.success("🎉 Your Agricultural Support demand has been submitted successfully!")
-                    except Exception as e:
-                        st.error(f"Error submitting request: {e}")
-
-    # --- SERVICE 2: NEWS & ANNOUNCEMENTS ---
-    elif st.session_state.selected_service == "news":
-        st.subheader(t['news'])
-        try:
-            res_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
-            news_items = res_news.data if res_news.data else []
-        except Exception:
-            news_items = []
-
-        if news_items:
-            for n in news_items:
-                st.markdown(f"""
-                    <div class="news-card">
-                        <span style="background: #0b8a62; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
-                        <h4 style="margin: 8px 0 5px 0; color: #1e5340;">📢 {sanitize(n.get("title",""))}</h4>
-                        <p style="margin: 0; color: #333;">{sanitize(n.get("content",""))}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("📰 No official news releases published today.")
-
-    # --- SERVICE 3: DECLARATION & QUOTA SYSTEM (WITH CULTIVATION START DATE) ---
-    elif st.session_state.selected_service == "crop":
-        st.subheader(t['crop'])
-        selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
-        cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
-        area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=10000.0)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(t['crop'], use_container_width=True, type="primary"): 
+                st.session_state.selected_service = "crop"
+                st.rerun()
+            if st.button(t['support'], use_container_width=True): 
+                st.session_state.selected_service = "support"
+                st.rerun()
+            if st.button(t['pay'], use_container_width=True): 
+                st.session_state.selected_service = "pay"
+                st.rerun()
         
-        # New Field: Date of Starting Cultivation
-        start_date = st.date_input("Date of Starting Cultivation / تاريخ بداية الزراعة", value=date.today())
+        with col2:
+            if st.button(t['news'], use_container_width=True): 
+                st.session_state.selected_service = "news"
+                st.rerun()
+            if st.button(t['weather'], use_container_width=True): 
+                st.session_state.selected_service = "weather"
+                st.rerun()
+            if st.button(t['suppliers'], use_container_width=True): 
+                st.session_state.selected_service = "suppliers"
+                st.rerun()
+
+    # CASE B: HIDE 6 BUTTONS & SHOW SELECTED SERVICE WITH A RETURN BUTTON
+    else:
+        if st.button(t['back_btn'], use_container_width=True):
+            st.session_state.selected_service = None
+            st.rerun()
         
-        if cat_choice == "Fruits (فواكه)":
-            selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
-            st.success("Unlimited Capacity / بدون حد أقصى — Fruit cultivation is open without national hectare restrictions.")
-        else:
-            selected_c = st.selectbox("Select Vegetable / اختر الخضار", list(VEGETABLE_LIMITS.keys()))
-            limit = VEGETABLE_LIMITS[selected_c]
-            current_total = get_current_crop_area(selected_c)
-            projected_total = current_total + area_ha
-            percentage = min((projected_total / limit), 1.0)
-            
-            st.write(f"**National Area Quota Status ({selected_c}):**")
-            st.progress(percentage)
-            st.caption(f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha")
-
-        if st.button("Submit & Generate QR Permit"):
-            if st.session_state.logged_in:
-                try:
-                    supabase_client.table("declarations").insert({
-                        "farmer_name": st.session_state.farmer_name,
-                        "carte_num": st.session_state.carte_num,
-                        "wilaya": selected_w,
-                        "category": cat_choice,
-                        "crop": selected_c,
-                        "area": area_ha,
-                        "start_date": str(start_date)
-                    }).execute()
-                    
-                    st.success("Declaration registered successfully!")
-                    qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA|START:{start_date}"
-                    qr = qrcode.make(qr_payload)
-                    buf = BytesIO()
-                    qr.save(buf, format="PNG")
-                    st.image(buf.getvalue(), caption=f"Official QR Permit (Start Date: {start_date})", width=220)
-                except Exception as e:
-                    st.error(f"Failed to record declaration: {e}")
-            else:
-                st.warning("Please log in first.")
-
-    # --- SERVICE 4: WEATHER ALERTS ---
-    elif st.session_state.selected_service == "weather":
-        st.subheader(t['weather'])
-        
-        try:
-            res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
-            alerts = res.data if res.data else []
-        except Exception: 
-            alerts = []
-        
-        if alerts:
-            for item in alerts:
-                title = sanitize(item.get("title", "Weather Notice"))
-                region = sanitize(item.get("region", "All Wilayas"))
-                message = sanitize(item.get("message", ""))
-                
-                raw_level = str(item.get("severity", "yellow")).lower().strip()
-                style = ALERT_STYLES.get(raw_level, ALERT_STYLES["yellow"])
-
-                st.markdown(f"""
-                    <div style="
-                        background-color: {style['bg_color']};
-                        border-left: 6px solid {style['border_color']};
-                        border-radius: 8px;
-                        padding: 14px 16px;
-                        margin-bottom: 14px;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                        color: {style['text_color']};
-                    ">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <span style="font-weight: bold; font-size: 1.05em;">
-                                {style['icon']} {title} — <small style="font-weight: normal;">({region})</small>
-                            </span>
-                            <span style="
-                                background-color: {style['badge_bg']};
-                                color: {style['badge_text']};
-                                padding: 3px 8px;
-                                border-radius: 4px;
-                                font-size: 0.75em;
-                                font-weight: bold;
-                                text-transform: uppercase;
-                            ">{style['label']}</span>
-                        </div>
-                        <p style="margin: 0; font-size: 0.95em; line-height: 1.4;">{message}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("🟢 No severe weather warnings active across the 48 wilayas.")
-
-    # --- SERVICE 5: PAYMENTS ---
-    elif st.session_state.selected_service == "pay":
-        st.subheader(t['pay'])
-        st.write("Annual Subscription Fee: **2,500 DZD**")
-        st.radio("Payment Gateway:", ["EDAHABIA (الذهبية)", "CIB Card"])
-        st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
-        if st.button("Confirm Payment"): st.success("Carte Fellah renewed for season 2026/2027!")
-
-    # --- SERVICE 6: MAPS DIRECTORY FOR MARKETS, CCLS & FERTILIZER DEPOTS ---
-    elif st.session_state.selected_service == "suppliers":
-        st.subheader("🗺️ خريطة الموزعين وأسوق الجملة ونقاط CCLS")
-        st.caption("Interactive Map — Click any marker on the map to get direct Google Maps navigation.")
-        
-        try:
-            res = supabase_client.table("suppliers_directory").select("*").execute()
-            db_locations = res.data if res.data else []
-        except Exception:
-            db_locations = []
-            
-        all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
-
-        categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
-        selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
-
-        if selected_cat != "All":
-            filtered_locs = [loc for loc in all_locations if loc.get("category") == selected_cat]
-        else:
-            filtered_locs = all_locations
-
-        m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
-
-        color_map = {
-            "Wholesale Produce Market": "green",
-            "OAIC Cereal Silo (CCLS)": "cadetblue",
-            "ASMIDAL Fertilizer Depot": "orange"
-        }
-
-        for loc in filtered_locs:
-            lat = float(loc.get("lat", 36.7323))
-            lon = float(loc.get("lon", 3.1678))
-            name = loc.get("name", "Agricultural Point")
-            wilaya = loc.get("wilaya", "")
-            cat = loc.get("category", "")
-            maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
-
-            popup_html = f"""
-            <div style="font-family: Arial; width: 210px;">
-                <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
-                <p style="margin:0; font-size:12px;"><b>Category:</b> {cat}</p>
-                <p style="margin:0 0 8px 0; font-size:12px;"><b>Wilaya:</b> {wilaya}</p>
-                <a href="{maps_url}" target="_blank" style="
-                    display: inline-block;
-                    background-color: #4285F4;
-                    color: white;
-                    padding: 6px 12px;
-                    text-decoration: none;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    font-weight: bold;
-                ">🗺️ Open in Google Maps ↗</a>
-            </div>
-            """
-            
-            icon_color = color_map.get(cat, "blue")
-            
-            folium.Marker(
-                location=[lat, lon],
-                popup=folium.Popup(popup_html, max_width=250),
-                tooltip=f"{name} ({wilaya})",
-                icon=folium.Icon(color=icon_color, icon="info-sign")
-            ).add_to(m)
-
-        st_folium(m, width=700, height=480)
-
         st.divider()
-        st.write("### Directory List / القائمة التفصيلية")
-        for loc in filtered_locs:
-            lat = float(loc.get("lat", 36.7323))
-            lon = float(loc.get("lon", 3.1678))
-            maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
-            st.markdown(f"""
-                <div class="market-card">
-                    <h4 style="margin: 0; color: #0b8a62;">📍 {loc.get('name')}</h4>
-                    <p style="margin: 2px 0;"><b>Wilaya:</b> {loc.get('wilaya')} | <b>Category:</b> {loc.get('category')}</p>
-                    <a href="{maps_url}" target="_blank" style="color: #1a73e8; font-weight: bold;">🗺️ Open Location in Google Maps ↗</a>
+
+        # --- SERVICE 1: AGRICULTURAL SUPPORT DEMAND ---
+        if st.session_state.selected_service == "support":
+            st.subheader(t['support'])
+            st.write("Submit official requests for Ministry subsidies (Geomembrane basins, well digging, solar, drip irrigation).")
+            
+            if not st.session_state.logged_in:
+                st.warning("⚠️ Please log in from the left menu ↗ to submit a support demand.")
+            else:
+                selected_w_sup = st.selectbox("Wilaya / الولاية", WILAYAS_48, key="sup_w")
+                selected_sector = st.selectbox("Select Subsidized Sector / اختر مجال الدعم", list(SUPPORT_SECTORS.keys()))
+                
+                st.markdown(f"#### 📄 Required Documents for `{selected_sector}`:")
+                req_docs = SUPPORT_SECTORS[selected_sector]
+                for doc in req_docs:
+                    st.write(f"• **{doc}**")
+                
+                st.divider()
+                st.write("### Attach Your Files & Papers (رفع الملفات والوثائق)")
+                uploaded_files = {}
+                
+                for idx, doc in enumerate(req_docs):
+                    up_file = st.file_uploader(f"Upload: {doc}", type=["pdf", "jpg", "jpeg", "png"], key=f"file_{idx}")
+                    if up_file:
+                        uploaded_files[doc] = up_file
+                
+                additional_notes = st.text_area("Additional Notes / ملاحظات إضافية", placeholder="Describe your farm capacity or specific project details...")
+
+                if st.button("Submit Support Demand (إرسال طلب الدعم)", type="primary", use_container_width=True):
+                    if len(uploaded_files) < len(req_docs):
+                        st.error(f"Please upload all {len(req_docs)} required documents before submitting.")
+                    else:
+                        uploaded_links = {}
+                        try:
+                            with st.spinner("Uploading documents securely to Supabase Storage..."):
+                                for doc_name, file_obj in uploaded_files.items():
+                                    clean_filename = f"{st.session_state.carte_num}_{random.randint(1000,9999)}_{file_obj.name}"
+                                    file_path = f"support_docs/{clean_filename}"
+                                    file_bytes = file_obj.read()
+                                    
+                                    res = supabase_client.storage.from_("agricultural-docs").upload(file_path, file_bytes)
+                                    public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
+                                    uploaded_links[doc_name] = public_url
+
+                                supabase_client.table("support_requests").insert({
+                                    "farmer_name": st.session_state.farmer_name,
+                                    "carte_num": st.session_state.carte_num,
+                                    "wilaya": selected_w_sup,
+                                    "sector": selected_sector,
+                                    "description": sanitize(additional_notes),
+                                    "files_json": uploaded_links
+                                }).execute()
+
+                                st.success("🎉 Your Agricultural Support demand has been submitted successfully!")
+                        except Exception as e:
+                            st.error(f"Error submitting request: {e}")
+
+        # --- SERVICE 2: NEWS & ANNOUNCEMENTS ---
+        elif st.session_state.selected_service == "news":
+            st.subheader(t['news'])
+            try:
+                res_news = supabase_client.table("portal_news").select("*").order("id", desc=True).execute()
+                news_items = res_news.data if res_news.data else []
+            except Exception:
+                news_items = []
+
+            if news_items:
+                for n in news_items:
+                    st.markdown(f"""
+                        <div class="news-card">
+                            <span style="background: #0b8a62; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
+                            <h4 style="margin: 8px 0 5px 0; color: #1e5340;">📢 {sanitize(n.get("title",""))}</h4>
+                            <p style="margin: 0; color: #333;">{sanitize(n.get("content",""))}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("📰 No official news releases published today.")
+
+        # --- SERVICE 3: DECLARATION & QUOTA SYSTEM (WITH CULTIVATION START DATE) ---
+        elif st.session_state.selected_service == "crop":
+            st.subheader(t['crop'])
+            selected_w = st.selectbox("Wilaya / الولاية (48 Wilayas)", WILAYAS_48)
+            cat_choice = st.radio("Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"])
+            area_ha = st.number_input("Your Farming Area (Hectares / هكتار)", min_value=0.1, value=5.0, max_value=10000.0)
+            
+            # Date of Starting Cultivation
+            start_date = st.date_input("Date of Starting Cultivation / تاريخ بداية الزراعة", value=date.today())
+            
+            if cat_choice == "Fruits (فواكه)":
+                selected_c = st.selectbox("Select Fruit / اختر الفاكهة", FRUIT_LIST)
+                st.success("Unlimited Capacity / بدون حد أقصى — Fruit cultivation is open without national hectare restrictions.")
+            else:
+                selected_c = st.selectbox("Select Vegetable / اختر الخضار", list(VEGETABLE_LIMITS.keys()))
+                limit = VEGETABLE_LIMITS[selected_c]
+                current_total = get_current_crop_area(selected_c)
+                projected_total = current_total + area_ha
+                percentage = min((projected_total / limit), 1.0)
+                
+                st.write(f"**National Area Quota Status ({selected_c}):**")
+                st.progress(percentage)
+                st.caption(f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha")
+
+            if st.button("Submit & Generate QR Permit", type="primary"):
+                if st.session_state.logged_in:
+                    try:
+                        supabase_client.table("declarations").insert({
+                            "farmer_name": st.session_state.farmer_name,
+                            "carte_num": st.session_state.carte_num,
+                            "wilaya": selected_w,
+                            "category": cat_choice,
+                            "crop": selected_c,
+                            "area": area_ha,
+                            "start_date": str(start_date)
+                        }).execute()
+                        
+                        st.success("Declaration registered successfully!")
+                        qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA|START:{start_date}"
+                        qr = qrcode.make(qr_payload)
+                        buf = BytesIO()
+                        qr.save(buf, format="PNG")
+                        st.image(buf.getvalue(), caption=f"Official QR Permit (Start Date: {start_date})", width=220)
+                    except Exception as e:
+                        st.error(f"Failed to record declaration: {e}")
+                else:
+                    st.warning("Please log in first from sidebar.")
+
+        # --- SERVICE 4: WEATHER ALERTS ---
+        elif st.session_state.selected_service == "weather":
+            st.subheader(t['weather'])
+            
+            try:
+                res = supabase_client.table("weather_alerts").select("*").order("id", desc=True).execute()
+                alerts = res.data if res.data else []
+            except Exception: 
+                alerts = []
+            
+            if alerts:
+                for item in alerts:
+                    title = sanitize(item.get("title", "Weather Notice"))
+                    region = sanitize(item.get("region", "All Wilayas"))
+                    message = sanitize(item.get("message", ""))
+                    
+                    raw_level = str(item.get("severity", "yellow")).lower().strip()
+                    style = ALERT_STYLES.get(raw_level, ALERT_STYLES["yellow"])
+
+                    st.markdown(f"""
+                        <div style="
+                            background-color: {style['bg_color']};
+                            border-left: 6px solid {style['border_color']};
+                            border-radius: 8px;
+                            padding: 14px 16px;
+                            margin-bottom: 14px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                            color: {style['text_color']};
+                        ">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span style="font-weight: bold; font-size: 1.05em;">
+                                    {style['icon']} {title} — <small style="font-weight: normal;">({region})</small>
+                                </span>
+                                <span style="
+                                    background-color: {style['badge_bg']};
+                                    color: {style['badge_text']};
+                                    padding: 3px 8px;
+                                    border-radius: 4px;
+                                    font-size: 0.75em;
+                                    font-weight: bold;
+                                    text-transform: uppercase;
+                                ">{style['label']}</span>
+                            </div>
+                            <p style="margin: 0; font-size: 0.95em; line-height: 1.4;">{message}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("🟢 No severe weather warnings active across the 48 wilayas.")
+
+        # --- SERVICE 5: PAYMENTS ---
+        elif st.session_state.selected_service == "pay":
+            st.subheader(t['pay'])
+            st.write("Annual Subscription Fee: **2,500 DZD**")
+            st.radio("Payment Gateway:", ["EDAHABIA (الذهبية)", "CIB Card"])
+            st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
+            if st.button("Confirm Payment", type="primary"): st.success("Carte Fellah renewed for season 2026/2027!")
+
+        # --- SERVICE 6: MAPS DIRECTORY FOR MARKETS, CCLS & FERTILIZER DEPOTS ---
+        elif st.session_state.selected_service == "suppliers":
+            st.subheader("🗺️ خريطة الموزعين وأسوق الجملة ونقاط CCLS")
+            st.caption("Interactive Map — Click any marker on the map to get direct Google Maps navigation.")
+            
+            try:
+                res = supabase_client.table("suppliers_directory").select("*").execute()
+                db_locations = res.data if res.data else []
+            except Exception:
+                db_locations = []
+                
+            all_locations = DEFAULT_AGRI_LOCATIONS + db_locations
+
+            categories = ["All", "Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"]
+            selected_cat = st.selectbox("Filter Points by Type / تصفية حسب النوع:", categories)
+
+            if selected_cat != "All":
+                filtered_locs = [loc for loc in all_locations if loc.get("category") == selected_cat]
+            else:
+                filtered_locs = all_locations
+
+            m = folium.Map(location=[34.5000, 3.2000], zoom_start=6, tiles="OpenStreetMap")
+
+            color_map = {
+                "Wholesale Produce Market": "green",
+                "OAIC Cereal Silo (CCLS)": "cadetblue",
+                "ASMIDAL Fertilizer Depot": "orange"
+            }
+
+            for loc in filtered_locs:
+                lat = float(loc.get("lat", 36.7323))
+                lon = float(loc.get("lon", 3.1678))
+                name = loc.get("name", "Agricultural Point")
+                wilaya = loc.get("wilaya", "")
+                cat = loc.get("category", "")
+                maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
+
+                popup_html = f"""
+                <div style="font-family: Arial; width: 210px;">
+                    <h4 style="margin:0 0 5px 0; color:#0b8a62;">{name}</h4>
+                    <p style="margin:0; font-size:12px;"><b>Category:</b> {cat}</p>
+                    <p style="margin:0 0 8px 0; font-size:12px;"><b>Wilaya:</b> {wilaya}</p>
+                    <a href="{maps_url}" target="_blank" style="
+                        display: inline-block;
+                        background-color: #4285F4;
+                        color: white;
+                        padding: 6px 12px;
+                        text-decoration: none;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    ">🗺️ Open in Google Maps ↗</a>
                 </div>
-            """, unsafe_allow_html=True)
+                """
+                
+                icon_color = color_map.get(cat, "blue")
+                
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=folium.Popup(popup_html, max_width=250),
+                    tooltip=f"{name} ({wilaya})",
+                    icon=folium.Icon(color=icon_color, icon="info-sign")
+                ).add_to(m)
+
+            st_folium(m, width=700, height=480)
+
+            st.divider()
+            st.write("### Directory List / القائمة التفصيلية")
+            for loc in filtered_locs:
+                lat = float(loc.get("lat", 36.7323))
+                lon = float(loc.get("lon", 3.1678))
+                maps_url = loc.get("maps_link", f"https://maps.google.com/?q={lat},{lon}")
+                st.markdown(f"""
+                    <div class="market-card">
+                        <h4 style="margin: 0; color: #0b8a62;">📍 {loc.get('name')}</h4>
+                        <p style="margin: 2px 0;"><b>Wilaya:</b> {loc.get('wilaya')} | <b>Category:</b> {loc.get('category')}</p>
+                        <a href="{maps_url}" target="_blank" style="color: #1a73e8; font-weight: bold;">🗺️ Open Location in Google Maps ↗</a>
+                    </div>
+                """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # VIEW 2: CARTE FELLAH
