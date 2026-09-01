@@ -239,23 +239,33 @@ with st.sidebar:
             if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
                 if login_email and login_pass:
                     try:
-                        res = supabase_client.table("farmer_profiles").select("*").eq("email", login_email.strip()).execute()
-                        if res and res.data:
-                            user = res.data[0]
-                            st.session_state.logged_in = True
-                            st.session_state.farmer_name = user["full_name"]
-                            st.session_state.farmer_email = user["email"]
-                            st.session_state.carte_num = user["carte_num"]
-                            st.success("Successfully logged in!")
-                            st.rerun()
-                        else:
-                            st.error("Account not found. Please register first.")
+                        # 1. Authenticate with Supabase Auth
+                        auth_res = supabase_client.auth.sign_in_with_password({
+                            "email": login_email.strip(),
+                            "password": login_pass
+                        })
+                        
+                        if auth_res.user:
+                            user_id = auth_res.user.id
+                            # 2. Retrieve additional profile metadata
+                            res = supabase_client.table("farmer_profiles").select("*").eq("id", user_id).execute()
+                            
+                            if res and res.data:
+                                user_profile = res.data[0]
+                                st.session_state.logged_in = True
+                                st.session_state.farmer_name = user_profile.get("full_name", "Farmer")
+                                st.session_state.farmer_email = user_profile.get("email", login_email.strip())
+                                st.session_state.carte_num = user_profile.get("carte_num", "N/A")
+                                st.success("Successfully logged in!")
+                                st.rerun()
+                            else:
+                                st.error("User profile data not found.")
                     except Exception as e:
-                        st.error(f"Login error: {e}")
+                        st.error(f"Login failed: {e}")
                 else:
                     st.warning("Please fill all fields.")
         
-        # REGISTER NEW FARMER
+        # REGISTER NEW FARMER (OPTION B IMPLEMENTATION)
         elif "Register" in auth_choice:
             reg_name = st.text_input("Full Name / الاسم الكامل", key="sb_r_name")
             reg_email = st.text_input("Email / البريد الإلكتروني", key="sb_r_email")
@@ -265,18 +275,35 @@ with st.sidebar:
             if st.button("📝 Register Account", use_container_width=True, type="primary"):
                 if reg_name and reg_email and reg_card and reg_pass:
                     try:
-                        supabase_client.table("farmer_profiles").insert({
-                            "email": sanitize(reg_email),
-                            "full_name": sanitize(reg_name),
-                            "carte_num": sanitize(reg_card)
-                        }).execute()
+                        clean_email = sanitize(reg_email)
+                        clean_name = sanitize(reg_name)
+                        clean_card = sanitize(reg_card)
+
+                        # Step 1: Create the Auth User in Supabase
+                        auth_response = supabase_client.auth.sign_up({
+                            "email": clean_email,
+                            "password": reg_pass
+                        })
                         
-                        st.session_state.logged_in = True
-                        st.session_state.farmer_name = sanitize(reg_name)
-                        st.session_state.farmer_email = sanitize(reg_email)
-                        st.session_state.carte_num = sanitize(reg_card)
-                        st.success("Registration completed successfully!")
-                        st.rerun()
+                        if auth_response.user:
+                            user_id = auth_response.user.id
+                            
+                            # Step 2: Insert into farmer_profiles using the matching auth user_id
+                            supabase_client.table("farmer_profiles").insert({
+                                "id": user_id,
+                                "email": clean_email,
+                                "full_name": clean_name,
+                                "carte_num": clean_card
+                            }).execute()
+
+                            st.session_state.logged_in = True
+                            st.session_state.farmer_name = clean_name
+                            st.session_state.farmer_email = clean_email
+                            st.session_state.carte_num = clean_card
+                            st.success("Registration completed successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to generate Auth user account.")
                     except Exception as e:
                         st.error(f"Error registering account: {e}")
                 else:
@@ -295,6 +322,10 @@ with st.sidebar:
         st.caption(f"Email: `{st.session_state.farmer_email}`")
         st.caption(f"Card N°: `{st.session_state.carte_num}`")
         if st.button("🔒 Log Out / خروج", use_container_width=True):
+            try:
+                supabase_client.auth.sign_out()
+            except Exception:
+                pass
             st.session_state.logged_in = False
             st.session_state.farmer_name = ""
             st.session_state.farmer_email = ""
