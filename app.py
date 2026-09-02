@@ -177,6 +177,10 @@ if 'selected_service' not in st.session_state: st.session_state.selected_service
 if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
 if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
 
+# CAPTCHA Challenge Initialization
+if 'captcha_num1' not in st.session_state: st.session_state.captcha_num1 = random.randint(1, 9)
+if 'captcha_num2' not in st.session_state: st.session_state.captcha_num2 = random.randint(1, 9)
+
 TEXTS = {
     'AR': {
         'title': "بوابة الفلاح - 48 ولاية",
@@ -210,6 +214,13 @@ TEXTS = {
     }
 }
 
+# ---------------------------------------------------------
+# INSTANT LANGUAGE SWITCH CALLBACK
+# ---------------------------------------------------------
+def on_lang_change():
+    selected = st.session_state.sb_lang
+    st.session_state.lang = 'AR' if selected == "العربية" else 'EN'
+
 t = TEXTS[st.session_state.lang]
 
 # ---------------------------------------------------------
@@ -223,28 +234,44 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     st.markdown("### 🌐 Language / اللغة")
-    selected_lang = st.radio("Choose Language", ["العربية", "English"], key="sb_lang", label_visibility="collapsed")
-    st.session_state.lang = 'AR' if selected_lang == "العربية" else 'EN'
+    
+    # Instant re-render on language selection
+    default_idx = 0 if st.session_state.lang == 'AR' else 1
+    st.radio(
+        "Choose Language", 
+        ["العربية", "English"], 
+        index=default_idx, 
+        key="sb_lang", 
+        on_change=on_lang_change, 
+        label_visibility="collapsed"
+    )
     st.divider()
     
     st.markdown("### 👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
         auth_choice = st.radio("Action:", ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password (نسيان كلمة السر)"], key="sb_auth_choice")
         
-        # LOG IN WITH CAPTCHA CHECKBOX
+        # LOG IN WITH DYNAMIC MATH CAPTCHA
         if "Log In" in auth_choice:
             login_email = st.text_input("Email / البريد الإلكتروني", key="sb_l_email")
             login_pass = st.text_input("Password / كلمة السر", type="password", key="sb_l_pass")
             
-            # CAPTCHA "I'm not a robot" Checkbox
-            captcha_check = st.checkbox("🤖 I'm not a robot / أنا لست روبوت", key="sb_captcha")
+            # Interactive Human CAPTCHA Challenge
+            n1 = st.session_state.captcha_num1
+            n2 = st.session_state.captcha_num2
+            correct_sum = n1 + n2
+            
+            st.markdown(f"**🤖 Human Verification / تحقق:** What is `{n1} + {n2}`?")
+            user_captcha = st.number_input("Solve the math challenge:", min_value=0, max_value=20, step=1, value=0, key="sb_captcha_val")
             
             if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
-                if not captcha_check:
-                    st.error("⚠️ Please check the CAPTCHA box to confirm you are not a robot.")
+                if user_captcha != correct_sum:
+                    st.error("❌ Incorrect CAPTCHA answer! Please solve the sum correctly.")
+                    # Refresh numbers on failed attempt
+                    st.session_state.captcha_num1 = random.randint(1, 9)
+                    st.session_state.captcha_num2 = random.randint(1, 9)
                 elif login_email and login_pass:
                     try:
-                        # Authenticate with Supabase Auth
                         auth_res = supabase_client.auth.sign_in_with_password({
                             "email": login_email.strip(),
                             "password": login_pass
@@ -252,7 +279,6 @@ with st.sidebar:
                         
                         if auth_res.user:
                             user_id = auth_res.user.id
-                            # Retrieve user profile from farmer_profiles table
                             res = supabase_client.table("farmer_profiles").select("*").eq("id", user_id).execute()
                             
                             if res and res.data:
@@ -268,13 +294,13 @@ with st.sidebar:
                     except Exception as e:
                         err_str = str(e)
                         if "Email not confirmed" in err_str:
-                            st.error("❌ Login failed: Email not confirmed! Please check your inbox and confirm your email address.")
+                            st.error("❌ Login failed: Email not confirmed! Check your inbox to verify your account.")
                         else:
                             st.error(f"Login failed: {e}")
                 else:
                     st.warning("Please fill all fields.")
         
-        # REGISTER NEW FARMER WITH EMAIL CONFIRMATION NOTIFICATION
+        # REGISTER NEW FARMER
         elif "Register" in auth_choice:
             reg_name = st.text_input("Full Name / الاسم الكامل", key="sb_r_name")
             reg_email = st.text_input("Email / البريد الإلكتروني", key="sb_r_email")
@@ -288,7 +314,6 @@ with st.sidebar:
                         clean_name = sanitize(reg_name)
                         clean_card = sanitize(reg_card)
 
-                        # Step 1: Register in Supabase Auth
                         auth_response = supabase_client.auth.sign_up({
                             "email": clean_email,
                             "password": reg_pass
@@ -297,7 +322,6 @@ with st.sidebar:
                         if auth_response.user:
                             user_id = auth_response.user.id
                             
-                            # Step 2: Save profile data into farmer_profiles table
                             supabase_client.table("farmer_profiles").insert({
                                 "id": user_id,
                                 "email": clean_email,
@@ -305,7 +329,6 @@ with st.sidebar:
                                 "carte_num": clean_card
                             }).execute()
 
-                            # Check if session exists (If email confirmation is enabled, session will be None)
                             if auth_response.session is None:
                                 st.info(f"📩 **Confirmation Email Sent!**\n\nWe sent a verification link to `{clean_email}`. Please open your inbox and confirm your email address before logging in.")
                             else:
@@ -322,14 +345,22 @@ with st.sidebar:
                 else:
                     st.warning("Please fill out all registration fields.")
 
-        # FORGOT PASSWORD / RECOVERY
+        # REAL SUPABASE PASSWORD RESET / RECOVERY
         else:
             rec_email = st.text_input("Enter your registered email:", key="sb_rec_email")
             if st.button("📧 Send Recovery Link", use_container_width=True):
                 if rec_email:
-                    st.success(f"Recovery instructions have been dispatched to `{rec_email}`!")
+                    try:
+                        # Calls Supabase Auth to dispatch real reset email
+                        supabase_client.auth.reset_password_for_email(
+                            rec_email.strip(),
+                            opts={"redirect_to": "https://your-app-url.streamlit.app"}
+                        )
+                        st.success(f" Recovery email sent to `{rec_email}`! Check your inbox and spam folder.")
+                    except Exception as e:
+                        st.error(f"Failed to dispatch recovery link: {e}")
                 else:
-                    st.warning("Please enter your email.")
+                    st.warning("Please enter your email address.")
     else:
         st.success(f"🟢 Connected:\n**{st.session_state.farmer_name}**")
         st.caption(f"Email: `{st.session_state.farmer_email}`")
