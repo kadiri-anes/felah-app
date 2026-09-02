@@ -353,8 +353,9 @@ with st.sidebar:
                     try:
                         # Calls Supabase Auth to dispatch real reset email
                         supabase_client.auth.reset_password_for_email(
-                            rec_email.strip(),
-                            opts={"redirect_to": "https://your-app-url.streamlit.app"}
+    rec_email.strip(),
+    options={"redirect_to": "https://your-app-url.streamlit.app"}
+)
                         )
                         st.success(f" Recovery email sent to `{rec_email}`! Check your inbox and spam folder.")
                     except Exception as e:
