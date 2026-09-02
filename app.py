@@ -267,7 +267,6 @@ with st.sidebar:
             if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
                 if user_captcha != correct_sum:
                     st.error("❌ Incorrect CAPTCHA answer! Please solve the sum correctly.")
-                    # Refresh numbers on failed attempt
                     st.session_state.captcha_num1 = random.randint(1, 9)
                     st.session_state.captcha_num2 = random.randint(1, 9)
                 elif login_email and login_pass:
@@ -345,19 +344,14 @@ with st.sidebar:
                 else:
                     st.warning("Please fill out all registration fields.")
 
-        # REAL SUPABASE PASSWORD RESET / RECOVERY
+        # REAL SUPABASE PASSWORD RESET / RECOVERY (FIXED)
         else:
             rec_email = st.text_input("Enter your registered email:", key="sb_rec_email")
             if st.button("📧 Send Recovery Link", use_container_width=True):
                 if rec_email:
                     try:
-                        # Calls Supabase Auth to dispatch real reset email
-                        supabase_client.auth.reset_password_for_email(
-    rec_email.strip(),
-    options={"redirect_to": "https://your-app-url.streamlit.app"}
-)
-                        )
-                        st.success(f" Recovery email sent to `{rec_email}`! Check your inbox and spam folder.")
+                        supabase_client.auth.reset_password_for_email(rec_email.strip())
+                        st.success(f"Recovery email sent to `{rec_email}`! Check your inbox and spam folder.")
                     except Exception as e:
                         st.error(f"Failed to dispatch recovery link: {e}")
                 else:
