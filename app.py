@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# COLOR PALETTE & CSS INJECTION (ORANGE DARK MODE MATCH)
+# DYNAMIC CSS STYLING (ORANGE IN DARK MODE / DEFAULT IN LIGHT MODE)
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -319,38 +319,67 @@ if is_dark:
     subtext_color = "#8b949e"
     accent_orange = "#f97316"
     accent_orange_hover = "#ea580c"
-    btn_bg = "#f97316"
-    btn_text = "#ffffff"
+
+    # Dark Mode Custom Button Styles (Orange)
+    btn_css = f"""
+        background-color: {accent_orange} !important;
+        color: #ffffff !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: all 0.15s ease-in-out;
+    """
+    btn_hover_css = f"background-color: {accent_orange_hover} !important; opacity: 0.9;"
+
+    # Dark Mode Sidebar Inputs Customization
+    sidebar_css = f"""
+        background-color: {sidebar_bg} !important;
+        border-right: 1px solid {border_color};
+    """
+    sidebar_inputs_css = f"""
+        div[data-testid="stSidebar"] input {{
+            background-color: #0d1117 !important;
+            color: #ffffff !important;
+            border: 1px solid {accent_orange} !important;
+        }}
+        div[data-testid="stSidebar"] div[data-baseweb="radio"] div[aria-checked="true"] {{
+            background-color: {accent_orange} !important;
+        }}
+    """
+    segmented_active_css = f"background-color: {accent_orange} !important; color: #ffffff !important;"
 else:
-    bg_color = "#f8fafc"
+    # Standard Light Mode Colors (Original Streamlit Theme)
+    bg_color = "#ffffff"
     card_bg = "#ffffff"
-    sidebar_bg = "#f1f5f9"
-    text_color = "#0f172a"
-    border_color = "#e2e8f0"
-    subtext_color = "#64748b"
-    accent_orange = "#ea580c"
-    accent_orange_hover = "#c2410c"
-    btn_bg = "#ea580c"
-    btn_text = "#ffffff"
+    sidebar_bg = "#f8f9fa"
+    text_color = "#212529"
+    border_color = "#dee2e6"
+    subtext_color = "#6c757d"
+    accent_orange = "#047857"
+
+    # Default Light Mode Button Styles
+    btn_css = ""
+    btn_hover_css = ""
+    sidebar_css = ""
+    sidebar_inputs_css = ""
+    segmented_active_css = "background-color: #047857 !important; color: #ffffff !important;"
 
 st.markdown(
     f"""
     <style>
-    /* Global App & Sidebar */
+    /* Global App Container */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }}
 
+    /* Sidebar Styling */
     div[data-testid="stSidebar"] {{
-        background-color: {sidebar_bg} !important;
-        border-right: 1px solid {border_color};
+        {sidebar_css}
     }}
 
-    div[data-testid="stSidebar"] * {{
-        color: {text_color} !important;
-    }}
+    {sidebar_inputs_css}
 
     /* Header Banner Container */
     .header-banner {{
@@ -374,28 +403,22 @@ st.markdown(
         color: #ecfdf5 !important;
     }}
 
-    /* Notification Bell Top Button in Dark Mode */
-    .hdr-bell-container button {{
-        background-color: {accent_orange} !important;
-        color: #ffffff !important;
-        border: none !important;
-        border-radius: 10px !important;
-        height: 100% !important;
-        font-size: 1.2rem !important;
-    }}
-    .hdr-bell-container button:hover {{
-        background-color: {accent_orange_hover} !important;
-    }}
-
-    /* Continuous Sliding Segmented Switcher */
+    /* Perfectly Centered Sliding Tabs across English/Arabic */
     div[data-testid="stSegmentedControl"] {{
+        margin: 0 auto !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        width: fit-content !important;
         background-color: {card_bg} !important;
         border: 1px solid {border_color} !important;
         border-radius: 30px !important;
         padding: 4px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-        display: flex !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+    }}
+    div[data-testid="stSegmentedControl"] > div {{
         justify-content: center !important;
+        width: 100% !important;
     }}
     div[data-testid="stSegmentedControl"] button {{
         border-radius: 25px !important;
@@ -403,28 +426,21 @@ st.markdown(
         color: {text_color} !important;
         transition: all 0.25s ease-in-out !important;
         font-weight: 600 !important;
+        padding: 6px 20px !important;
     }}
     div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
-        background-color: {accent_orange} !important;
-        color: #ffffff !important;
-        box-shadow: 0 2px 6px rgba(249, 115, 22, 0.4) !important;
+        {segmented_active_css}
     }}
 
-    /* Custom Buttons - Orange Tint Match */
+    /* Buttons Style */
     .stButton>button {{
-        background-color: {btn_bg} !important;
-        color: {btn_text} !important;
-        border-radius: 8px !important;
-        border: none !important;
-        font-weight: 600 !important;
-        transition: all 0.15s ease-in-out;
+        {btn_css}
     }}
     .stButton>button:hover {{
-        background-color: {accent_orange_hover} !important;
-        opacity: 0.9;
+        {btn_hover_css}
     }}
 
-    /* Section Headers & Content Wrapper */
+    /* Section Headers */
     .section-title {{
         text-align: center;
         color: {text_color};
@@ -495,7 +511,7 @@ with st.sidebar:
 
     st.divider()
 
-    # User Authentication
+    # User Authentication Area (Orange in Dark mode, normal in Light mode)
     st.subheader("👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
         auth_mode = st.radio(
@@ -593,7 +609,7 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# CENTERED HEADER BANNER WITH ORANGE NOTIFICATION BELL
+# CENTERED HEADER BANNER WITH NOTIFICATION BELL
 # ---------------------------------------------------------
 banner_col1, banner_col2, banner_col3 = st.columns([1, 6, 1])
 
@@ -609,7 +625,6 @@ with banner_col2:
     )
 
 with banner_col3:
-    st.markdown('<div class="hdr-bell-container">', unsafe_allow_html=True)
     bell_label = f"🔔 {unread_count}" if unread_count > 0 else "🔔"
     if st.button(
         bell_label,
@@ -619,7 +634,6 @@ with banner_col3:
     ):
         st.session_state.show_notif_popup = not st.session_state.show_notif_popup
         st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # Quick Notification Viewer Overlay
 if st.session_state.show_notif_popup:
@@ -648,13 +662,11 @@ if st.session_state.show_notif_popup:
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
-st.write("")  # Tight spacing
+st.write("")
 
 # ---------------------------------------------------------
-# CENTERED SLIDING SEGMENTED CONTROL TABS
+# PERFECTLY CENTERED SLIDING SEGMENTED CONTROL TABS
 # ---------------------------------------------------------
-c_left, c_mid, c_right = st.columns([1, 4, 1])
-
 tab_options_map = {
     f"🏠 {t['tab_home']}": "home",
     f"🪪 {t['tab_card']}": "card",
@@ -663,7 +675,10 @@ tab_options_map = {
 
 reverse_map = {v: k for k, v in tab_options_map.items()}
 
-with c_mid:
+# Centered layout using st.columns
+_, center_col, _ = st.columns([1, 8, 1])
+
+with center_col:
     selected_segmented_label = st.segmented_control(
         label="Navigation Tabs",
         options=list(tab_options_map.keys()),
@@ -683,7 +698,7 @@ with c_mid:
         st.rerun()
 
 # ---------------------------------------------------------
-# TAB 1: MAIN SERVICES VIEW (BAR REMOVED DIRECTLY ABOVE THIS)
+# TAB 1: MAIN SERVICES VIEW
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
     if st.session_state.selected_service is None:
