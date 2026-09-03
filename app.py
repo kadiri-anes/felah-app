@@ -408,11 +408,10 @@ if st.session_state.active_tab == "services":
                 st.rerun()
             if st.button(t["crop"], use_container_width=True):
                 st.session_state.selected_service = "crop"
-                # SERVICE 1 CONTINUED / PAYMENTS AND SERVICES BUTTONS
-        st.rerun()
-        if st.button(t['pay'], use_container_width=True): 
-            st.session_state.selected_service = "pay"
-            st.rerun()
+                st.rerun()
+            if st.button(t['pay'], use_container_width=True): 
+                st.session_state.selected_service = "pay"
+                st.rerun()
         
         with col2:
             if st.button(t['news'], use_container_width=True): 
