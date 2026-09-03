@@ -184,7 +184,7 @@ TEXTS = {
         "support": "طلب دعم الدولة (الدعم الفلاحي)",
         "weather": "الأحوال الجوية والتنبيهات",
         "pay": "تجديد بطاقة الفلاح (الذهبية/CIB)",
-        "suppliers": "خريطة CCLS ونقاط الأسمدة وأسواق الجملة",
+        "suppliers": "خريطة CCLS ونقاط الأسمدة وأسوق الجملة",
         "back_btn": "⬅️ العودة للخدمات الرئيسية",
     },
     "EN": {
@@ -306,134 +306,154 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# COLOR PALETTE & CSS INJECTION
+# COLOR PALETTE & CSS INJECTION (ORANGE DARK MODE MATCH)
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
 if is_dark:
     bg_color = "#0d1117"
     card_bg = "#161b22"
+    sidebar_bg = "#161b22"
     text_color = "#f0f6fc"
     border_color = "#30363d"
     subtext_color = "#8b949e"
-    primary_accent = "#10b981"
-    primary_hover = "#059669"
+    accent_orange = "#f97316"
+    accent_orange_hover = "#ea580c"
+    btn_bg = "#f97316"
+    btn_text = "#ffffff"
 else:
     bg_color = "#f8fafc"
     card_bg = "#ffffff"
+    sidebar_bg = "#f1f5f9"
     text_color = "#0f172a"
     border_color = "#e2e8f0"
     subtext_color = "#64748b"
-    primary_accent = "#059669"
-    primary_hover = "#047857"
+    accent_orange = "#ea580c"
+    accent_orange_hover = "#c2410c"
+    btn_bg = "#ea580c"
+    btn_text = "#ffffff"
 
 st.markdown(
     f"""
     <style>
-    @keyframes slideInUp {{
-        0% {{
-            opacity: 0;
-            transform: translateY(14px);
-        }}
-        100% {{
-            opacity: 1;
-            transform: translateY(0);
-        }}
-    }}
-
+    /* Global App & Sidebar */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }}
 
+    div[data-testid="stSidebar"] {{
+        background-color: {sidebar_bg} !important;
+        border-right: 1px solid {border_color};
+    }}
+
+    div[data-testid="stSidebar"] * {{
+        color: {text_color} !important;
+    }}
+
     /* Header Banner Container */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
-        padding: 20px;
+        padding: 18px;
         border-radius: 12px;
         text-align: center;
-        margin-bottom: 20px;
-        position: relative;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }}
     .header-banner h2 {{
         margin: 0 0 4px 0;
         font-weight: 700;
-        font-size: 1.6rem;
+        font-size: 1.5rem;
         color: #ffffff !important;
     }}
     .header-banner p {{
         margin: 0;
         opacity: 0.95;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         color: #ecfdf5 !important;
     }}
 
-    /* Sliding Content Area */
-    .animated-tab-content {{
-        animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        background-color: {card_bg};
-        border: 1px solid {border_color};
-        border-radius: 12px;
-        padding: 22px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    /* Notification Bell Top Button in Dark Mode */
+    .hdr-bell-container button {{
+        background-color: {accent_orange} !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 10px !important;
+        height: 100% !important;
+        font-size: 1.2rem !important;
+    }}
+    .hdr-bell-container button:hover {{
+        background-color: {accent_orange_hover} !important;
     }}
 
-    /* Section Headers */
+    /* Continuous Sliding Segmented Switcher */
+    div[data-testid="stSegmentedControl"] {{
+        background-color: {card_bg} !important;
+        border: 1px solid {border_color} !important;
+        border-radius: 30px !important;
+        padding: 4px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        display: flex !important;
+        justify-content: center !important;
+    }}
+    div[data-testid="stSegmentedControl"] button {{
+        border-radius: 25px !important;
+        border: none !important;
+        color: {text_color} !important;
+        transition: all 0.25s ease-in-out !important;
+        font-weight: 600 !important;
+    }}
+    div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
+        background-color: {accent_orange} !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 6px rgba(249, 115, 22, 0.4) !important;
+    }}
+
+    /* Custom Buttons - Orange Tint Match */
+    .stButton>button {{
+        background-color: {btn_bg} !important;
+        color: {btn_text} !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: all 0.15s ease-in-out;
+    }}
+    .stButton>button:hover {{
+        background-color: {accent_orange_hover} !important;
+        opacity: 0.9;
+    }}
+
+    /* Section Headers & Content Wrapper */
     .section-title {{
         text-align: center;
-        color: {primary_accent};
-        margin-bottom: 18px;
-        font-size: 1.4rem;
+        color: {text_color};
+        margin-top: 10px;
+        margin-bottom: 20px;
+        font-size: 1.3rem;
         font-weight: 700;
     }}
 
-    /* News & Notification Cards */
-    .news-card {{
+    /* Cards */
+    .news-card, .notif-card {{
         background-color: {card_bg};
         border: 1px solid {border_color};
-        border-left: 5px solid {primary_accent};
-        padding: 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        color: {text_color};
-    }}
-    .notif-card {{
-        background-color: {card_bg};
-        border: 1px solid {border_color};
-        border-right: 5px solid {primary_accent};
+        border-left: 5px solid {accent_orange};
         padding: 14px;
         border-radius: 8px;
         margin-bottom: 10px;
         color: {text_color};
     }}
 
-    /* Streamlit UI Controls Tuning */
-    div[data-testid="stSidebar"] {{
-        background-color: {card_bg} !important;
-        border-right: 1px solid {border_color};
-    }}
-    
-    .stButton>button {{
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.15s ease-in-out;
-    }}
-    .stButton>button:hover {{
-        border-color: {primary_accent} !important;
-        color: {primary_accent} !important;
-    }}
-
-    /* Notification Bell Popup Window */
+    /* Notification Popup */
     .notif-popover {{
         background-color: {card_bg};
-        border: 1px solid {border_color};
-        border-radius: 8px;
+        border: 1px solid {accent_orange};
+        border-radius: 10px;
         padding: 14px;
+        margin-top: 10px;
         margin-bottom: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     }}
     </style>
 """,
@@ -449,7 +469,7 @@ unread_count = get_unread_notif_count()
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
-    # Fast Language Switcher (Zero delay state binding)
+    # Fast Language Switcher
     lang_choice = st.radio(
         "اللغة / Language",
         ["العربية", "English"],
@@ -498,7 +518,7 @@ with st.sidebar:
                 value=0,
             )
 
-            if st.button("Submit Registration", type="primary"):
+            if st.button("Submit Registration", use_container_width=True):
                 if (
                     captcha_ans
                     != st.session_state.captcha_num1
@@ -526,7 +546,7 @@ with st.sidebar:
                         st.error(f"Registration Error: {e}")
 
         elif auth_mode == "Log In (دخول)":
-            if st.button("Login", type="primary"):
+            if st.button("Login", use_container_width=True):
                 if email_input and pass_input and supabase_client:
                     try:
                         res = supabase_client.auth.sign_in_with_password(
@@ -551,7 +571,7 @@ with st.sidebar:
                     st.error("Please enter email and password.")
 
         elif auth_mode == "Forgot Password":
-            if st.button("Send Reset Link"):
+            if st.button("Send Reset Link", use_container_width=True):
                 if email_input and supabase_client:
                     try:
                         supabase_client.auth.reset_password_for_email(
@@ -573,7 +593,7 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# CENTERED HEADER BANNER WITH NOTIFICATION BELL
+# CENTERED HEADER BANNER WITH ORANGE NOTIFICATION BELL
 # ---------------------------------------------------------
 banner_col1, banner_col2, banner_col3 = st.columns([1, 6, 1])
 
@@ -589,25 +609,29 @@ with banner_col2:
     )
 
 with banner_col3:
-    # Top Quick Notification Bell Toggle Button
-    bell_label = f"🔔 ({unread_count})" if unread_count > 0 else "🔔"
-    if st.button(bell_label, key="hdr_bell_btn", help="View Notifications"):
+    st.markdown('<div class="hdr-bell-container">', unsafe_allow_html=True)
+    bell_label = f"🔔 {unread_count}" if unread_count > 0 else "🔔"
+    if st.button(
+        bell_label,
+        key="hdr_bell_btn",
+        help="View Notifications",
+        use_container_width=True,
+    ):
         st.session_state.show_notif_popup = not st.session_state.show_notif_popup
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # Quick Notification Viewer Overlay
 if st.session_state.show_notif_popup:
     with banner_col2:
-        st.markdown(
-            f'<div class="notif-popover">', unsafe_allow_html=True
-        )
+        st.markdown('<div class="notif-popover">', unsafe_allow_html=True)
         st.markdown("#### 🔔 Quick Notifications Inbox")
         if not st.session_state.logged_in:
             st.info("Please log in to view your private notifications.")
         else:
             notifs = get_user_notifications()
             if notifs:
-                for n in notifs[:3]:  # Top 3 latest
+                for n in notifs[:3]:
                     st.markdown(
                         f"""
                         <div class="notif-card">
@@ -624,66 +648,44 @@ if st.session_state.show_notif_popup:
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
+st.write("")  # Tight spacing
+
 # ---------------------------------------------------------
-# CENTERED SLIDING NAVIGATION TABS
+# CENTERED SLIDING SEGMENTED CONTROL TABS
 # ---------------------------------------------------------
 c_left, c_mid, c_right = st.columns([1, 4, 1])
 
+tab_options_map = {
+    f"🏠 {t['tab_home']}": "home",
+    f"🪪 {t['tab_card']}": "card",
+    f"🔔 {t['tab_account']}": "account",
+}
+
+reverse_map = {v: k for k, v in tab_options_map.items()}
+
 with c_mid:
-    t_col1, t_col2, t_col3 = st.columns(3)
-
-    badge = f" ({unread_count})" if unread_count > 0 else ""
-
-    with t_col1:
-        if st.button(
-            f"🏠 {t['tab_home']}",
-            use_container_width=True,
-            type=(
-                "primary"
-                if st.session_state.active_tab == "home"
-                else "secondary"
-            ),
-            key="tab_home_btn",
-        ):
-            st.session_state.active_tab = "home"
-            st.rerun()
-
-    with t_col2:
-        if st.button(
-            f"🪪 {t['tab_card']}",
-            use_container_width=True,
-            type=(
-                "primary"
-                if st.session_state.active_tab == "card"
-                else "secondary"
-            ),
-            key="tab_card_btn",
-        ):
-            st.session_state.active_tab = "card"
-            st.rerun()
-
-    with t_col3:
-        if st.button(
-            f"🔔 {t['tab_account']}{badge}",
-            use_container_width=True,
-            type=(
-                "primary"
-                if st.session_state.active_tab == "account"
-                else "secondary"
-            ),
-            key="tab_acc_btn",
-        ):
-            st.session_state.active_tab = "account"
-            st.rerun()
-
-# ---------------------------------------------------------
-# TAB 1: MAIN SERVICES VIEW
-# ---------------------------------------------------------
-if st.session_state.active_tab == "home":
-    st.markdown(
-        '<div class="animated-tab-content">', unsafe_allow_html=True
+    selected_segmented_label = st.segmented_control(
+        label="Navigation Tabs",
+        options=list(tab_options_map.keys()),
+        default=reverse_map.get(
+            st.session_state.active_tab, list(tab_options_map.keys())[0]
+        ),
+        label_visibility="collapsed",
+        key="sliding_tabs_control",
     )
 
+    if (
+        selected_segmented_label
+        and tab_options_map[selected_segmented_label]
+        != st.session_state.active_tab
+    ):
+        st.session_state.active_tab = tab_options_map[selected_segmented_label]
+        st.rerun()
+
+# ---------------------------------------------------------
+# TAB 1: MAIN SERVICES VIEW (BAR REMOVED DIRECTLY ABOVE THIS)
+# ---------------------------------------------------------
+if st.session_state.active_tab == "home":
     if st.session_state.selected_service is None:
         st.markdown(
             f"<h3 class='section-title'>{t['main_services']}</h3>",
@@ -696,7 +698,6 @@ if st.session_state.active_tab == "home":
             if st.button(
                 f"🌾 {t['crop']}",
                 use_container_width=True,
-                type="primary",
                 key="srv_crop",
             ):
                 st.session_state.selected_service = "crop"
@@ -795,7 +796,6 @@ if st.session_state.active_tab == "home":
 
                 if st.button(
                     "Submit Support Demand (إرسال طلب الدعم)",
-                    type="primary",
                     use_container_width=True,
                 ):
                     if len(uploaded_files) < len(req_docs):
@@ -860,8 +860,8 @@ if st.session_state.active_tab == "home":
                     st.markdown(
                         f"""
                         <div class="news-card">
-                            <span style="background: {primary_accent}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
-                            <h4 style="margin: 8px 0 5px 0; color: {primary_accent};">📢 {sanitize(n.get("title",""))}</h4>
+                            <span style="background: {accent_orange}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
+                            <h4 style="margin: 8px 0 5px 0; color: {accent_orange};">📢 {sanitize(n.get("title",""))}</h4>
                             <p style="margin: 0;">{sanitize(n.get("content",""))}</p>
                         </div>
                     """,
@@ -915,9 +915,7 @@ if st.session_state.active_tab == "home":
                     f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha"
                 )
 
-            if st.button(
-                "Submit & Generate QR Permit", type="primary"
-            ):
+            if st.button("Submit & Generate QR Permit"):
                 if st.session_state.logged_in:
                     try:
                         supabase_client.table("declarations").insert({
@@ -1004,7 +1002,7 @@ if st.session_state.active_tab == "home":
             st.text_input(
                 "Card Number:", placeholder="6037 XXXX XXXX XXXX"
             )
-            if st.button("Confirm Payment", type="primary"):
+            if st.button("Confirm Payment"):
                 st.success("Carte Fellah renewed for season 2026/2027!")
 
         # SERVICE 6: MAPS DIRECTORY
@@ -1069,43 +1067,38 @@ if st.session_state.active_tab == "home":
 
                 popup_html = f"""
                 <div style="font-family: Arial; width: 200px; color: black;">
-                    <h4 style="margin:0; color:#059669;">{name}</h4>
+                    <h4 style="margin:0; color:#ea580c;">{name}</h4>
                     <p style="margin:0; font-size:12px;"><b>Cat:</b> {cat}</p>
-                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#2563eb; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
+                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#ea580c; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
                 </div>
                 """
                 folium.Marker(
                     location=[lat, lon],
                     popup=folium.Popup(popup_html, max_width=220),
                     tooltip=name,
-                    icon=folium.Icon(color=color_map.get(cat, "blue")),
+                    icon=folium.Icon(color=color_map.get(cat, "orange")),
                 ).add_to(m)
 
             st_folium(m, width=700, height=450)
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
 # TAB 2: DIGITAL CARTE FELLAH
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "card":
-    st.markdown(
-        '<div class="animated-tab-content">', unsafe_allow_html=True
-    )
     st.subheader("Digital Carte Fellah - البطاقة الفلاحية الرقمية")
 
     if st.session_state.logged_in:
         st.markdown(
             f"""
-            <div style="border: 2px solid {primary_accent}; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
-                <h3 style="color: {primary_accent}; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
+            <div style="border: 2px solid {accent_orange}; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
+                <h3 style="color: {accent_orange}; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
                 <p><b>وزارة الفلاحة والتنمية الريفية</b></p>
                 <hr style="border-color: {border_color};">
                 <div style="text-align: right; display: inline-block;">
                     <p><b>Farmer Name / الاسم:</b> {st.session_state.farmer_name}</p>
                     <p><b>Email / البريد:</b> {st.session_state.farmer_email}</p>
                     <p><b>Card N° / رقم البطاقة:</b> {st.session_state.carte_num}</p>
-                    <p><b>Status / الحالة:</b> <span style="color: {primary_accent}; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
+                    <p><b>Status / الحالة:</b> <span style="color: {accent_orange}; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
                 </div>
             </div>
         """,
@@ -1114,16 +1107,10 @@ elif st.session_state.active_tab == "card":
     else:
         st.warning("Please log in to view your digital card.")
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
 # ---------------------------------------------------------
 # TAB 3: PERSONAL HUB & OWNER ADMIN CONSOLE
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
-    st.markdown(
-        '<div class="animated-tab-content">', unsafe_allow_html=True
-    )
-
     if st.session_state.logged_in:
         st.subheader(f"👋 Welcome, {st.session_state.farmer_name}")
         st.caption(
@@ -1234,7 +1221,7 @@ elif st.session_state.active_tab == "account":
             type="password",
             key="admin_pwd",
         )
-        if st.button("Unlock Admin Panel", type="primary"):
+        if st.button("Unlock Admin Panel"):
             if admin_input_pass == get_admin_password():
                 st.session_state.admin_authenticated = True
                 st.success("Access Granted to Portal Admin Console.")
@@ -1396,5 +1383,3 @@ elif st.session_state.active_tab == "account":
         if st.button("🔒 Lock Admin Console"):
             st.session_state.admin_authenticated = False
             st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
