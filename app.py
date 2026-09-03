@@ -383,21 +383,11 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    /* Centered Outer Banner Wrap */
-    .banner-outer-wrap {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-        margin-bottom: 20px;
-        position: relative;
-    }}
-
-    /* Perfectly Centered Banner */
+    /* Green Header Banner with ~1cm Shift to the Right for Title Text */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
-        padding: 20px 25px;
+        padding: 20px 25px 20px 60px; /* Shifted internal alignment to the right */
         border-radius: 14px;
         text-align: center;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
@@ -410,54 +400,48 @@ st.markdown(
         font-weight: 800;
         font-size: 1.55rem;
         color: #ffffff !important;
+        padding-right: 38px; /* Shifts main heading ~1cm to the right */
     }}
     .header-banner p {{
         margin: 0;
         opacity: 0.95;
         font-size: 0.9rem;
         color: #ecfdf5 !important;
+        padding-right: 38px; /* Shifts subtitle ~1cm to the right */
     }}
 
-    /* Floating Bell Button Positioned Outside Title Flow */
-    .bell-wrap {{
-        position: absolute;
-        right: 0;
-        top: 50%;
-        transform: translateY(-50%);
-    }}
-
-    /* FORCE PERFECT CENTERING FOR STREAMLIT SEGMENTED CONTROL */
+    /* MATCHING WIDTH FOR SEGMENTED CONTROL / THREE TABS */
     div[data-testid="stSegmentedControl"] {{
         display: flex !important;
         justify-content: center !important;
         align-items: center !important;
         width: 100% !important;
-        max-width: 650px !important;
-        margin: 0 auto 25px auto !important;
+        max-width: 800px !important; /* Matches green banner exact max-width */
+        margin: 15px auto 25px auto !important;
         background-color: {segmented_bg} !important;
         border: 1px solid {border_color} !important;
-        border-radius: 35px !important;
-        padding: 5px !important;
+        border-radius: 12px !important;
+        padding: 4px !important;
         box-shadow: 0 3px 10px rgba(0,0,0,0.06) !important;
     }}
     
     div[data-testid="stSegmentedControl"] > div {{
         width: 100% !important;
         display: flex !important;
-        justify-content: center !important;
+        justify-content: space-between !important;
         align-items: center !important;
         margin: 0 auto !important;
     }}
     
     div[data-testid="stSegmentedControl"] button {{
         flex: 1 !important;
-        border-radius: 28px !important;
+        border-radius: 8px !important;
         border: none !important;
         color: {text_color} !important;
         transition: all 0.25s ease-in-out !important;
-        font-size: 1rem !important;
+        font-size: 0.95rem !important;
         font-weight: 600 !important;
-        padding: 8px 16px !important;
+        padding: 8px 12px !important;
         text-align: center !important;
     }}
     
@@ -636,7 +620,7 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# STRICTLY CENTERED HEADER BANNER
+# HEADER BANNER & BELL ICON
 # ---------------------------------------------------------
 banner_col, bell_col = st.columns([11, 1])
 
@@ -689,7 +673,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# PERFECTLY CENTERED SLIDING TABS SWITCHER
+# ALIGNED SLIDING TABS SWITCHER (YELLOW LINE MATCH)
 # ---------------------------------------------------------
 tab_options_map = {
     f"🏠 {t['tab_home']}": "home",
