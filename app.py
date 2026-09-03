@@ -1,413 +1,428 @@
-from datetime import date
-from io import BytesIO
-import random
-import re
-import folium
+import streamlit as st
 import pandas as pd
 import qrcode
-import streamlit as st
+import random
+import html
+import hashlib
+from datetime import date
+from io import BytesIO
+from st_supabase_connection import SupabaseConnection
+import folium
 from streamlit_folium import st_folium
-from supabase import create_client, Client
 
 # ---------------------------------------------------------
-# STREAMLIT PAGE CONFIGURATION
+# Security & Helper Functions
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="المناصة الرقمية للخدمات الفلاحية - Felah Portal",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+def sanitize(text: str) -> str:
+    """Sanitize user input to prevent XSS attacks."""
+    if not isinstance(text, str):
+        return str(text)
+    return html.escape(text.strip())
 
-# Custom CSS styling for portal UI and alert elements
-st.markdown(
-    """
+def hash_password(password: str) -> str:
+    """Hash password using SHA-256 for local checks."""
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def get_admin_password() -> str:
+    return st.secrets.get("ADMIN_PASSWORD", "greatdz")
+
+# ---------------------------------------------------------
+# Page Configuration & Styling
+# ---------------------------------------------------------
+st.set_page_config(page_title="Felah Mobile Portal - Algeria", page_icon="🌾", layout="centered")
+
+st.markdown("""
     <style>
-    .main { padding: 1rem 2rem; }
+    .stApp { background-color: #f4f7f6; }
+    .mobile-sidebar-notice {
+        background-color: #e6f4ea;
+        border: 2px dashed #0b8a62;
+        border-radius: 10px;
+        padding: 10px;
+        text-align: center;
+        margin-bottom: 12px;
+        font-weight: bold;
+        color: #0b8a62;
+    }
+    .promo-banner {
+        background: linear-gradient(135deg, #0b8a62 0%, #1e5340 100%);
+        color: white;
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 12px;
+        border: 2px solid #d4af37;
+    }
     .news-card {
-        background-color: #f8f9fa;
+        background-color: #ffffff;
         border-left: 5px solid #0b8a62;
+        border-radius: 8px;
         padding: 15px;
         margin-bottom: 12px;
-        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.06);
     }
     .notif-card {
-        background-color: #eef7f4;
-        border: 1px solid #c2e5d9;
+        background-color: #ffffff;
+        border-left: 5px solid #1a73e8;
+        border-radius: 8px;
         padding: 12px;
-        border-radius: 6px;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
+    .unread-badge {
+        background-color: #d32f2f;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: bold;
+    }
+    .market-card { background-color: white; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
     </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CONSTANTS & CONFIGURATION DATA
+# Database Client Initializer
 # ---------------------------------------------------------
+try:
+    conn = st.connection(
+        "supabase",
+        type=SupabaseConnection,
+        url=st.secrets["connections"]["supabase"]["SUPABASE_URL"],
+        key=st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
+    )
+except Exception:
+    conn = st.connection("supabase", type=SupabaseConnection)
+
+supabase_client = conn.client
+
+# ---------------------------------------------------------
+# PRESET ALGERIAN DATA & LOCATIONS
+# ---------------------------------------------------------
+DEFAULT_AGRI_LOCATIONS = [
+    {"name": "Wholesale Market (EPLFM MAGRO)", "wilaya": "16 - Alger", "category": "Wholesale Produce Market", "lat": 36.7323, "lon": 3.1678, "maps_link": "https://maps.google.com/?q=36.7323,3.1678"},
+    {"name": "CCLS Silo & Grain Point", "wilaya": "19 - Sétif", "category": "OAIC Cereal Silo (CCLS)", "lat": 36.1911, "lon": 5.4137, "maps_link": "https://maps.google.com/?q=36.1911,5.4137"},
+    {"name": "Asmidal Fertilizer Depot", "wilaya": "23 - Annaba", "category": "ASMIDAL Fertilizer Depot", "lat": 36.9000, "lon": 7.7667, "maps_link": "https://maps.google.com/?q=36.9000,7.7667"},
+    {"name": "Wholesale Market (Attaf)", "wilaya": "44 - Aïn Defla", "category": "Wholesale Produce Market", "lat": 36.2238, "lon": 1.9682, "maps_link": "https://maps.google.com/?q=36.2238,1.9682"},
+    {"name": "CCLS Cereal Storage Depot", "wilaya": "14 - Tiaret", "category": "OAIC Cereal Silo (CCLS)", "lat": 35.3710, "lon": 1.3169, "maps_link": "https://maps.google.com/?q=35.3710,1.3169"},
+    {"name": "Wholesale Dates Market", "wilaya": "07 - Biskra", "category": "Wholesale Produce Market", "lat": 34.8502, "lon": 5.7281, "maps_link": "https://maps.google.com/?q=34.8502,5.7281"}
+]
+
 WILAYAS_48 = [
-    "01 - Adrar",
-    "02 - Chlef",
-    "03 - Laghouat",
-    "04 - Oum El Bouaghi",
-    "05 - Batna",
-    "06 - Béjaïa",
-    "07 - Biskra",
-    "08 - Béchar",
-    "09 - Blida",
-    "10 - Bouira",
-    "11 - Tamanrasset",
-    "12 - Tébessa",
-    "13 - Tlemcen",
-    "14 - Tiaret",
-    "15 - Tizi Ouzou",
-    "16 - Alger",
-    "17 - Djelfa",
-    "18 - Jijel",
-    "19 - Sétif",
-    "20 - Saïda",
-    "21 - Skikda",
-    "22 - Sidi Bel Abbès",
-    "23 - Annaba",
-    "24 - Guelma",
-    "25 - Constantine",
-    "26 - Médéa",
-    "27 - Mostaganem",
-    "28 - M'Sila",
-    "29 - Mascara",
-    "30 - Ouargla",
-    "31 - Oran",
-    "32 - El Bayadh",
-    "33 - Illizi",
-    "34 - Bordj Bou Arréridj",
-    "35 - Boumerdès",
-    "36 - El Tarf",
-    "37 - Tindouf",
-    "38 - Tissemsilt",
-    "39 - El Oued",
-    "40 - Khenchela",
-    "41 - Souk Ahras",
-    "42 - Tipaza",
-    "43 - Mila",
-    "44 - Aïn Defla",
-    "45 - Naâma",
-    "46 - Aïn Témouchent",
-    "47 - Ghardaïa",
-    "48 - Relizane",
+    "01 - Adrar", "02 - Chlef", "03 - Laghouat", "04 - Oum El Bouaghi", "05 - Batna", 
+    "06 - Béjaïa", "07 - Biskra", "08 - Béchar", "09 - Blida", "10 - Bouira", 
+    "11 - Tamanrasset", "12 - Tébessa", "13 - Tlemcen", "14 - Tiaret", "15 - Tizi Ouzou", 
+    "16 - Alger", "17 - Djelfa", "18 - Jijel", "19 - Sétif", "20 - Saïda", 
+    "21 - Skikda", "22 - Sidi Bel Abbès", "23 - Annaba", "24 - Guelma", "25 - Constantine", 
+    "26 - Médéa", "27 - Mostaganem", "28 - M'Sila", "29 - Mascara", "30 - Ouargla", 
+    "31 - Oran", "32 - El Bayadh", "33 - Illizi", "34 - Bordj Bou Arréridj", "35 - Boumerdès", 
+    "36 - El Tarf", "37 - Tindouf", "38 - Tissemsilt", "39 - El Oued", "40 - Khenchela", 
+    "41 - Souk Ahras", "42 - Tipaza", "43 - Mila", "44 - Aïn Defla", "45 - Naâma", 
+    "46 - Aïn Témouchent", "47 - Ghardaïa", "48 - Relizane"
 ]
 
 VEGETABLE_LIMITS = {
-    "Potatoes (بطاطا)": 150000.0,
-    "Tomatoes (طماطم)": 80000.0,
-    "Onions (بصل)": 60000.0,
-    "Garlic (ثوم)": 20000.0,
-    "Carrots (جزر)": 30000.0,
+    "Potato (بطاطس)": 1700.0, "Tomato (طماطم)": 1000.0, "Pepper (فلفل)": 800.0,
+    "Carrot (جزر)": 700.0, "Onion (بصل)": 650.0, "Garlic (ثوم)": 600.0,
+    "Wheat / Cereal (قمح)": 400.0, "Beans (فاصولياء)": 400.0, "Lettuce (خس)": 300.0, "Cucumber (خيار)": 200.0
 }
 
 FRUIT_LIST = [
-    "Dates (تمور)",
-    "Olives (زيتون)",
-    "Citrus (حمضيات)",
-    "Apples (تفاح)",
-    "Grapes (عنب)",
+    "Dates Deglet Nour (تمور دقلة نور)", "Citrus / Oranges (حمضيات / برتقال)",
+    "Apples (تفاح)", "Grapes (عنب)", "Olives (زيتون)", "Figs (تين)", "Watermelon / Melon (بطيخ)"
 ]
 
 SUPPORT_SECTORS = {
-    "Geomembrane Water Basin (أحواض الجيوممبران)": [
-        "Farmer Card (بطاقة الفلاح)",
-        "Land Ownership or Lease Contract (عقد الملكية أو الامتياز)",
-        "Technical Soil/Topography Report (تقرير تقني)",
-    ],
-    "Agricultural Well Digging (حفر الأبار الفلاحية)": [
-        "Farmer Card (بطاقة الفلاح)",
-        "Water Resources Authorization (ترخيص الموارد المائية)",
-        "Land Cadastral Plan (مخطط مساحي)",
-    ],
-    "Solar Pumping Systems (الطاقة الشمسية للمضخات)": [
-        "Farmer Card (بطاقة الفلاح)",
-        "Proforma Invoice for Equipment (فاتورة شكلية)",
-        "Pumping Station Specifications (دفتر الشروط)",
-    ],
-    "Drip Irrigation Networks (الري بالتقطير)": [
-        "Farmer Card (بطاقة الفلاح)",
-        "Water Source Proof (إثبات توفر الماء)",
-        "Irrigation Network Layout Map (مخطط الشبكة)",
-    ],
+    "Geomembrane Water Basin (حوض الجيو-ممبران)": ["Fellah Card (بطاقة الفلاح)", "Land Ownership or Lease Contract (عقد الملكية أو الامتياز)", "Technical Study / Supplier Proforma Invoice (دراسة تقنية / فاتورة شكلية)"],
+    "Well & Water Drilling (حفر الآبار الفلاحية)": ["Fellah Card (بطاقة الفلاح)", "Water Drilling Authorization Permit (رخصة حفر البئر من الموارد المائية)", "Land Title / Lease Agreement (عقد الملكية أو الامتياز)"],
+    "Modern Drip/Sprinkler Irrigation (أنظمة الري الحديثة)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice for Equipment (فاتورة شكلية للعتاد)", "Land Topography Plan (مخطط طبوغرافي للأرض)"],
+    "Solar Energy for Agricultural Pumps (الطاقة الشمسية للمزارع)": ["Fellah Card (بطاقة الفلاح)", "Solar Installation Technical Quote (عرض سعر للنظام الشمسي)", "Well Authorization / Water Source Proof (اثبات وجود مورد مائي)"],
+    "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزع معتمد)", "Exploitation Certificate (شهادة استغلال فلاحي)"]
 }
 
 ALERT_STYLES = {
-    "yellow": {
-        "bg_color": "#fff3cd",
-        "border_color": "#ffeba2",
-        "text_color": "#856404",
-        "badge_bg": "#ffe8a1",
-        "badge_text": "#856404",
-        "icon": "⚠️",
-        "label": "Moderate / معتدل",
-    },
-    "orange": {
-        "bg_color": "#ffe8cc",
-        "border_color": "#ffd8a8",
-        "text_color": "#d9480f",
-        "badge_bg": "#ffd8a8",
-        "badge_text": "#d9480f",
-        "icon": "🍊",
-        "label": "High / مرتفع",
-    },
-    "red": {
-        "bg_color": "#f8d7da",
-        "border_color": "#f5c6cb",
-        "text_color": "#721c24",
-        "badge_bg": "#f5c6cb",
-        "badge_text": "#721c24",
-        "icon": "🚨",
-        "label": "Critical / خطير جداً",
-    },
+    "yellow": {"bg_color": "#fff9c4", "border_color": "#fbc02d", "text_color": "#574200", "badge_bg": "#fbc02d", "badge_text": "#000000", "icon": "⚠️", "label": "Yellow / Vigilance (يقظة)"},
+    "orange": {"bg_color": "#ffe0b2", "border_color": "#f57c00", "text_color": "#4a2400", "badge_bg": "#f57c00", "badge_text": "#ffffff", "icon": "🍊", "label": "Orange / High Alert (حذر شديد)"},
+    "red": {"bg_color": "#ffcdd2", "border_color": "#d32f2f", "text_color": "#490c0c", "badge_bg": "#d32f2f", "badge_text": "#ffffff", "icon": "🚨", "label": "Red / Extreme Danger (خطر أقصى)"}
 }
-
-DEFAULT_AGRI_LOCATIONS = [
-    {
-        "name": "EURL Marché Gros Eucalyptus",
-        "wilaya": "16 - Alger",
-        "category": "Wholesale Produce Market",
-        "lat": 36.6580,
-        "lon": 3.1420,
-        "maps_link": "https://maps.google.com/?q=36.6580,3.1420",
-    },
-    {
-        "name": "OAIC CCLS Depot Biskra",
-        "wilaya": "07 - Biskra",
-        "category": "OAIC Cereal Silo (CCLS)",
-        "lat": 34.8500,
-        "lon": 5.7333,
-        "maps_link": "https://maps.google.com/?q=34.8500,5.7333",
-    },
-    {
-        "name": "ASMIDAL Fertilizer Distribution Centre",
-        "wilaya": "23 - Annaba",
-        "category": "ASMIDAL Fertilizer Depot",
-        "lat": 36.9000,
-        "lon": 7.7667,
-        "maps_link": "https://maps.google.com/?q=36.9000,7.7667",
-    },
-]
-
-TRANSLATIONS = {
-    "AR": {
-        "title": "المنصة الرقمية للخدمات الفلاحية",
-        "nav_col1": "🌾 الخدمات الفلاحية",
-        "nav_col2": "🪪 البطاقة الفلاحية",
-        "nav_col3": "👤 حسابي واللوحة الإدارية",
-        "support": "📝 طلب الدعم والدعم الريفي",
-        "crop": "🌱 التصريح بالمزروعات والكتلة الإقليمية",
-        "pay": "💳 تجديد الاشتراك والدفع",
-        "news": "📰 الأخبار والبلاغات الرسمية",
-        "weather": "🌩️ التنبيهات الجوية والأحوال الجوية",
-        "suppliers": "🗺️ دليل شبكة الموزعين والأسواق",
-        "back_btn": "⬅️ العودة للخدمات الرئيسية",
-    },
-    "FR": {
-        "title": "Portail Numérique des Services Agricoles",
-        "nav_col1": "🌾 Services Agricoles",
-        "nav_col2": "🪪 Carte Fellah",
-        "nav_col3": "👤 Mon Compte & Admin",
-        "support": "📝 Demandes Subventions",
-        "crop": "🌱 Déclaration de Cultures & Quotas",
-        "pay": "💳 Paiement & Renouvellement",
-        "news": "📰 Actualités Officielle",
-        "weather": "🌩️ Alertes Météo",
-        "suppliers": "🗺️ Carte des Distributeurs & CCLS",
-        "back_btn": "⬅️ Retour aux Services",
-    },
-    "EN": {
-        "title": "Digital Agricultural Services Portal",
-        "nav_col1": "🌾 Agricultural Services",
-        "nav_col2": "🪪 Fellah Card",
-        "nav_col3": "👤 My Account & Admin",
-        "support": "📝 Support & Subsidy Demand",
-        "crop": "🌱 Crop Declaration & Quota",
-        "pay": "💳 Subscription Payment",
-        "news": "📰 Official News Portal",
-        "weather": "🌩️ Weather Alerts",
-        "suppliers": "🗺️ Directory & Markets Map",
-        "back_btn": "⬅️ Back to All Services",
-    },
-}
-
-# ---------------------------------------------------------
-# INITIALIZE SESSION STATE
-# ---------------------------------------------------------
-if "lang" not in st.session_state:
-    st.session_state.lang = "AR"
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "farmer_name" not in st.session_state:
-    st.session_state.farmer_name = ""
-if "farmer_email" not in st.session_state:
-    st.session_state.farmer_email = ""
-if "carte_num" not in st.session_state:
-    st.session_state.carte_num = ""
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = "services"
-if "selected_service" not in st.session_state:
-    st.session_state.selected_service = None
-if "admin_authenticated" not in st.session_state:
-    st.session_state.admin_authenticated = False
-
-# ---------------------------------------------------------
-# SUPABASE CONNECTION SETUP
-# ---------------------------------------------------------
-@st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["connections"]["supabase"]["SUPABASE_URL"]
-    key = st.secrets["connections"]["supabase"]["SUPABASE_KEY"]
-    return create_client(url, key)
-
-
-supabase_client = init_supabase()
-
-# ---------------------------------------------------------
-# HELPER FUNCTIONS
-# ---------------------------------------------------------
-def sanitize(input_str: str) -> str:
-    """Basic input sanitizer removing HTML tags to prevent XSS."""
-    if not isinstance(input_str, str):
-        return str(input_str)
-    return re.sub(r"<[^>]*>", "", input_str).strip()
-
-
-def get_admin_password() -> str:
-    """Retrieve secret key for system administration."""
-    try:
-        return st.secrets["ADMIN_SECRET_PASSWORD"]
-    except Exception:
-        return "admin1234"
-
 
 def get_current_crop_area(crop_name: str) -> float:
-    """Query total registered hectares for a specific vegetable crop from Supabase."""
     try:
-        res = (
-            supabase_client.table("declarations")
-            .select("area")
-            .eq("crop", crop_name)
-            .execute()
-        )
-        if res.data:
-            return sum(float(item["area"]) for item in res.data)
+        res = supabase_client.table("declarations").select("area").eq("crop", crop_name).execute()
+        if res and res.data:
+            return sum(item["area"] for item in res.data if item.get("area") is not None)
     except Exception:
-        pass
+        return 0.0
     return 0.0
 
-
-t = TRANSLATIONS[st.session_state.lang]
+def get_unread_notif_count(email: str) -> int:
+    if not email:
+        return 0
+    try:
+        res = supabase_client.table("farmer_notifications").select("id").eq("farmer_email", email).eq("is_read", False).execute()
+        return len(res.data) if res and res.data else 0
+    except Exception:
+        return 0
 
 # ---------------------------------------------------------
-# SIDEBAR LOGISTICS AND AUTHENTICATION
+# Session State Initializer
+# ---------------------------------------------------------
+if 'lang' not in st.session_state: st.session_state.lang = 'AR'
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'farmer_name' not in st.session_state: st.session_state.farmer_name = ""
+if 'farmer_email' not in st.session_state: st.session_state.farmer_email = ""
+if 'carte_num' not in st.session_state: st.session_state.carte_num = ""
+if 'active_tab' not in st.session_state: st.session_state.active_tab = "home"
+if 'selected_service' not in st.session_state: st.session_state.selected_service = None
+if 'admin_authenticated' not in st.session_state: st.session_state.admin_authenticated = False
+if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "login"
+
+# CAPTCHA Challenge Initialization
+if 'captcha_num1' not in st.session_state: st.session_state.captcha_num1 = random.randint(1, 9)
+if 'captcha_num2' not in st.session_state: st.session_state.captcha_num2 = random.randint(1, 9)
+
+TEXTS = {
+    'AR': {
+        'title': "بوابة الفلاح - 48 ولاية",
+        'banner': "برنامج التخطيط والتنسيق الفلاحي 2026",
+        'home': "الرئيسية",
+        'card': "بطاقتي",
+        'account': "حسابي وسجلاتي",
+        'weather': "الأحوال الجوية والتنبيهات",
+        'crop': "نصائح الزراعة والتصريح (QR)",
+        'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
+        'suppliers': "خريطة أسوق الجملة، نقاط CCLS والأسمدة",
+        'support': "طلب دعم الدولة (الدعم الفلاحي)",
+        'news': "الأخبار والإعلانات الرسمية",
+        'admin': "لوحة تحكم المالِك (Owner Admin)",
+        'back_btn': "🔙 الرجوع لبرنامج الخدمات الرئيسي"
+    },
+    'EN': {
+        'title': "Felah Farmer Portal - 48 Wilayas",
+        'banner': "Agricultural Planning & Coordination Program 2026",
+        'home': "Home",
+        'card': "My Card",
+        'account': "My Account & Records",
+        'weather': "Weather & Ag-Alerts",
+        'crop': "Cultivation & QR Permit",
+        'pay': "Carte Fellah Subscription",
+        'suppliers': "Wholesale Markets, CCLS & Fertilizer Map",
+        'support': "Government Agricultural Support",
+        'news': "News & Official Announcements",
+        'admin': "Owner Admin Dashboard",
+        'back_btn': "🔙 Back to Main Services Menu"
+    }
+}
+
+# ---------------------------------------------------------
+# INSTANT LANGUAGE SWITCH CALLBACK
+# ---------------------------------------------------------
+def on_lang_change():
+    selected = st.session_state.sb_lang
+    st.session_state.lang = 'AR' if selected == "العربية" else 'EN'
+
+t = TEXTS[st.session_state.lang]
+
+# ---------------------------------------------------------
+# SIDEBAR NAVIGATION & PERSISTENT AUTHENTICATION
 # ---------------------------------------------------------
 with st.sidebar:
-    st.title("🇩🇿 Felah Services")
-
-    # Language Switcher
-    st.session_state.lang = st.selectbox(
-        "🌐 Language / اللغة / Langue", ["AR", "FR", "EN"], index=0
+    st.markdown("""
+        <div style="background-color: #0b8a62; color: white; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 15px;">
+            ⚙️ MENU / القائمة
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("### 🌐 Language / اللغة")
+    
+    # Instant re-render on language selection
+    default_idx = 0 if st.session_state.lang == 'AR' else 1
+    st.radio(
+        "Choose Language", 
+        ["العربية", "English"], 
+        index=default_idx, 
+        key="sb_lang", 
+        on_change=on_lang_change, 
+        label_visibility="collapsed"
     )
-    t = TRANSLATIONS[st.session_state.lang]
-
     st.divider()
-
-    # User Login / Authentication
+    
+    st.markdown("### 👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
-        st.subheader("🔑 Farmer Login / تسجيل الدخول")
-        login_carte = st.text_input(
-            "Carte Fellah N° (رقم البطاقة)", placeholder="e.g. DZ-2026-1234"
-        )
-        login_email = st.text_input("Email / البريد الإلكتروني")
+        auth_choice = st.radio("Action:", ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password (نسيان كلمة السر)"], key="sb_auth_choice")
+        
+        # LOG IN WITH DYNAMIC MATH CAPTCHA
+        if "Log In" in auth_choice:
+            login_email = st.text_input("Email / البريد الإلكتروني", key="sb_l_email")
+            login_pass = st.text_input("Password / كلمة السر", type="password", key="sb_l_pass")
+            
+            # Interactive Human CAPTCHA Challenge
+            n1 = st.session_state.captcha_num1
+            n2 = st.session_state.captcha_num2
+            correct_sum = n1 + n2
+            
+            st.markdown(f"**🤖 Human Verification / تحقق:** What is `{n1} + {n2}`?")
+            user_captcha = st.number_input("Solve the math challenge:", min_value=0, max_value=20, step=1, value=0, key="sb_captcha_val")
+            
+            if st.button("🔓 Log In / دخول", use_container_width=True, type="primary"):
+                if user_captcha != correct_sum:
+                    st.error("❌ Incorrect CAPTCHA answer! Please solve the sum correctly.")
+                    st.session_state.captcha_num1 = random.randint(1, 9)
+                    st.session_state.captcha_num2 = random.randint(1, 9)
+                elif login_email and login_pass:
+                    try:
+                        auth_res = supabase_client.auth.sign_in_with_password({
+                            "email": login_email.strip(),
+                            "password": login_pass
+                        })
+                        
+                        if auth_res.user:
+                            user_id = auth_res.user.id
+                            res = supabase_client.table("farmer_profiles").select("*").eq("id", user_id).execute()
+                            
+                            if res and res.data:
+                                user_profile = res.data[0]
+                                st.session_state.logged_in = True
+                                st.session_state.farmer_name = user_profile.get("full_name", "Farmer")
+                                st.session_state.farmer_email = user_profile.get("email", login_email.strip())
+                                st.session_state.carte_num = user_profile.get("carte_num", "N/A")
+                                st.success("Successfully logged in!")
+                                st.rerun()
+                            else:
+                                st.error("User profile data not found.")
+                    except Exception as e:
+                        err_str = str(e)
+                        if "Email not confirmed" in err_str:
+                            st.error("❌ Login failed: Email not confirmed! Check your inbox to verify your account.")
+                        else:
+                            st.error(f"Login failed: {e}")
+                else:
+                    st.warning("Please fill all fields.")
+        
+        # REGISTER NEW FARMER
+        elif "Register" in auth_choice:
+            reg_name = st.text_input("Full Name / الاسم الكامل", key="sb_r_name")
+            reg_email = st.text_input("Email / البريد الإلكتروني", key="sb_r_email")
+            reg_card = st.text_input("Carte Fellah N°", placeholder="DZ-2026-XXXXX", key="sb_r_card")
+            reg_pass = st.text_input("Create Password", type="password", key="sb_r_pass")
+            
+            if st.button("📝 Register Account", use_container_width=True, type="primary"):
+                if reg_name and reg_email and reg_card and reg_pass:
+                    try:
+                        clean_email = sanitize(reg_email)
+                        clean_name = sanitize(reg_name)
+                        clean_card = sanitize(reg_card)
 
-        if st.button("Log In (دخول)", type="primary", use_container_width=True):
-            if login_carte and login_email:
-                try:
-                    res = (
-                        supabase_client.table("farmer_profiles")
-                        .select("*")
-                        .eq("carte_num", login_carte)
-                        .execute()
-                    )
-                    if res.data:
-                        profile = res.data[0]
-                        st.session_state.logged_in = True
-                        st.session_state.farmer_name = profile.get(
-                            "farmer_name", "Farmer User"
-                        )
-                        st.session_state.farmer_email = login_email
-                        st.session_state.carte_num = login_carte
-                        st.success(f"Welcome back, {st.session_state.farmer_name}!")
-                        st.rerun()
-                    else:
-                        # Auto-register new farmer entry
-                        new_profile = {
-                            "farmer_name": f"Farmer ({login_carte})",
-                            "carte_num": login_carte,
-                            "email": login_email,
-                        }
-                        supabase_client.table("farmer_profiles").insert(
-                            new_profile
-                        ).execute()
-                        st.session_state.logged_in = True
-                        st.session_state.farmer_name = new_profile["farmer_name"]
-                        st.session_state.farmer_email = login_email
-                        st.session_state.carte_num = login_carte
-                        st.success("New profile registered & logged in!")
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Authentication error: {e}")
-            else:
-                st.warning("Please fill in both fields.")
+                        auth_response = supabase_client.auth.sign_up({
+                            "email": clean_email,
+                            "password": reg_pass
+                        })
+                        
+                        if auth_response.user:
+                            user_id = auth_response.user.id
+                            
+                            supabase_client.table("farmer_profiles").insert({
+                                "id": user_id,
+                                "email": clean_email,
+                                "full_name": clean_name,
+                                "carte_num": clean_card
+                            }).execute()
+
+                            if auth_response.session is None:
+                                st.info(f"📩 **Confirmation Email Sent!**\n\nWe sent a verification link to `{clean_email}`. Please open your inbox and confirm your email address before logging in.")
+                            else:
+                                st.session_state.logged_in = True
+                                st.session_state.farmer_name = clean_name
+                                st.session_state.farmer_email = clean_email
+                                st.session_state.carte_num = clean_card
+                                st.success("Registration completed successfully!")
+                                st.rerun()
+                        else:
+                            st.error("Failed to generate Auth user account.")
+                    except Exception as e:
+                        st.error(f"Error registering account: {e}")
+                else:
+                    st.warning("Please fill out all registration fields.")
+
+        # REAL SUPABASE PASSWORD RESET / RECOVERY (FIXED)
+        else:
+            rec_email = st.text_input("Enter your registered email:", key="sb_rec_email")
+            if st.button("📧 Send Recovery Link", use_container_width=True):
+                if rec_email:
+                    try:
+                        supabase_client.auth.reset_password_for_email(rec_email.strip())
+                        st.success(f"Recovery email sent to `{rec_email}`! Check your inbox and spam folder.")
+                    except Exception as e:
+                        st.error(f"Failed to dispatch recovery link: {e}")
+                else:
+                    st.warning("Please enter your email address.")
     else:
-        st.success(f"👤 Connected: **{st.session_state.farmer_name}**")
-        st.caption(f"Card: `{st.session_state.carte_num}`")
-        if st.button("Logout (خروج)", use_container_width=True):
+        st.success(f"🟢 Connected:\n**{st.session_state.farmer_name}**")
+        st.caption(f"Email: `{st.session_state.farmer_email}`")
+        st.caption(f"Card N°: `{st.session_state.carte_num}`")
+        if st.button("🔒 Log Out / خروج", use_container_width=True):
+            try:
+                supabase_client.auth.sign_out()
+            except Exception:
+                pass
             st.session_state.logged_in = False
             st.session_state.farmer_name = ""
             st.session_state.farmer_email = ""
             st.session_state.carte_num = ""
+            st.session_state.admin_authenticated = False
             st.rerun()
 
 # ---------------------------------------------------------
-# MAIN NAVIGATION HEADER
+# TOP STATUS HEADER WITH NOTIFICATION BELL 🔔
 # ---------------------------------------------------------
-st.title(t["title"])
+unread_count = get_unread_notif_count(st.session_state.farmer_email)
+
+mobile_status = f"🟢 Connected: {st.session_state.farmer_name}" if st.session_state.logged_in else "🔴 Not Logged In — Click top-left arrow ↗ to Login"
+st.markdown(f'<div class="mobile-sidebar-notice">👉 {mobile_status}</div>', unsafe_allow_html=True)
+
+col_head1, col_head2 = st.columns([4, 1])
+with col_head1:
+    st.markdown(f"<h2 style='margin:0;'>{t['title']}</h2>", unsafe_allow_html=True)
+with col_head2:
+    if st.button(f"🔔 {unread_count}", help="Click to view notifications"):
+        st.session_state.active_tab = "account"
+        st.rerun()
+
+st.markdown(f"""
+    <div class="promo-banner">
+        <h4 style="margin:0;">{t['banner']}</h4>
+        <small>الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية</small>
+    </div>
+""", unsafe_allow_html=True)
 
 nav_col1, nav_col2, nav_col3 = st.columns(3)
 with nav_col1:
-    if st.button(t["nav_col1"], use_container_width=True):
-        st.session_state.active_tab = "services"
+    if st.button(f"{t['home']}", use_container_width=True): 
+        st.session_state.active_tab = "home"
+        st.session_state.selected_service = None
         st.rerun()
 with nav_col2:
-    if st.button(t["nav_col2"], use_container_width=True):
-        st.session_state.active_tab = "card"
-        st.rerun()
+    if st.button(f"{t['card']}", use_container_width=True): st.session_state.active_tab = "card"
 with nav_col3:
-    if st.button(t["nav_col3"], use_container_width=True):
-        st.session_state.active_tab = "account"
-        st.rerun()
+    if st.button(f"{t['account']} 🔔", use_container_width=True): st.session_state.active_tab = "account"
 
 st.divider()
 
 # ---------------------------------------------------------
-# VIEW 1: AGRICULTURAL SERVICES
+# VIEW 1: HOME DASHBOARD & SERVICES
 # ---------------------------------------------------------
-if st.session_state.active_tab == "services":
+if st.session_state.active_tab == "home":
+    
     if st.session_state.selected_service is None:
+        st.subheader("الخدمات الإلكترونية / Main Services")
+        
         col1, col2 = st.columns(2)
-
         with col1:
-            if st.button(t["support"], use_container_width=True):
-                st.session_state.selected_service = "support"
-                st.rerun()
-            if st.button(t["crop"], use_container_width=True):
+            if st.button(t['crop'], use_container_width=True, type="primary"): 
                 st.session_state.selected_service = "crop"
+                st.rerun()
+            if st.button(t['support'], use_container_width=True): 
+                st.session_state.selected_service = "support"
                 st.rerun()
             if st.button(t['pay'], use_container_width=True): 
                 st.session_state.selected_service = "pay"
@@ -589,8 +604,7 @@ if st.session_state.active_tab == "services":
             st.write("Annual Subscription Fee: **2,500 DZD**")
             st.radio("Payment Gateway:", ["EDAHABIA (الذهبية)", "CIB Card"])
             st.text_input("Card Number:", placeholder="6037 XXXX XXXX XXXX")
-            if st.button("Confirm Payment", type="primary"): 
-                st.success("Carte Fellah renewed for season 2026/2027!")
+            if st.button("Confirm Payment", type="primary"): st.success("Carte Fellah renewed for season 2026/2027!")
 
         # SERVICE 6: MAPS DIRECTORY
         elif st.session_state.selected_service == "suppliers":
