@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX (CENTERED SINGLE-BAR)
+# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX (TRANSPARENT BACKGROUND BLENDED)
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -339,7 +339,6 @@ if is_dark:
         }}
     """
     segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;"
-    segmented_bg = card_bg
 else:
     bg_color = "#f8fafc"
     card_bg = "#ffffff"
@@ -367,7 +366,6 @@ else:
     sidebar_css = f"background-color: {sidebar_bg} !important;"
     sidebar_inputs_css = ""
     segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.12) !important;"
-    segmented_bg = "#e2e8f0"
 
 st.markdown(
     f"""
@@ -420,34 +418,34 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* SINGLE UNIFIED CENTERED BAR WITH 3 SLIDES */
+    /* FLEX CENTER TRICK WITH TRANSPARENT BALANCING */
     div[data-testid="stSegmentedControl"] {{
         display: flex !important;
         justify-content: center !important;
         align-items: center !important;
         width: 100% !important;
         margin: 0 auto 20px auto !important;
+        background: transparent !important;
     }}
 
-    /* Inner Wrapper: Unified outer shell */
+    /* Inner Pill Container - Transparent shell matching app background */
     div[data-testid="stSegmentedControl"] > div,
     div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
-        flex-direction: row-reverse !important;
-        flex-wrap: nowrap !important;
-        justify-content: center !important;
+        flex-direction: row-reverse !important; /* RTL Support */
+        justify-content: space-between !important;
         align-items: center !important;
         width: 100% !important;
-        max-width: 500px !important;
+        max-width: 480px !important;
         margin: 0 auto !important;
-        background-color: {segmented_bg} !important;
-        padding: 4px !important;
+        background-color: {bg_color} !important; /* Same as background */
+        padding: 3px !important;
         border-radius: 30px !important;
         border: 1px solid {border_color} !important;
         box-sizing: border-box !important;
     }}
 
-    /* Individual Inner Slides */
+    /* Dummy/Unselected Segment Buttons (Blends seamlessly) */
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stSegmentedControl"] [role="option"] {{
         flex: 1 1 0% !important;
@@ -460,13 +458,14 @@ st.markdown(
         padding: 8px 4px !important;
         text-align: center !important;
         border-radius: 24px !important;
-        border: none !important;
+        border: 1px solid transparent !important;
+        background-color: transparent !important; /* Transparent background */
         color: {text_color} !important;
-        margin: 0 !important;
+        margin: 0 2px !important;
         transition: all 0.2s ease-in-out !important;
     }}
 
-    /* Active Selected Slide Style */
+    /* Active Highlighted Button */
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
     div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
         {segmented_active_css}
@@ -484,14 +483,13 @@ st.markdown(
         div[data-testid="stSegmentedControl"] > div,
         div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
             max-width: 100% !important;
-            padding: 3px !important;
+            padding: 2px !important;
         }}
 
         div[data-testid="stSegmentedControl"] button,
         div[data-testid="stSegmentedControl"] [role="option"] {{
             font-size: 0.72rem !important;
             padding: 7px 2px !important;
-            letter-spacing: -0.3px !important;
         }}
     }}
 
@@ -719,7 +717,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# ALIGNED SLIDING TABS SWITCHER (SINGLE CENTERED BUTTON SHELL)
+# ALIGNED SLIDING TABS SWITCHER (TRANSPARENT BALANCE BAR)
 # ---------------------------------------------------------
 tab_options_map = {
     f"{t['tab_home']}": "home",
