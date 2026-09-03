@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX
+# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX (CENTERED SINGLE-BAR)
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -338,7 +338,7 @@ if is_dark:
             border: 1px solid {accent_color} !important;
         }}
     """
-    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important;"
+    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;"
     segmented_bg = card_bg
 else:
     bg_color = "#f8fafc"
@@ -366,8 +366,8 @@ else:
     """
     sidebar_css = f"background-color: {sidebar_bg} !important;"
     sidebar_inputs_css = ""
-    segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;"
-    segmented_bg = "#f1f5f9"
+    segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.12) !important;"
+    segmented_bg = "#e2e8f0"
 
 st.markdown(
     f"""
@@ -390,7 +390,7 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    /* Green Header Banner Setup - Dynamic Centering */
+    /* Green Header Banner Setup */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
@@ -420,53 +420,59 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* STRICT OVERRIDE FOR STREAMLIT SEGMENTED CONTROL / TABS BAR */
+    /* SINGLE UNIFIED CENTERED BAR WITH 3 SLIDES */
     div[data-testid="stSegmentedControl"] {{
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
         width: 100% !important;
         margin: 0 auto 20px auto !important;
-        display: block !important;
     }}
 
-    /* Force the inner wrapper to behave as an un-wrappable flex row */
+    /* Inner Wrapper: Unified outer shell */
     div[data-testid="stSegmentedControl"] > div,
     div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
-        flex-direction: row-reverse !important; /* Proper RTL support */
-        flex-wrap: nowrap !important;          /* Hard disable line breaks */
+        flex-direction: row-reverse !important;
+        flex-wrap: nowrap !important;
+        justify-content: center !important;
+        align-items: center !important;
         width: 100% !important;
-        gap: 4px !important;
+        max-width: 500px !important;
+        margin: 0 auto !important;
         background-color: {segmented_bg} !important;
         padding: 4px !important;
-        border-radius: 12px !important;
+        border-radius: 30px !important;
         border: 1px solid {border_color} !important;
         box-sizing: border-box !important;
     }}
 
-    /* Target every button inside the segmented control */
+    /* Individual Inner Slides */
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stSegmentedControl"] [role="option"] {{
-        flex: 1 1 0% !important;               /* Force equal 1/3 layout width */
-        min-width: 0 !important;                /* Removes browser min-content restriction */
-        width: auto !important;
-        white-space: nowrap !important;        /* Prevents multi-line wrapping inside tabs */
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+        white-space: nowrap !important;
         overflow: hidden !important;
         text-overflow: ellipsis !important;
-        font-size: 0.85rem !important;
+        font-size: 0.82rem !important;
         font-weight: 600 !important;
-        padding: 8px 2px !important;
+        padding: 8px 4px !important;
         text-align: center !important;
-        border-radius: 8px !important;
+        border-radius: 24px !important;
         border: none !important;
         color: {text_color} !important;
         margin: 0 !important;
+        transition: all 0.2s ease-in-out !important;
     }}
 
+    /* Active Selected Slide Style */
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
     div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
         {segmented_active_css}
     }}
 
-    /* MOBILE SPECIFIC RESPONSIVE ADJUSTMENTS (< 640px) */
+    /* Mobile Responsive Scaling (< 640px) */
     @media (max-width: 640px) {{
         .header-banner h2 {{
             font-size: 1.1rem !important;
@@ -475,12 +481,17 @@ st.markdown(
             font-size: 0.75rem !important;
         }}
         
-        /* Auto-scale tabs bar text so all 3 items fit on mobile without breaking */
+        div[data-testid="stSegmentedControl"] > div,
+        div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+            max-width: 100% !important;
+            padding: 3px !important;
+        }}
+
         div[data-testid="stSegmentedControl"] button,
         div[data-testid="stSegmentedControl"] [role="option"] {{
             font-size: 0.72rem !important;
-            padding: 6px 1px !important;
-            letter-spacing: -0.2px !important;
+            padding: 7px 2px !important;
+            letter-spacing: -0.3px !important;
         }}
     }}
 
@@ -708,7 +719,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# ALIGNED SLIDING TABS SWITCHER (MOBILE & DESKTOP SINGLE LINE)
+# ALIGNED SLIDING TABS SWITCHER (SINGLE CENTERED BUTTON SHELL)
 # ---------------------------------------------------------
 tab_options_map = {
     f"{t['tab_home']}": "home",
