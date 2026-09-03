@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX (TRANSPARENT BACKGROUND BLENDED)
+# DYNAMIC CSS STYLING WITH BALANCING SIDE SPACERS
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -418,7 +418,7 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* FLEX CENTER TRICK WITH TRANSPARENT BALANCING */
+    /* FLEX CENTER CONTAINMENT */
     div[data-testid="stSegmentedControl"] {{
         display: flex !important;
         justify-content: center !important;
@@ -428,47 +428,57 @@ st.markdown(
         background: transparent !important;
     }}
 
-    /* Inner Pill Container - Transparent shell matching app background */
+    /* Inner Bar Shell */
     div[data-testid="stSegmentedControl"] > div,
     div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
         flex-direction: row-reverse !important; /* RTL Support */
-        justify-content: space-between !important;
+        justify-content: center !important;
         align-items: center !important;
         width: 100% !important;
-        max-width: 480px !important;
+        max-width: 600px !important;
         margin: 0 auto !important;
-        background-color: {bg_color} !important; /* Same as background */
-        padding: 3px !important;
-        border-radius: 30px !important;
-        border: 1px solid {border_color} !important;
+        background-color: transparent !important;
+        padding: 4px !important;
         box-sizing: border-box !important;
     }}
 
-    /* Dummy/Unselected Segment Buttons (Blends seamlessly) */
+    /* LEFT & RIGHT TRANSPARENT BALANCING SPACERS */
+    div[data-testid="stSegmentedControl"] > div::before,
+    div[data-testid="stSegmentedControl"] > div::after,
+    div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
+    div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
+        content: "" !important;
+        flex: 1 1 0% !important; /* Pushes interactive buttons into exact horizontal center */
+        min-width: 10px !important;
+        height: 1px !important;
+        background: transparent !important;
+        pointer-events: none !important;
+    }}
+
+    /* Individual Option Buttons with Gap Spacing */
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stSegmentedControl"] [role="option"] {{
-        flex: 1 1 0% !important;
-        min-width: 0 !important;
+        flex: 0 0 auto !important;
         white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        font-size: 0.82rem !important;
+        font-size: 0.84rem !important;
         font-weight: 600 !important;
-        padding: 8px 4px !important;
+        padding: 8px 18px !important; /* Comfortable button padding */
         text-align: center !important;
         border-radius: 24px !important;
-        border: 1px solid transparent !important;
-        background-color: transparent !important; /* Transparent background */
+        border: 1px solid {border_color} !important;
+        background-color: {card_bg} !important; /* Standard button color */
         color: {text_color} !important;
-        margin: 0 2px !important;
+        margin: 0 6px !important; /* Controlled gap distance between buttons */
         transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
     /* Active Highlighted Button */
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
     div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
         {segmented_active_css}
+        border-color: {accent_color} !important;
     }}
 
     /* Mobile Responsive Scaling (< 640px) */
@@ -479,17 +489,12 @@ st.markdown(
         .header-banner p {{
             font-size: 0.75rem !important;
         }}
-        
-        div[data-testid="stSegmentedControl"] > div,
-        div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
-            max-width: 100% !important;
-            padding: 2px !important;
-        }}
 
         div[data-testid="stSegmentedControl"] button,
         div[data-testid="stSegmentedControl"] [role="option"] {{
             font-size: 0.72rem !important;
-            padding: 7px 2px !important;
+            padding: 7px 8px !important;
+            margin: 0 3px !important;
         }}
     }}
 
@@ -717,7 +722,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# ALIGNED SLIDING TABS SWITCHER (TRANSPARENT BALANCE BAR)
+# ALIGNED SLIDING TABS SWITCHER (WITH SIDE SPACERS)
 # ---------------------------------------------------------
 tab_options_map = {
     f"{t['tab_home']}": "home",
