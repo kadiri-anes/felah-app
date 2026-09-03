@@ -16,7 +16,7 @@ from streamlit_folium import st_folium
 st.set_page_config(
     page_title="برنامج التخطيط والتنسيق الفلاحي 2026",
     page_icon="🌾",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
 
@@ -175,9 +175,9 @@ TEXTS = {
     "AR": {
         "title": "برنامج التخطيط والتنسيق الفلاحي 2026",
         "subtitle": "الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية",
-        "tab_home": "الرئيسية",
-        "tab_card": "بطاقاتي",
-        "tab_account": "حسابي وسجلاتي",
+        "tab_home": "الرئيسية 🏠",
+        "tab_card": "بطاقاتي 💳",
+        "tab_account": "حسابي وسجلاتي 🔔",
         "main_services": "الخدمات الإلكترونية الرئيسية",
         "crop": "نصائح الزراعة والتصريح (QR)",
         "news": "الأخبار والإعلانات الرسمية",
@@ -190,9 +190,9 @@ TEXTS = {
     "EN": {
         "title": "Agricultural Planning & Coordination Program 2026",
         "subtitle": "People's Democratic Republic of Algeria - Ministry of Agriculture",
-        "tab_home": "Home Services",
-        "tab_card": "Digital Farmer Card",
-        "tab_account": "Account & History",
+        "tab_home": "Home Services 🏠",
+        "tab_card": "Digital Farmer Card 💳",
+        "tab_account": "Account & History 🔔",
         "main_services": "Main E-Services",
         "crop": "Crop Declaration & Permit (QR)",
         "news": "Official News Releases",
@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING
+# DYNAMIC CSS STYLING & MOBILE RESPONSIVE FIXES
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -367,7 +367,7 @@ else:
     sidebar_css = f"background-color: {sidebar_bg} !important;"
     sidebar_inputs_css = ""
     segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;"
-    segmented_bg = "#e2e8f0"
+    segmented_bg = "#f1f5f9"
 
 st.markdown(
     f"""
@@ -378,75 +378,95 @@ st.markdown(
         font-family: system-ui, -apple-system, sans-serif;
     }}
 
+    .block-container {{
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 800px !important;
+    }}
+
     div[data-testid="stSidebar"] {{
         {sidebar_css}
     }}
     {sidebar_inputs_css}
 
-    /* Green Header Banner with ~1cm Shift to the Right for Title Text */
+    /* Green Header Banner Setup - Dynamic Centering */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
-        padding: 20px 25px 20px 60px; /* Shifted internal alignment to the right */
+        padding: 22px 16px;
         border-radius: 14px;
-        text-align: center;
+        text-align: center !important;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-        width: 100%;
-        max-width: 800px;
-        margin: 0 auto;
+        width: 100% !important;
+        margin: 0 auto 15px auto !important;
+        box-sizing: border-box;
     }}
     .header-banner h2 {{
-        margin: 0 0 6px 0;
-        font-weight: 800;
-        font-size: 1.55rem;
+        margin: 0 0 6px 0 !important;
+        font-weight: 800 !important;
+        font-size: 1.45rem !important;
         color: #ffffff !important;
-        padding-right: 38px; /* Shifts main heading ~1cm to the right */
+        text-align: center !important;
+        padding: 0 !important;
+        line-height: 1.3 !important;
     }}
     .header-banner p {{
-        margin: 0;
+        margin: 0 !important;
         opacity: 0.95;
-        font-size: 0.9rem;
+        font-size: 0.88rem !important;
         color: #ecfdf5 !important;
-        padding-right: 38px; /* Shifts subtitle ~1cm to the right */
+        text-align: center !important;
+        padding: 0 !important;
     }}
 
-    /* MATCHING WIDTH FOR SEGMENTED CONTROL / THREE TABS */
+    /* Segmented Control (Tabs Bar) Force Single Line & Flex Width */
     div[data-testid="stSegmentedControl"] {{
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
         width: 100% !important;
-        max-width: 800px !important; /* Matches green banner exact max-width */
-        margin: 15px auto 25px auto !important;
-        background-color: {segmented_bg} !important;
-        border: 1px solid {border_color} !important;
-        border-radius: 12px !important;
-        padding: 4px !important;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.06) !important;
+        margin: 0 auto 20px auto !important;
     }}
-    
+
     div[data-testid="stSegmentedControl"] > div {{
-        width: 100% !important;
         display: flex !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-        margin: 0 auto !important;
+        flex-direction: row-reverse !important; /* RTL support for Arabic options */
+        flex-wrap: nowrap !important;          /* Prevents wrapping into a 2nd line */
+        width: 100% !important;
+        gap: 4px !important;
+        background-color: {segmented_bg} !important;
+        padding: 4px !important;
+        border-radius: 12px !important;
+        border: 1px solid {border_color} !important;
     }}
-    
+
     div[data-testid="stSegmentedControl"] button {{
-        flex: 1 !important;
+        flex: 1 1 0px !important;              /* Distributes equal width across tabs */
+        white-space: nowrap !important;        /* Prevents text break */
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        padding: 8px 4px !important;
+        text-align: center !important;
         border-radius: 8px !important;
         border: none !important;
         color: {text_color} !important;
-        transition: all 0.25s ease-in-out !important;
-        font-size: 0.95rem !important;
-        font-weight: 600 !important;
-        padding: 8px 12px !important;
-        text-align: center !important;
     }}
-    
+
     div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
         {segmented_active_css}
+    }}
+
+    /* Screen Sizing Adjustments for Mobile Phones */
+    @media (max-width: 640px) {{
+        .header-banner h2 {{
+            font-size: 1.1rem !important;
+        }}
+        .header-banner p {{
+            font-size: 0.75rem !important;
+        }}
+        div[data-testid="stSegmentedControl"] button {{
+            font-size: 0.72rem !important;    /* Automatically scales font on mobile */
+            padding: 6px 2px !important;
+        }}
     }}
 
     .stButton>button {{
@@ -459,9 +479,9 @@ st.markdown(
     .section-title {{
         text-align: center;
         color: {text_color};
-        margin-top: 15px;
-        margin-bottom: 22px;
-        font-size: 1.4rem;
+        margin-top: 10px;
+        margin-bottom: 20px;
+        font-size: 1.35rem;
         font-weight: 700;
     }}
 
@@ -673,12 +693,12 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# ALIGNED SLIDING TABS SWITCHER (YELLOW LINE MATCH)
+# ALIGNED SLIDING TABS SWITCHER (MOBILE & DESKTOP SINGLE LINE)
 # ---------------------------------------------------------
 tab_options_map = {
-    f"🏠 {t['tab_home']}": "home",
-    f"🪪 {t['tab_card']}": "card",
-    f"🔔 {t['tab_account']}": "account",
+    f"{t['tab_home']}": "home",
+    f"{t['tab_card']}": "card",
+    f"{t['tab_account']}": "account",
 }
 
 reverse_map = {v: k for k, v in tab_options_map.items()}
