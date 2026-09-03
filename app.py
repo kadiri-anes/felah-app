@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING & MOBILE RESPONSIVE FIXES
+# DYNAMIC CSS STYLING & STRICT SINGLE-LINE TAB FIX
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -372,6 +372,7 @@ else:
 st.markdown(
     f"""
     <style>
+    /* App Container */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
@@ -419,43 +420,53 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* Segmented Control (Tabs Bar) Force Single Line & Flex Width */
+    /* STRICT OVERRIDE FOR STREAMLIT SEGMENTED CONTROL / TABS BAR */
     div[data-testid="stSegmentedControl"] {{
         width: 100% !important;
         margin: 0 auto 20px auto !important;
+        display: block !important;
     }}
 
-    div[data-testid="stSegmentedControl"] > div {{
+    /* Force the inner wrapper to behave as an un-wrappable flex row */
+    div[data-testid="stSegmentedControl"] > div,
+    div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
-        flex-direction: row-reverse !important; /* RTL support for Arabic options */
-        flex-wrap: nowrap !important;          /* Prevents wrapping into a 2nd line */
+        flex-direction: row-reverse !important; /* Proper RTL support */
+        flex-wrap: nowrap !important;          /* Hard disable line breaks */
         width: 100% !important;
         gap: 4px !important;
         background-color: {segmented_bg} !important;
         padding: 4px !important;
         border-radius: 12px !important;
         border: 1px solid {border_color} !important;
+        box-sizing: border-box !important;
     }}
 
-    div[data-testid="stSegmentedControl"] button {{
-        flex: 1 1 0px !important;              /* Distributes equal width across tabs */
-        white-space: nowrap !important;        /* Prevents text break */
+    /* Target every button inside the segmented control */
+    div[data-testid="stSegmentedControl"] button,
+    div[data-testid="stSegmentedControl"] [role="option"] {{
+        flex: 1 1 0% !important;               /* Force equal 1/3 layout width */
+        min-width: 0 !important;                /* Removes browser min-content restriction */
+        width: auto !important;
+        white-space: nowrap !important;        /* Prevents multi-line wrapping inside tabs */
         overflow: hidden !important;
         text-overflow: ellipsis !important;
-        font-size: 0.88rem !important;
+        font-size: 0.85rem !important;
         font-weight: 600 !important;
-        padding: 8px 4px !important;
+        padding: 8px 2px !important;
         text-align: center !important;
         border-radius: 8px !important;
         border: none !important;
         color: {text_color} !important;
+        margin: 0 !important;
     }}
 
-    div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
+    div[data-testid="stSegmentedControl"] button[data-checked="true"],
+    div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
         {segmented_active_css}
     }}
 
-    /* Screen Sizing Adjustments for Mobile Phones */
+    /* MOBILE SPECIFIC RESPONSIVE ADJUSTMENTS (< 640px) */
     @media (max-width: 640px) {{
         .header-banner h2 {{
             font-size: 1.1rem !important;
@@ -463,9 +474,13 @@ st.markdown(
         .header-banner p {{
             font-size: 0.75rem !important;
         }}
-        div[data-testid="stSegmentedControl"] button {{
-            font-size: 0.72rem !important;    /* Automatically scales font on mobile */
-            padding: 6px 2px !important;
+        
+        /* Auto-scale tabs bar text so all 3 items fit on mobile without breaking */
+        div[data-testid="stSegmentedControl"] button,
+        div[data-testid="stSegmentedControl"] [role="option"] {{
+            font-size: 0.72rem !important;
+            padding: 6px 1px !important;
+            letter-spacing: -0.2px !important;
         }}
     }}
 
