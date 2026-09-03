@@ -320,7 +320,6 @@ if is_dark:
     accent_color = "#f97316"
     accent_hover = "#ea580c"
 
-    # Dark Mode Buttons
     btn_css = f"""
         background-color: {accent_color} !important;
         color: #ffffff !important;
@@ -331,7 +330,6 @@ if is_dark:
         box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
     """
     btn_hover_css = f"background-color: {accent_hover} !important;"
-
     sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
     sidebar_inputs_css = f"""
         div[data-testid="stSidebar"] input {{
@@ -343,7 +341,6 @@ if is_dark:
     segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important;"
     segmented_bg = card_bg
 else:
-    # Light Mode Colors with distinct light grey button appearance
     bg_color = "#f8fafc"
     card_bg = "#ffffff"
     sidebar_bg = "#f1f5f9"
@@ -352,7 +349,6 @@ else:
     subtext_color = "#64748b"
     accent_color = "#047857"
 
-    # Distinct Light Grey Button Styling
     btn_css = """
         background-color: #e2e8f0 !important;
         color: #1e293b !important;
@@ -376,43 +372,61 @@ else:
 st.markdown(
     f"""
     <style>
-    /* Global App Container */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: system-ui, -apple-system, sans-serif;
     }}
 
-    /* Sidebar Styling */
     div[data-testid="stSidebar"] {{
         {sidebar_css}
     }}
     {sidebar_inputs_css}
 
-    /* Header Banner Container */
+    /* Centered Outer Banner Wrap */
+    .banner-outer-wrap {{
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin-bottom: 20px;
+        position: relative;
+    }}
+
+    /* Perfectly Centered Banner */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
-        padding: 22px 15px;
+        padding: 20px 25px;
         border-radius: 14px;
         text-align: center;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
-        margin-bottom: 20px;
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
     }}
     .header-banner h2 {{
         margin: 0 0 6px 0;
         font-weight: 800;
-        font-size: 1.65rem;
+        font-size: 1.55rem;
         color: #ffffff !important;
     }}
     .header-banner p {{
         margin: 0;
         opacity: 0.95;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         color: #ecfdf5 !important;
     }}
 
-    /* Perfectly Centered & Larger Sliding Tabs */
+    /* Floating Bell Button Positioned Outside Title Flow */
+    .bell-wrap {{
+        position: absolute;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+    }}
+
+    /* FORCE PERFECT CENTERING FOR STREAMLIT SEGMENTED CONTROL */
     div[data-testid="stSegmentedControl"] {{
         display: flex !important;
         justify-content: center !important;
@@ -423,29 +437,34 @@ st.markdown(
         background-color: {segmented_bg} !important;
         border: 1px solid {border_color} !important;
         border-radius: 35px !important;
-        padding: 6px !important;
+        padding: 5px !important;
         box-shadow: 0 3px 10px rgba(0,0,0,0.06) !important;
     }}
+    
     div[data-testid="stSegmentedControl"] > div {{
         width: 100% !important;
         display: flex !important;
-        justify-content: space-around !important;
+        justify-content: center !important;
+        align-items: center !important;
+        margin: 0 auto !important;
     }}
+    
     div[data-testid="stSegmentedControl"] button {{
         flex: 1 !important;
         border-radius: 28px !important;
         border: none !important;
         color: {text_color} !important;
         transition: all 0.25s ease-in-out !important;
-        font-size: 1.05rem !important;
+        font-size: 1rem !important;
         font-weight: 600 !important;
-        padding: 10px 18px !important;
+        padding: 8px 16px !important;
+        text-align: center !important;
     }}
+    
     div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
         {segmented_active_css}
     }}
 
-    /* Buttons Appearance (Distinct Light Grey in Light Mode) */
     .stButton>button {{
         {btn_css}
     }}
@@ -453,7 +472,6 @@ st.markdown(
         {btn_hover_css}
     }}
 
-    /* Section Title Centering */
     .section-title {{
         text-align: center;
         color: {text_color};
@@ -463,7 +481,6 @@ st.markdown(
         font-weight: 700;
     }}
 
-    /* Cards Styling */
     .news-card, .notif-card {{
         background-color: {card_bg};
         border: 1px solid {border_color};
@@ -619,11 +636,11 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# CENTERED HEADER BANNER
+# STRICTLY CENTERED HEADER BANNER
 # ---------------------------------------------------------
-banner_col1, banner_col2 = st.columns([8, 1])
+banner_col, bell_col = st.columns([11, 1])
 
-with banner_col1:
+with banner_col:
     st.markdown(
         f"""
         <div class="header-banner">
@@ -634,7 +651,7 @@ with banner_col1:
         unsafe_allow_html=True,
     )
 
-with banner_col2:
+with bell_col:
     bell_label = f"🔔 {unread_count}" if unread_count > 0 else "🔔"
     if st.button(
         bell_label,
@@ -672,7 +689,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CENTERED & LARGER SLIDING TABS SWITCHER
+# PERFECTLY CENTERED SLIDING TABS SWITCHER
 # ---------------------------------------------------------
 tab_options_map = {
     f"🏠 {t['tab_home']}": "home",
