@@ -210,7 +210,7 @@ TEXTS = {
 if "lang" not in st.session_state:
     st.session_state.lang = "AR"
 if "theme_mode" not in st.session_state:
-    st.session_state.theme_mode = "Dark"
+    st.session_state.theme_mode = "Light"
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "home"
 if "selected_service" not in st.session_state:
@@ -306,7 +306,7 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING (ORANGE IN DARK MODE / DEFAULT IN LIGHT MODE)
+# DYNAMIC CSS STYLING
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
@@ -317,52 +317,61 @@ if is_dark:
     text_color = "#f0f6fc"
     border_color = "#30363d"
     subtext_color = "#8b949e"
-    accent_orange = "#f97316"
-    accent_orange_hover = "#ea580c"
+    accent_color = "#f97316"
+    accent_hover = "#ea580c"
 
-    # Dark Mode Custom Button Styles (Orange)
+    # Dark Mode Buttons
     btn_css = f"""
-        background-color: {accent_orange} !important;
+        background-color: {accent_color} !important;
         color: #ffffff !important;
-        border-radius: 8px !important;
-        border: none !important;
+        border-radius: 10px !important;
+        border: 1px solid {accent_hover} !important;
         font-weight: 600 !important;
-        transition: all 0.15s ease-in-out;
+        padding: 0.6rem 1.2rem !important;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
     """
-    btn_hover_css = f"background-color: {accent_orange_hover} !important; opacity: 0.9;"
+    btn_hover_css = f"background-color: {accent_hover} !important;"
 
-    # Dark Mode Sidebar Inputs Customization
-    sidebar_css = f"""
-        background-color: {sidebar_bg} !important;
-        border-right: 1px solid {border_color};
-    """
+    sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
     sidebar_inputs_css = f"""
         div[data-testid="stSidebar"] input {{
             background-color: #0d1117 !important;
             color: #ffffff !important;
-            border: 1px solid {accent_orange} !important;
-        }}
-        div[data-testid="stSidebar"] div[data-baseweb="radio"] div[aria-checked="true"] {{
-            background-color: {accent_orange} !important;
+            border: 1px solid {accent_color} !important;
         }}
     """
-    segmented_active_css = f"background-color: {accent_orange} !important; color: #ffffff !important;"
+    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important;"
+    segmented_bg = card_bg
 else:
-    # Standard Light Mode Colors (Original Streamlit Theme)
-    bg_color = "#ffffff"
+    # Light Mode Colors with distinct light grey button appearance
+    bg_color = "#f8fafc"
     card_bg = "#ffffff"
-    sidebar_bg = "#f8f9fa"
-    text_color = "#212529"
-    border_color = "#dee2e6"
-    subtext_color = "#6c757d"
-    accent_orange = "#047857"
+    sidebar_bg = "#f1f5f9"
+    text_color = "#0f172a"
+    border_color = "#cbd5e1"
+    subtext_color = "#64748b"
+    accent_color = "#047857"
 
-    # Default Light Mode Button Styles
-    btn_css = ""
-    btn_hover_css = ""
-    sidebar_css = ""
+    # Distinct Light Grey Button Styling
+    btn_css = """
+        background-color: #e2e8f0 !important;
+        color: #1e293b !important;
+        border-radius: 10px !important;
+        border: 1px solid #cbd5e1 !important;
+        font-weight: 600 !important;
+        padding: 0.65rem 1.25rem !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
+        transition: all 0.2s ease-in-out !important;
+    """
+    btn_hover_css = """
+        background-color: #cbd5e1 !important;
+        border-color: #94a3b8 !important;
+        color: #0f172a !important;
+    """
+    sidebar_css = f"background-color: {sidebar_bg} !important;"
     sidebar_inputs_css = ""
-    segmented_active_css = "background-color: #047857 !important; color: #ffffff !important;"
+    segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important;"
+    segmented_bg = "#e2e8f0"
 
 st.markdown(
     f"""
@@ -371,68 +380,72 @@ st.markdown(
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-family: system-ui, -apple-system, sans-serif;
     }}
 
     /* Sidebar Styling */
     div[data-testid="stSidebar"] {{
         {sidebar_css}
     }}
-
     {sidebar_inputs_css}
 
     /* Header Banner Container */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
-        padding: 18px;
-        border-radius: 12px;
+        padding: 22px 15px;
+        border-radius: 14px;
         text-align: center;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+        margin-bottom: 20px;
     }}
     .header-banner h2 {{
-        margin: 0 0 4px 0;
-        font-weight: 700;
-        font-size: 1.5rem;
+        margin: 0 0 6px 0;
+        font-weight: 800;
+        font-size: 1.65rem;
         color: #ffffff !important;
     }}
     .header-banner p {{
         margin: 0;
         opacity: 0.95;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         color: #ecfdf5 !important;
     }}
 
-    /* Perfectly Centered Sliding Tabs across English/Arabic */
+    /* Perfectly Centered & Larger Sliding Tabs */
     div[data-testid="stSegmentedControl"] {{
-        margin: 0 auto !important;
         display: flex !important;
         justify-content: center !important;
         align-items: center !important;
-        width: fit-content !important;
-        background-color: {card_bg} !important;
+        width: 100% !important;
+        max-width: 650px !important;
+        margin: 0 auto 25px auto !important;
+        background-color: {segmented_bg} !important;
         border: 1px solid {border_color} !important;
-        border-radius: 30px !important;
-        padding: 4px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+        border-radius: 35px !important;
+        padding: 6px !important;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.06) !important;
     }}
     div[data-testid="stSegmentedControl"] > div {{
-        justify-content: center !important;
         width: 100% !important;
+        display: flex !important;
+        justify-content: space-around !important;
     }}
     div[data-testid="stSegmentedControl"] button {{
-        border-radius: 25px !important;
+        flex: 1 !important;
+        border-radius: 28px !important;
         border: none !important;
         color: {text_color} !important;
         transition: all 0.25s ease-in-out !important;
+        font-size: 1.05rem !important;
         font-weight: 600 !important;
-        padding: 6px 20px !important;
+        padding: 10px 18px !important;
     }}
     div[data-testid="stSegmentedControl"] button[data-checked="true"] {{
         {segmented_active_css}
     }}
 
-    /* Buttons Style */
+    /* Buttons Appearance (Distinct Light Grey in Light Mode) */
     .stButton>button {{
         {btn_css}
     }}
@@ -440,36 +453,36 @@ st.markdown(
         {btn_hover_css}
     }}
 
-    /* Section Headers */
+    /* Section Title Centering */
     .section-title {{
         text-align: center;
         color: {text_color};
-        margin-top: 10px;
-        margin-bottom: 20px;
-        font-size: 1.3rem;
+        margin-top: 15px;
+        margin-bottom: 22px;
+        font-size: 1.4rem;
         font-weight: 700;
     }}
 
-    /* Cards */
+    /* Cards Styling */
     .news-card, .notif-card {{
         background-color: {card_bg};
         border: 1px solid {border_color};
-        border-left: 5px solid {accent_orange};
-        padding: 14px;
-        border-radius: 8px;
-        margin-bottom: 10px;
+        border-left: 5px solid {accent_color};
+        padding: 16px;
+        border-radius: 10px;
+        margin-bottom: 12px;
         color: {text_color};
+        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
     }}
 
-    /* Notification Popup */
     .notif-popover {{
         background-color: {card_bg};
-        border: 1px solid {accent_orange};
-        border-radius: 10px;
-        padding: 14px;
+        border: 1px solid {accent_color};
+        border-radius: 12px;
+        padding: 16px;
         margin-top: 10px;
-        margin-bottom: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        margin-bottom: 20px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15);
     }}
     </style>
 """,
@@ -485,7 +498,6 @@ unread_count = get_unread_notif_count()
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
-    # Fast Language Switcher
     lang_choice = st.radio(
         "اللغة / Language",
         ["العربية", "English"],
@@ -497,11 +509,10 @@ with st.sidebar:
         st.session_state.lang = new_lang
         st.rerun()
 
-    # Fast Light / Dark Theme Switch
     theme_choice = st.radio(
         "المظهر / Theme Mode",
-        ["Dark 🌙", "Light ☀️"],
-        index=0 if st.session_state.theme_mode == "Dark" else 1,
+        ["Light ☀️", "Dark 🌙"],
+        index=0 if st.session_state.theme_mode == "Light" else 1,
         key="theme_radio_select",
     )
     new_theme = "Dark" if "Dark" in theme_choice else "Light"
@@ -511,7 +522,6 @@ with st.sidebar:
 
     st.divider()
 
-    # User Authentication Area (Orange in Dark mode, normal in Light mode)
     st.subheader("👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
         auth_mode = st.radio(
@@ -609,11 +619,11 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# CENTERED HEADER BANNER WITH NOTIFICATION BELL
+# CENTERED HEADER BANNER
 # ---------------------------------------------------------
-banner_col1, banner_col2, banner_col3 = st.columns([1, 6, 1])
+banner_col1, banner_col2 = st.columns([8, 1])
 
-with banner_col2:
+with banner_col1:
     st.markdown(
         f"""
         <div class="header-banner">
@@ -624,7 +634,7 @@ with banner_col2:
         unsafe_allow_html=True,
     )
 
-with banner_col3:
+with banner_col2:
     bell_label = f"🔔 {unread_count}" if unread_count > 0 else "🔔"
     if st.button(
         bell_label,
@@ -637,35 +647,32 @@ with banner_col3:
 
 # Quick Notification Viewer Overlay
 if st.session_state.show_notif_popup:
-    with banner_col2:
-        st.markdown('<div class="notif-popover">', unsafe_allow_html=True)
-        st.markdown("#### 🔔 Quick Notifications Inbox")
-        if not st.session_state.logged_in:
-            st.info("Please log in to view your private notifications.")
+    st.markdown('<div class="notif-popover">', unsafe_allow_html=True)
+    st.markdown("#### 🔔 Quick Notifications Inbox")
+    if not st.session_state.logged_in:
+        st.info("Please log in to view your private notifications.")
+    else:
+        notifs = get_user_notifications()
+        if notifs:
+            for n in notifs[:3]:
+                st.markdown(
+                    f"""
+                    <div class="notif-card">
+                        <b>📩 {sanitize(n.get('title',''))}</b>
+                        <p style="margin:2px 0; font-size:0.9em;">{sanitize(n.get('message',''))}</p>
+                    </div>
+                """,
+                    unsafe_allow_html=True,
+                )
         else:
-            notifs = get_user_notifications()
-            if notifs:
-                for n in notifs[:3]:
-                    st.markdown(
-                        f"""
-                        <div class="notif-card">
-                            <b>📩 {sanitize(n.get('title',''))}</b>
-                            <p style="margin:2px 0; font-size:0.9em;">{sanitize(n.get('message',''))}</p>
-                        </div>
-                    """,
-                        unsafe_allow_html=True,
-                    )
-            else:
-                st.info("No notifications available.")
-        if st.button("Close Notifications", key="close_notif"):
-            st.session_state.show_notif_popup = False
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-st.write("")
+            st.info("No notifications available.")
+    if st.button("Close Notifications", key="close_notif"):
+        st.session_state.show_notif_popup = False
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# PERFECTLY CENTERED SLIDING SEGMENTED CONTROL TABS
+# CENTERED & LARGER SLIDING TABS SWITCHER
 # ---------------------------------------------------------
 tab_options_map = {
     f"🏠 {t['tab_home']}": "home",
@@ -675,27 +682,22 @@ tab_options_map = {
 
 reverse_map = {v: k for k, v in tab_options_map.items()}
 
-# Centered layout using st.columns
-_, center_col, _ = st.columns([1, 8, 1])
+selected_segmented_label = st.segmented_control(
+    label="Navigation Tabs",
+    options=list(tab_options_map.keys()),
+    default=reverse_map.get(
+        st.session_state.active_tab, list(tab_options_map.keys())[0]
+    ),
+    label_visibility="collapsed",
+    key="sliding_tabs_control",
+)
 
-with center_col:
-    selected_segmented_label = st.segmented_control(
-        label="Navigation Tabs",
-        options=list(tab_options_map.keys()),
-        default=reverse_map.get(
-            st.session_state.active_tab, list(tab_options_map.keys())[0]
-        ),
-        label_visibility="collapsed",
-        key="sliding_tabs_control",
-    )
-
-    if (
-        selected_segmented_label
-        and tab_options_map[selected_segmented_label]
-        != st.session_state.active_tab
-    ):
-        st.session_state.active_tab = tab_options_map[selected_segmented_label]
-        st.rerun()
+if (
+    selected_segmented_label
+    and tab_options_map[selected_segmented_label] != st.session_state.active_tab
+):
+    st.session_state.active_tab = tab_options_map[selected_segmented_label]
+    st.rerun()
 
 # ---------------------------------------------------------
 # TAB 1: MAIN SERVICES VIEW
@@ -875,8 +877,8 @@ if st.session_state.active_tab == "home":
                     st.markdown(
                         f"""
                         <div class="news-card">
-                            <span style="background: {accent_orange}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
-                            <h4 style="margin: 8px 0 5px 0; color: {accent_orange};">📢 {sanitize(n.get("title",""))}</h4>
+                            <span style="background: {accent_color}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
+                            <h4 style="margin: 8px 0 5px 0; color: {accent_color};">📢 {sanitize(n.get("title",""))}</h4>
                             <p style="margin: 0;">{sanitize(n.get("content",""))}</p>
                         </div>
                     """,
@@ -1082,16 +1084,16 @@ if st.session_state.active_tab == "home":
 
                 popup_html = f"""
                 <div style="font-family: Arial; width: 200px; color: black;">
-                    <h4 style="margin:0; color:#ea580c;">{name}</h4>
+                    <h4 style="margin:0; color:#047857;">{name}</h4>
                     <p style="margin:0; font-size:12px;"><b>Cat:</b> {cat}</p>
-                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#ea580c; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
+                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#047857; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
                 </div>
                 """
                 folium.Marker(
                     location=[lat, lon],
                     popup=folium.Popup(popup_html, max_width=220),
                     tooltip=name,
-                    icon=folium.Icon(color=color_map.get(cat, "orange")),
+                    icon=folium.Icon(color=color_map.get(cat, "green")),
                 ).add_to(m)
 
             st_folium(m, width=700, height=450)
@@ -1105,15 +1107,15 @@ elif st.session_state.active_tab == "card":
     if st.session_state.logged_in:
         st.markdown(
             f"""
-            <div style="border: 2px solid {accent_orange}; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
-                <h3 style="color: {accent_orange}; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
+            <div style="border: 2px solid {accent_color}; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
+                <h3 style="color: {accent_color}; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
                 <p><b>وزارة الفلاحة والتنمية الريفية</b></p>
                 <hr style="border-color: {border_color};">
                 <div style="text-align: right; display: inline-block;">
                     <p><b>Farmer Name / الاسم:</b> {st.session_state.farmer_name}</p>
                     <p><b>Email / البريد:</b> {st.session_state.farmer_email}</p>
                     <p><b>Card N° / رقم البطاقة:</b> {st.session_state.carte_num}</p>
-                    <p><b>Status / الحالة:</b> <span style="color: {accent_orange}; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
+                    <p><b>Status / الحالة:</b> <span style="color: {accent_color}; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
                 </div>
             </div>
         """,
