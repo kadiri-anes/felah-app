@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# GLOBAL CONSTANTS & TRANSLATIONS
+# CONSTANTS & DATA STRUCTURES
 # ---------------------------------------------------------
 WILAYAS_48 = [
     "01 - Adrar",
@@ -143,31 +143,31 @@ SUPPORT_SECTORS = {
 
 ALERT_STYLES = {
     "yellow": {
-        "bg_color": "#fffbe6",
-        "border_color": "#ffe58f",
-        "text_color": "#d48806",
+        "bg_color": "#2c2200",
+        "border_color": "#eab308",
+        "text_color": "#fef08a",
         "icon": "⚠️",
         "label": "يقظة - الأصفر",
-        "badge_bg": "#ffe58f",
-        "badge_text": "#8c6b00",
+        "badge_bg": "#a16207",
+        "badge_text": "#ffffff",
     },
     "orange": {
-        "bg_color": "#fff2e8",
-        "border_color": "#ffbb96",
-        "text_color": "#d4380d",
+        "bg_color": "#331600",
+        "border_color": "#f97316",
+        "text_color": "#ffedd5",
         "icon": "🟠",
         "label": "تحذير - البرتقالي",
-        "badge_bg": "#ffbb96",
-        "badge_text": "#871400",
+        "badge_bg": "#c2410c",
+        "badge_text": "#ffffff",
     },
     "red": {
-        "bg_color": "#fff1f0",
-        "border_color": "#ffa39e",
-        "text_color": "#cf1322",
+        "bg_color": "#370909",
+        "border_color": "#ef4444",
+        "text_color": "#fee2e2",
         "icon": "🚨",
         "label": "خطر - الأحمر",
-        "badge_bg": "#ffa39e",
-        "badge_text": "#820014",
+        "badge_bg": "#b91c1c",
+        "badge_text": "#ffffff",
     },
 }
 
@@ -228,6 +228,8 @@ if "admin_authenticated" not in st.session_state:
 if "captcha_num1" not in st.session_state:
     st.session_state.captcha_num1 = random.randint(1, 9)
     st.session_state.captcha_num2 = random.randint(1, 9)
+if "show_notif_popup" not in st.session_state:
+    st.session_state.show_notif_popup = False
 
 # ---------------------------------------------------------
 # SUPABASE CONNECTION SETUP
@@ -237,11 +239,10 @@ try:
 except Exception:
     supabase_client = None
 
+
 # ---------------------------------------------------------
 # HELPER & UTILITY FUNCTIONS
 # ---------------------------------------------------------
-
-
 def sanitize(text: str) -> str:
     if not text:
         return ""
@@ -271,6 +272,22 @@ def get_unread_notif_count() -> int:
         return 0
 
 
+def get_user_notifications():
+    if not st.session_state.logged_in or not supabase_client:
+        return []
+    try:
+        res = (
+            supabase_client.table("farmer_notifications")
+            .select("*")
+            .eq("farmer_email", st.session_state.farmer_email)
+            .order("id", desc=True)
+            .execute()
+        )
+        return res.data if res.data else []
+    except Exception:
+        return []
+
+
 def get_current_crop_area(crop_name: str) -> float:
     if not supabase_client:
         return 0.0
@@ -289,15 +306,26 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC THEME & CSS INJECTION
+# COLOR PALETTE & CSS INJECTION
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
-bg_color = "#121820" if is_dark else "#f4f7f6"
-card_bg = "#1b2430" if is_dark else "#ffffff"
-text_color = "#e2e8f0" if is_dark else "#2d3748"
-border_color = "#2d3748" if is_dark else "#e2e8f0"
-subtext_color = "#a0aec0" if is_dark else "#4a5568"
+if is_dark:
+    bg_color = "#0d1117"
+    card_bg = "#161b22"
+    text_color = "#f0f6fc"
+    border_color = "#30363d"
+    subtext_color = "#8b949e"
+    primary_accent = "#10b981"
+    primary_hover = "#059669"
+else:
+    bg_color = "#f8fafc"
+    card_bg = "#ffffff"
+    text_color = "#0f172a"
+    border_color = "#e2e8f0"
+    subtext_color = "#64748b"
+    primary_accent = "#059669"
+    primary_hover = "#047857"
 
 st.markdown(
     f"""
@@ -305,7 +333,7 @@ st.markdown(
     @keyframes slideInUp {{
         0% {{
             opacity: 0;
-            transform: translateY(18px);
+            transform: translateY(14px);
         }}
         100% {{
             opacity: 1;
@@ -313,103 +341,99 @@ st.markdown(
         }}
     }}
 
-    /* Global Dark/Light Adaptation */
-    @media (prefers-color-scheme: dark) {{
-        .stApp {{
-            background-color: {bg_color};
-            color: {text_color};
-        }}
-    }}
-
     .stApp {{
-        background-color: {bg_color};
-        color: {text_color};
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: {bg_color} !important;
+        color: {text_color} !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }}
 
-    /* Centered Header Banner */
+    /* Header Banner Container */
     .header-banner {{
-        background: linear-gradient(135deg, #0b8a62 0%, #1e5340 100%);
-        color: white;
-        padding: 22px 20px;
+        background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+        color: #ffffff;
+        padding: 20px;
         border-radius: 12px;
         text-align: center;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        margin-bottom: 20px;
+        position: relative;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }}
     .header-banner h2 {{
-        margin: 0 0 6px 0;
+        margin: 0 0 4px 0;
         font-weight: 700;
-        font-size: 1.7rem;
+        font-size: 1.6rem;
+        color: #ffffff !important;
     }}
     .header-banner p {{
         margin: 0;
-        opacity: 0.9;
+        opacity: 0.95;
         font-size: 0.95rem;
+        color: #ecfdf5 !important;
     }}
 
-    /* Centered Navigation Tabs Container */
-    .nav-tabs-wrapper {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 25px;
-        width: 100%;
-    }}
-
-    /* Dynamic Content Container with Keyframe Slide Transition */
+    /* Sliding Content Area */
     .animated-tab-content {{
-        animation: slideInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         background-color: {card_bg};
         border: 1px solid {border_color};
         border-radius: 12px;
-        padding: 24px;
-        margin-top: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        padding: 22px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
     }}
 
-    /* Main Services Section Title */
+    /* Section Headers */
     .section-title {{
         text-align: center;
-        color: #0b8a62;
-        margin-bottom: 20px;
-        font-size: 1.5rem;
-        font-weight: 600;
+        color: {primary_accent};
+        margin-bottom: 18px;
+        font-size: 1.4rem;
+        font-weight: 700;
     }}
 
-    /* Custom Cards Styling */
+    /* News & Notification Cards */
     .news-card {{
         background-color: {card_bg};
         border: 1px solid {border_color};
-        border-left: 5px solid #0b8a62;
+        border-left: 5px solid {primary_accent};
         padding: 16px;
         border-radius: 8px;
-        margin-bottom: 14px;
+        margin-bottom: 12px;
+        color: {text_color};
     }}
     .notif-card {{
         background-color: {card_bg};
         border: 1px solid {border_color};
-        border-right: 5px solid #0b8a62;
+        border-right: 5px solid {primary_accent};
         padding: 14px;
         border-radius: 8px;
         margin-bottom: 10px;
+        color: {text_color};
     }}
 
-    /* Streamlit Widget Customization */
+    /* Streamlit UI Controls Tuning */
     div[data-testid="stSidebar"] {{
-        background-color: {card_bg};
+        background-color: {card_bg} !important;
         border-right: 1px solid {border_color};
     }}
+    
     .stButton>button {{
         border-radius: 8px;
         font-weight: 600;
-        transition: all 0.2s ease-in-out;
+        transition: all 0.15s ease-in-out;
     }}
     .stButton>button:hover {{
-        border-color: #0b8a62;
-        color: #0b8a62;
-        transform: translateY(-1px);
+        border-color: {primary_accent} !important;
+        color: {primary_accent} !important;
+    }}
+
+    /* Notification Bell Popup Window */
+    .notif-popover {{
+        background-color: {card_bg};
+        border: 1px solid {border_color};
+        border-radius: 8px;
+        padding: 14px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }}
     </style>
 """,
@@ -417,26 +441,32 @@ st.markdown(
 )
 
 t = TEXTS[st.session_state.lang]
+unread_count = get_unread_notif_count()
 
 # ---------------------------------------------------------
-# SIDEBAR CONTROL PANEL & AUTH
+# SIDEBAR CONTROL PANEL
 # ---------------------------------------------------------
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
-    # Language Switcher
+    # Fast Language Switcher (Zero delay state binding)
     lang_choice = st.radio(
         "اللغة / Language",
         ["العربية", "English"],
         index=0 if st.session_state.lang == "AR" else 1,
+        key="lang_radio_select",
     )
-    st.session_state.lang = "AR" if lang_choice == "العربية" else "EN"
+    new_lang = "AR" if lang_choice == "العربية" else "EN"
+    if new_lang != st.session_state.lang:
+        st.session_state.lang = new_lang
+        st.rerun()
 
-    # Smooth Dark / Light Mode Switch
+    # Fast Light / Dark Theme Switch
     theme_choice = st.radio(
         "المظهر / Theme Mode",
         ["Dark 🌙", "Light ☀️"],
         index=0 if st.session_state.theme_mode == "Dark" else 1,
+        key="theme_radio_select",
     )
     new_theme = "Dark" if "Dark" in theme_choice else "Light"
     if new_theme != st.session_state.theme_mode:
@@ -445,7 +475,7 @@ with st.sidebar:
 
     st.divider()
 
-    # User Account / Auth Workflow
+    # User Authentication
     st.subheader("👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
         auth_mode = st.radio(
@@ -462,7 +492,6 @@ with st.sidebar:
                 "Carte Fellah N° / رقم بطاقة الفلاح", placeholder="DZ-2026-XXXX"
             )
 
-            # CAPTCHA Guard
             captcha_ans = st.number_input(
                 f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
                 step=1,
@@ -532,7 +561,6 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"Error: {e}")
     else:
-        unread_count = get_unread_notif_count()
         st.success(f"Logged in: {st.session_state.farmer_name}")
         st.caption(f"Carte N°: {st.session_state.carte_num}")
         if unread_count > 0:
@@ -545,60 +573,111 @@ with st.sidebar:
             st.rerun()
 
 # ---------------------------------------------------------
-# HEADER BANNER (CENTERED)
+# CENTERED HEADER BANNER WITH NOTIFICATION BELL
 # ---------------------------------------------------------
-st.markdown(
-    f"""
-    <div class="header-banner">
-        <h2>{t['title']}</h2>
-        <p>{t['subtitle']}</p>
-    </div>
-""",
-    unsafe_allow_html=True,
-)
+banner_col1, banner_col2, banner_col3 = st.columns([1, 6, 1])
+
+with banner_col2:
+    st.markdown(
+        f"""
+        <div class="header-banner">
+            <h2>{t['title']}</h2>
+            <p>{t['subtitle']}</p>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+with banner_col3:
+    # Top Quick Notification Bell Toggle Button
+    bell_label = f"🔔 ({unread_count})" if unread_count > 0 else "🔔"
+    if st.button(bell_label, key="hdr_bell_btn", help="View Notifications"):
+        st.session_state.show_notif_popup = not st.session_state.show_notif_popup
+        st.rerun()
+
+# Quick Notification Viewer Overlay
+if st.session_state.show_notif_popup:
+    with banner_col2:
+        st.markdown(
+            f'<div class="notif-popover">', unsafe_allow_html=True
+        )
+        st.markdown("#### 🔔 Quick Notifications Inbox")
+        if not st.session_state.logged_in:
+            st.info("Please log in to view your private notifications.")
+        else:
+            notifs = get_user_notifications()
+            if notifs:
+                for n in notifs[:3]:  # Top 3 latest
+                    st.markdown(
+                        f"""
+                        <div class="notif-card">
+                            <b>📩 {sanitize(n.get('title',''))}</b>
+                            <p style="margin:2px 0; font-size:0.9em;">{sanitize(n.get('message',''))}</p>
+                        </div>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("No notifications available.")
+        if st.button("Close Notifications", key="close_notif"):
+            st.session_state.show_notif_popup = False
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CENTERED TOP SLIDING NAVIGATION TABS
+# CENTERED SLIDING NAVIGATION TABS
 # ---------------------------------------------------------
 c_left, c_mid, c_right = st.columns([1, 4, 1])
 
 with c_mid:
     t_col1, t_col2, t_col3 = st.columns(3)
 
-    unread_badge = f" ({get_unread_notif_count()})" if st.session_state.logged_in and get_unread_notif_count() > 0 else ""
+    badge = f" ({unread_count})" if unread_count > 0 else ""
 
     with t_col1:
-        is_home = st.session_state.active_tab == "home"
         if st.button(
             f"🏠 {t['tab_home']}",
             use_container_width=True,
-            type="primary" if is_home else "secondary",
+            type=(
+                "primary"
+                if st.session_state.active_tab == "home"
+                else "secondary"
+            ),
+            key="tab_home_btn",
         ):
             st.session_state.active_tab = "home"
             st.rerun()
 
     with t_col2:
-        is_card = st.session_state.active_tab == "card"
         if st.button(
             f"🪪 {t['tab_card']}",
             use_container_width=True,
-            type="primary" if is_card else "secondary",
+            type=(
+                "primary"
+                if st.session_state.active_tab == "card"
+                else "secondary"
+            ),
+            key="tab_card_btn",
         ):
             st.session_state.active_tab = "card"
             st.rerun()
 
     with t_col3:
-        is_acc = st.session_state.active_tab == "account"
         if st.button(
-            f"🔔 {t['tab_account']}{unread_badge}",
+            f"🔔 {t['tab_account']}{badge}",
             use_container_width=True,
-            type="primary" if is_acc else "secondary",
+            type=(
+                "primary"
+                if st.session_state.active_tab == "account"
+                else "secondary"
+            ),
+            key="tab_acc_btn",
         ):
             st.session_state.active_tab = "account"
             st.rerun()
 
 # ---------------------------------------------------------
-# TAB 1: MAIN SERVICES VIEW (ANIMATED)
+# TAB 1: MAIN SERVICES VIEW
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
     st.markdown(
@@ -611,7 +690,6 @@ if st.session_state.active_tab == "home":
             unsafe_allow_html=True,
         )
 
-        # Centered Grid Layout for Main Services Icons
         srv_col1, srv_col2 = st.columns(2)
 
         with srv_col1:
@@ -619,18 +697,21 @@ if st.session_state.active_tab == "home":
                 f"🌾 {t['crop']}",
                 use_container_width=True,
                 type="primary",
+                key="srv_crop",
             ):
                 st.session_state.selected_service = "crop"
                 st.rerun()
             if st.button(
                 f"📑 {t['support']}",
                 use_container_width=True,
+                key="srv_sup",
             ):
                 st.session_state.selected_service = "support"
                 st.rerun()
             if st.button(
                 f"💳 {t['pay']}",
                 use_container_width=True,
+                key="srv_pay",
             ):
                 st.session_state.selected_service = "pay"
                 st.rerun()
@@ -639,24 +720,27 @@ if st.session_state.active_tab == "home":
             if st.button(
                 f"📢 {t['news']}",
                 use_container_width=True,
+                key="srv_news",
             ):
                 st.session_state.selected_service = "news"
                 st.rerun()
             if st.button(
                 f"🌤️ {t['weather']}",
                 use_container_width=True,
+                key="srv_weather",
             ):
                 st.session_state.selected_service = "weather"
                 st.rerun()
             if st.button(
                 f"🗺️ {t['suppliers']}",
                 use_container_width=True,
+                key="srv_map",
             ):
                 st.session_state.selected_service = "suppliers"
                 st.rerun()
 
     else:
-        if st.button(t["back_btn"], use_container_width=True):
+        if st.button(t["back_btn"], use_container_width=True, key="back_btn"):
             st.session_state.selected_service = None
             st.rerun()
 
@@ -776,8 +860,8 @@ if st.session_state.active_tab == "home":
                     st.markdown(
                         f"""
                         <div class="news-card">
-                            <span style="background: #0b8a62; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
-                            <h4 style="margin: 8px 0 5px 0; color: #0b8a62;">📢 {sanitize(n.get("title",""))}</h4>
+                            <span style="background: {primary_accent}; color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em;">{sanitize(n.get("category",""))}</span>
+                            <h4 style="margin: 8px 0 5px 0; color: {primary_accent};">📢 {sanitize(n.get("title",""))}</h4>
                             <p style="margin: 0;">{sanitize(n.get("content",""))}</p>
                         </div>
                     """,
@@ -984,10 +1068,10 @@ if st.session_state.active_tab == "home":
                 )
 
                 popup_html = f"""
-                <div style="font-family: Arial; width: 200px;">
-                    <h4 style="margin:0; color:#0b8a62;">{name}</h4>
+                <div style="font-family: Arial; width: 200px; color: black;">
+                    <h4 style="margin:0; color:#059669;">{name}</h4>
                     <p style="margin:0; font-size:12px;"><b>Cat:</b> {cat}</p>
-                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#4285F4; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
+                    <a href="{maps_url}" target="_blank" style="display:inline-block; margin-top:5px; background:#2563eb; color:white; padding:4px 8px; border-radius:4px; font-size:11px; text-decoration:none;">🗺️ Open Google Maps</a>
                 </div>
                 """
                 folium.Marker(
@@ -1002,7 +1086,7 @@ if st.session_state.active_tab == "home":
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TAB 2: DIGITAL CARTE FELLAH (ANIMATED)
+# TAB 2: DIGITAL CARTE FELLAH
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "card":
     st.markdown(
@@ -1013,15 +1097,15 @@ elif st.session_state.active_tab == "card":
     if st.session_state.logged_in:
         st.markdown(
             f"""
-            <div style="border: 2px solid #0b8a62; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
-                <h3 style="color: #0b8a62; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
+            <div style="border: 2px solid {primary_accent}; border-radius: 15px; padding: 20px; background: {card_bg}; text-align: center;">
+                <h3 style="color: {primary_accent}; margin-top:0;">الجمهورية الجزائرية الديمقراطية الشعبية</h3>
                 <p><b>وزارة الفلاحة والتنمية الريفية</b></p>
                 <hr style="border-color: {border_color};">
                 <div style="text-align: right; display: inline-block;">
                     <p><b>Farmer Name / الاسم:</b> {st.session_state.farmer_name}</p>
                     <p><b>Email / البريد:</b> {st.session_state.farmer_email}</p>
                     <p><b>Card N° / رقم البطاقة:</b> {st.session_state.carte_num}</p>
-                    <p><b>Status / الحالة:</b> <span style="color: #0b8a62; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
+                    <p><b>Status / الحالة:</b> <span style="color: {primary_accent}; font-weight: bold;">ACTIVE / 2026 Valid</span></p>
                 </div>
             </div>
         """,
@@ -1033,14 +1117,13 @@ elif st.session_state.active_tab == "card":
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# TAB 3: PERSONAL HUB & OWNER ADMIN CONSOLE (ANIMATED)
+# TAB 3: PERSONAL HUB & OWNER ADMIN CONSOLE
 # ---------------------------------------------------------
 elif st.session_state.active_tab == "account":
     st.markdown(
         '<div class="animated-tab-content">', unsafe_allow_html=True
     )
 
-    # PART 1: FARMER'S PERSONAL HUB
     if st.session_state.logged_in:
         st.subheader(f"👋 Welcome, {st.session_state.farmer_name}")
         st.caption(
@@ -1055,44 +1138,31 @@ elif st.session_state.active_tab == "account":
 
         with acc_tab1:
             st.subheader("Your Official Notifications")
-            try:
-                res_notif = (
-                    supabase_client.table("farmer_notifications")
-                    .select("*")
-                    .eq("farmer_email", st.session_state.farmer_email)
-                    .order("id", desc=True)
-                    .execute()
-                )
-                notifs = res_notif.data if res_notif.data else []
+            notifs = get_user_notifications()
 
-                if notifs:
-                    for n in notifs:
-                        st.markdown(
-                            f"""
-                            <div class="notif-card">
-                                <b>📩 {sanitize(n.get('title',''))}</b>
-                                <p style="margin:4px 0;">{sanitize(n.get('message',''))}</p>
-                                <small style="color:gray;">{n.get('created_at','')[:10]}</small>
-                            </div>
-                        """,
-                            unsafe_allow_html=True,
-                        )
-
-                    if st.button("Mark All Notifications as Read"):
-                        supabase_client.table(
-                            "farmer_notifications"
-                        ).update({"is_read": True}).eq(
-                            "farmer_email",
-                            st.session_state.farmer_email,
-                        ).execute()
-                        st.success("Notifications updated.")
-                        st.rerun()
-                else:
-                    st.info(
-                        "No personal notifications at this moment."
+            if notifs:
+                for n in notifs:
+                    st.markdown(
+                        f"""
+                        <div class="notif-card">
+                            <b>📩 {sanitize(n.get('title',''))}</b>
+                            <p style="margin:4px 0;">{sanitize(n.get('message',''))}</p>
+                            <small style="color:{subtext_color};">{n.get('created_at','')[:10]}</small>
+                        </div>
+                    """,
+                        unsafe_allow_html=True,
                     )
-            except Exception as e:
-                st.error(f"Error reading notifications: {e}")
+
+                if st.button("Mark All Notifications as Read"):
+                    supabase_client.table("farmer_notifications").update(
+                        {"is_read": True}
+                    ).eq(
+                        "farmer_email", st.session_state.farmer_email
+                    ).execute()
+                    st.success("Notifications updated.")
+                    st.rerun()
+            else:
+                st.info("No personal notifications at this moment.")
 
         with acc_tab2:
             st.subheader("Submitted Crop Declarations")
@@ -1153,7 +1223,7 @@ elif st.session_state.active_tab == "account":
         )
         st.divider()
 
-    # PART 2: OWNER ADMIN DASHBOARD MANAGEMENT
+    # OWNER ADMIN DASHBOARD MANAGEMENT
     st.subheader(
         "🔐 Owner / Portal Admin Management Console"
     )
@@ -1181,7 +1251,6 @@ elif st.session_state.active_tab == "account":
             "📊 View All Database Records",
         ])
 
-        # ADMIN TAB 1: NEWS AND ALERTS
         with adm_tab1:
             st.markdown("#### Post Weather Alert")
             al_title = st.text_input(
@@ -1227,7 +1296,6 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Failed to publish news: {e}")
 
-        # ADMIN TAB 2: DIRECT NOTIFICATIONS
         with adm_tab2:
             st.markdown("#### Send Targeted Notification to Farmer")
             target_email = st.text_input(
@@ -1252,7 +1320,6 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Dispatch failed: {e}")
 
-        # ADMIN TAB 3: ADD DIRECTORY LOCATION
         with adm_tab3:
             st.markdown("#### Add Location to Map Directory")
             loc_name = st.text_input("Facility Name")
@@ -1293,7 +1360,6 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Failed to insert map point: {e}")
 
-        # ADMIN TAB 4: DATABASE TABLES INSPECTION
         with adm_tab4:
             st.markdown("#### System Database Inspector")
             table_choice = st.selectbox(
