@@ -27,7 +27,7 @@ def get_admin_password() -> str:
     return st.secrets.get("ADMIN_PASSWORD", "greatdz")
 
 # ---------------------------------------------------------
-# Page Configuration & Modern Theme Styling (Light & Dark Support)
+# Page Configuration & Modern Theme Styling
 # ---------------------------------------------------------
 st.set_page_config(page_title="Felah Mobile Portal - Algeria", page_icon="🌾", layout="centered")
 
@@ -42,7 +42,7 @@ st.markdown("""
         .news-card p, .news-card h4 { color: #e2e8f0 !important; }
     }
 
-    /* General Layout Adjustments */
+    /* Layout Elements */
     .mobile-sidebar-notice {
         background-color: #e6f4ea;
         border: 2px dashed #0b8a62;
@@ -59,7 +59,7 @@ st.markdown("""
         border-radius: 12px;
         padding: 15px;
         text-align: center;
-        margin-bottom: 12px;
+        margin-bottom: 20px;
         border: 2px solid #d4af37;
     }
     .news-card {
@@ -79,26 +79,35 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
 
-    /* BIGGER & CENTERED HORIZONTAL TABS FOR DESKTOP AND MOBILE */
+    /* CENTERED, WIDE & ENLARGED MAIN TOP TABS */
     div[data-baseweb="tab-list"] {
         display: flex !important;
-        flex-direction: row !important;
-        width: 100% !important;
         justify-content: center !important;
         align-items: center !important;
-        gap: 12px !important;
-        margin: 0 auto 15px auto !important;
+        width: 100% !important;
+        gap: 8px !important;
+        background-color: transparent !important;
+        margin-bottom: 20px !important;
     }
     div[data-baseweb="tab"] {
-        flex-grow: 1 !important;
+        flex: 1 1 0% !important;
         text-align: center !important;
-        padding: 14px 10px !important;
-        font-size: 1.15rem !important;
+        padding: 12px 16px !important;
+        font-size: 1.1rem !important;
         font-weight: bold !important;
+        background-color: #f0f2f5 !important;
         border-radius: 10px !important;
+        border: 1px solid #dcdfe6 !important;
+        color: #2c3e50 !important;
+        justify-content: center !important;
+    }
+    div[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #e6f4ea !important;
+        border-color: #0b8a62 !important;
+        color: #0b8a62 !important;
     }
 
-    /* Tight inline service section (No Gap) */
+    /* Tight service area */
     .service-container {
         margin-top: 0px !important;
         padding-top: 0px !important;
@@ -122,7 +131,7 @@ except Exception:
 supabase_client = conn.client
 
 # ---------------------------------------------------------
-# PRESET ALGERIAN DATA & LOCATIONS
+# PRESET DATA & WILAYAS
 # ---------------------------------------------------------
 DEFAULT_AGRI_LOCATIONS = [
     {"name": "Wholesale Market (EPLFM MAGRO)", "wilaya": "16 - Alger", "category": "Wholesale Produce Market", "lat": 36.7323, "lon": 3.1678, "maps_link": "https://maps.google.com/?q=36.7323,3.1678"},
@@ -162,7 +171,7 @@ SUPPORT_SECTORS = {
     "Well & Water Drilling (حفر الآبار الفلاحية)": ["Fellah Card (بطاقة الفلاح)", "Water Drilling Authorization Permit (رخصة حفر البئر من الموارد المائية)", "Land Title / Lease Agreement (عقد الملكية أو الامتياز)"],
     "Modern Drip/Sprinkler Irrigation (أنظمة الري الحديثة)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice for Equipment (فاتورة شكلية للعتاد)", "Land Topography Plan (مخطط طبوغرافي للأرض)"],
     "Solar Energy for Agricultural Pumps (الطاقة الشمسية للمزارع)": ["Fellah Card (بطاقة الفلاح)", "Solar Installation Technical Quote (عرض سعر للنظام الشمسي)", "Well Authorization / Water Source Proof (اثبات وجود مورد مائي)"],
-    "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزن معتمد)", "Exploitation Certificate (شهادة استغلال فلاحي)"]
+    "Tractors & Farm Machinery (الجرارات والعتاد الفلاحي)": ["Fellah Card (بطاقة الفلاح)", "Proforma Invoice from Certified Dealer (فاتورة شكلية من موزع معتمد)", "Exploitation Certificate (شهادة استغلال فلاحي)"]
 }
 
 ALERT_STYLES = {
@@ -213,7 +222,7 @@ TEXTS = {
         'weather': "الأحوال الجوية والتنبيهات",
         'crop': "نصائح الزراعة والتصريح (QR)",
         'pay': "تجديد بطاقة الفلاح (CIB/الذهبية)",
-        'suppliers': "خريطة CCLS خريطة أسوق الجملة، نقاط",
+        'suppliers': "خريطة أسوق الجملة، نقاط CCLS والأسمدة",
         'support': "طلب دعم الدولة (الدعم الفلاحي)",
         'news': "الأخبار والإعلانات الرسمية",
         'back_btn': "🔙 العودة"
@@ -377,12 +386,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CENTERED & ENLARGED 3 TAB SLIDERS
+# MAIN 3 TOP SLIDING TABS (EXACT CENTERED & LARGE FORMAT)
 # ---------------------------------------------------------
 tab_home, tab_card, tab_account = st.tabs([t['home'], t['card'], t['account']])
 
 # =========================================================
-# TAB 1: HOME & SERVICES (Instant Display)
+# TAB 1: HOME & MAIN SERVICES
 # =========================================================
 with tab_home:
     if st.session_state.selected_service is None:
@@ -615,90 +624,138 @@ with tab_card:
         st.warning("Please log in from the left menu to view your digital card.")
 
 # =========================================================
-# TAB 3: MY ACCOUNT & RESTORED ADMIN CONSOLE
+# TAB 3: MY ACCOUNT & ADMIN CONSOLE (WITH SLIDING SUB-TABS)
 # =========================================================
 with tab_account:
     if st.session_state.logged_in:
         st.subheader(f"👋 Welcome, {st.session_state.farmer_name}")
         
-        st.markdown("#### 🔔 Notifications")
-        try:
-            res_notif = supabase_client.table("farmer_notifications").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
-            notifs = res_notif.data if res_notif.data else []
-            
-            if notifs:
-                for n in notifs:
-                    st.markdown(f"""
-                        <div class="notif-card">
-                            <b>📩 {sanitize(n.get('title',''))}</b>
-                            <p style="margin:4px 0;">{sanitize(n.get('message',''))}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("No personal notifications.")
-        except Exception as e:
-            st.error(f"Error fetching notifications: {e}")
+        user_tab1, user_tab2, user_tab3 = st.tabs(["🔔 Notifications", "📜 My Crop Declarations", "📄 My Subsidies Requests"])
+        
+        with user_tab1:
+            try:
+                res_notif = supabase_client.table("farmer_notifications").select("*").eq("farmer_email", st.session_state.farmer_email).order("id", desc=True).execute()
+                notifs = res_notif.data if res_notif.data else []
+                
+                if notifs:
+                    for n in notifs:
+                        st.markdown(f"""
+                            <div class="notif-card">
+                                <b>📩 {sanitize(n.get('title',''))}</b>
+                                <p style="margin:4px 0;">{sanitize(n.get('message',''))}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("No personal notifications.")
+            except Exception as e:
+                st.error(f"Error fetching notifications: {e}")
 
-        st.divider()
+        with user_tab2:
+            try:
+                res_dec = supabase_client.table("declarations").select("*").eq("carte_num", st.session_state.carte_num).execute()
+                if res_dec.data:
+                    st.dataframe(pd.DataFrame(res_dec.data)[["crop", "category", "area", "wilaya", "start_date"]], use_container_width=True)
+                else:
+                    st.info("No crop declarations found.")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
-        st.markdown("#### 📜 My Crop Declarations")
-        try:
-            res_dec = supabase_client.table("declarations").select("*").eq("carte_num", st.session_state.carte_num).execute()
-            if res_dec.data:
-                st.dataframe(pd.DataFrame(res_dec.data)[["crop", "category", "area", "wilaya", "start_date"]], use_container_width=True)
-            else:
-                st.info("No crop declarations found.")
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-        st.divider()
-
-        st.markdown("#### 📄 My Subsidies Requests")
-        try:
-            res_sup = supabase_client.table("support_requests").select("*").eq("carte_num", st.session_state.carte_num).execute()
-            if res_sup.data:
-                st.dataframe(pd.DataFrame(res_sup.data)[["sector", "wilaya", "status", "created_at"]], use_container_width=True)
-            else:
-                st.info("No subsidy applications found.")
-        except Exception as e:
-            st.error(f"Error: {e}")
+        with user_tab3:
+            try:
+                res_sup = supabase_client.table("support_requests").select("*").eq("carte_num", st.session_state.carte_num).execute()
+                if res_sup.data:
+                    st.dataframe(pd.DataFrame(res_sup.data)[["sector", "wilaya", "status", "created_at"]], use_container_width=True)
+                else:
+                    st.info("No subsidy applications found.")
+            except Exception as e:
+                st.error(f"Error: {e}")
     else:
         st.info("👈 Please log in from the sidebar menu to view your personal account records.")
 
     st.divider()
 
-    # ORIGINAL ADMIN AREA LAYOUT RESTORED
+    # RESTORED ADMIN PANEL WITH FULL FEATURED SUB-TABS (SLIDES)
     st.subheader("🔐 Admin Management Portal")
-    admin_input_pass = st.text_input("Enter Admin Secret Key", type="password", key="admin_pwd_orig")
+    admin_input_pass = st.text_input("Enter Admin Secret Key", type="password", key="admin_pwd_full")
+    
     if admin_input_pass == get_admin_password():
-        st.success("🔓 Authenticated as Administrator")
+        st.success("🔓 Authenticated as Portal Administrator")
         
-        st.markdown("### 📢 Post Weather Alert / News")
-        al_title = st.text_input("Title / العنوان")
-        al_region = st.selectbox("Target Region / الولاية", ["All Wilayas"] + WILAYAS_48)
-        al_severity = st.selectbox("Severity Level", ["yellow", "orange", "red"])
-        al_msg = st.text_area("Content / المحتوى")
-        
-        if st.button("Broadcast Alert", type="primary"):
-            supabase_client.table("weather_alerts").insert({
-                "title": sanitize(al_title), "region": al_region, "severity": al_severity, "message": sanitize(al_msg)
-            }).execute()
-            st.success("Alert Broadcasted Successfully!")
+        # Sub-tabs/Slides for Admin Tasks
+        adm_alerts, adm_news, adm_notifs, adm_locs, adm_db = st.tabs([
+            "⚠️ Weather Alerts", 
+            "📰 News", 
+            "📨 Notifications", 
+            "📍 Add Location", 
+            "📊 Full Database"
+        ])
 
-        st.divider()
-        st.markdown("### 📨 Send Direct Notification")
-        target_email = st.text_input("Target Farmer Email")
-        notif_title = st.text_input("Subject")
-        notif_body = st.text_area("Message Body")
-        if st.button("Send Direct Message"):
-            supabase_client.table("farmer_notifications").insert({
-                "farmer_email": sanitize(target_email), "title": sanitize(notif_title), "message": sanitize(notif_body), "is_read": False
-            }).execute()
-            st.success("Notification Dispatched!")
+        with adm_alerts:
+            st.markdown("### 📢 Broadcast Weather Alert")
+            al_title = st.text_input("Alert Title / العنوان", key="ad_alt_t")
+            al_region = st.selectbox("Target Region / الولاية", ["All Wilayas"] + WILAYAS_48, key="ad_alt_r")
+            al_severity = st.selectbox("Severity Level", ["yellow", "orange", "red"], key="ad_alt_s")
+            al_msg = st.text_area("Content / المحتوى", key="ad_alt_m")
+            if st.button("Broadcast Weather Alert", type="primary"):
+                supabase_client.table("weather_alerts").insert({
+                    "title": sanitize(al_title), "region": al_region, "severity": al_severity, "message": sanitize(al_msg)
+                }).execute()
+                st.success("Alert Broadcasted Successfully!")
 
-        st.divider()
-        st.markdown("### 📊 System Database Records")
-        table_choice = st.selectbox("Inspect Database Table:", ["farmer_profiles", "declarations", "support_requests", "farmer_notifications", "weather_alerts", "portal_news"])
-        res_all = supabase_client.table(table_choice).select("*").execute()
-        if res_all.data:
-            st.dataframe(pd.DataFrame(res_all.data), use_container_width=True)
+        with adm_news:
+            st.markdown("### 📰 Publish Official Announcement")
+            news_title = st.text_input("News Title", key="ad_nw_t")
+            news_cat = st.selectbox("Category", ["Official Statement", "Ministry Announcement", "Market Update", "General Advisory"], key="ad_nw_c")
+            news_content = st.text_area("News Body Content", key="ad_nw_m")
+            if st.button("Publish News"):
+                supabase_client.table("portal_news").insert({
+                    "title": sanitize(news_title), "category": news_cat, "content": sanitize(news_content)
+                }).execute()
+                st.success("News Announcement Published!")
+
+        with adm_notifs:
+            st.markdown("### 📨 Send Direct Farmer Notification")
+            target_email = st.text_input("Target Farmer Email", key="ad_nt_e")
+            notif_title = st.text_input("Subject", key="ad_nt_t")
+            notif_body = st.text_area("Message Body", key="ad_nt_b")
+            if st.button("Send Direct Message"):
+                supabase_client.table("farmer_notifications").insert({
+                    "farmer_email": sanitize(target_email), "title": sanitize(notif_title), "message": sanitize(notif_body), "is_read": False
+                }).execute()
+                st.success("Notification Dispatched!")
+
+        with adm_locs:
+            st.markdown("### 📍 Register Map Directory Location")
+            loc_name = st.text_input("Location / Facility Name", key="ad_lc_n")
+            loc_wilaya = st.selectbox("Wilaya Location", WILAYAS_48, key="ad_lc_w")
+            loc_cat = st.selectbox("Facility Type", ["Wholesale Produce Market", "OAIC Cereal Silo (CCLS)", "ASMIDAL Fertilizer Depot"], key="ad_lc_c")
+            loc_lat = st.number_input("Latitude", value=36.7323, format="%.4f", key="ad_lc_lt")
+            loc_lon = st.number_input("Longitude", value=3.1678, format="%.4f", key="ad_lc_ln")
+            if st.button("Add Map Point"):
+                maps_url = f"https://maps.google.com/?q={loc_lat},{loc_lon}"
+                supabase_client.table("suppliers_directory").insert({
+                    "name": sanitize(loc_name), "wilaya": loc_wilaya, "category": loc_cat, "lat": loc_lat, "lon": loc_lon, "maps_link": maps_url
+                }).execute()
+                st.success("New Map Location Saved!")
+
+        with adm_db:
+            st.markdown("### 📊 Live Crop Quotas & System Database")
+            
+            # Crop Area Usage Analytics Overview
+            st.write("#### 🌾 National Vegetable Quotas & Used Areas")
+            quota_data = []
+            for crop, limit in VEGETABLE_LIMITS.items():
+                used = get_current_crop_area(crop)
+                avail = max(0.0, limit - used)
+                quota_data.append({"Crop": crop, "Used (Ha)": used, "Available (Ha)": avail, "Total Quota (Ha)": limit})
+            st.dataframe(pd.DataFrame(quota_data), use_container_width=True)
+
+            st.divider()
+            
+            # Full DB Inspector
+            table_choice = st.selectbox("Inspect Database Table Records:", ["declarations", "support_requests", "farmer_profiles", "farmer_notifications", "weather_alerts", "portal_news", "suppliers_directory"])
+            res_all = supabase_client.table(table_choice).select("*").execute()
+            if res_all.data:
+                st.dataframe(pd.DataFrame(res_all.data), use_container_width=True)
+            else:
+                st.info("Table is empty.")
