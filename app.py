@@ -253,7 +253,7 @@ def get_admin_password() -> str:
     try:
         return st.secrets["ADMIN_SECRET_KEY"]
     except Exception:
-        return "AlgeriaAgri2026"
+        return "greatdz"
 
 
 def get_unread_notif_count() -> int:
