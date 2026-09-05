@@ -311,34 +311,72 @@ def get_current_crop_area(crop_name: str) -> float:
 is_dark = st.session_state.theme_mode == "Dark"
 
 if is_dark:
-    bg_color = "#0d1117"
-    card_bg = "#161b22"
-    sidebar_bg = "#161b22"
-    text_color = "#f0f6fc"
-    border_color = "#30363d"
-    subtext_color = "#8b949e"
-    accent_color = "#f97316"
-    accent_hover = "#ea580c"
+    # Deep charcoal base + restrained red-orange + dark golden-yellow accents
+    # Designed to be comfortable for the eyes while keeping text highly visible.
+    bg_color = "#101214"
+    card_bg = "#191c20"
+    sidebar_bg = "#17191d"
+    text_color = "#f4f1e8"
+    border_color = "#34383d"
+    subtext_color = "#b4b0a7"
+    accent_color = "#d94a2f"
+    accent_hover = "#b93622"
+    accent_yellow = "#c89d2a"
+    accent_yellow_hover = "#a9811f"
 
     btn_css = f"""
-        background-color: {accent_color} !important;
-        color: #ffffff !important;
+        background: linear-gradient(135deg, {accent_color} 0%, #bd3824 100%) !important;
+        color: #fffaf0 !important;
         border-radius: 10px !important;
         border: 1px solid {accent_hover} !important;
-        font-weight: 600 !important;
+        font-weight: 650 !important;
         padding: 0.6rem 1.2rem !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+        box-shadow: 0 2px 7px rgba(0,0,0,0.30) !important;
+        transition: all 0.2s ease-in-out !important;
     """
-    btn_hover_css = f"background-color: {accent_hover} !important;"
-    sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
+    btn_hover_css = f"""
+        background: linear-gradient(135deg, {accent_hover} 0%, #9f2d1d 100%) !important;
+        border-color: {accent_yellow} !important;
+        color: #fffaf0 !important;
+    """
+    sidebar_css = f"""
+        background-color: {sidebar_bg} !important;
+        border-right: 1px solid {border_color} !important;
+        color: {text_color} !important;
+    """
     sidebar_inputs_css = f"""
         div[data-testid="stSidebar"] input {{
-            background-color: #0d1117 !important;
-            color: #ffffff !important;
-            border: 1px solid {accent_color} !important;
+            background-color: #202328 !important;
+            color: #fffaf0 !important;
+            border: 1px solid #4a4d50 !important;
+            border-radius: 8px !important;
+        }}
+        div[data-testid="stSidebar"] input:focus {{
+            border-color: {accent_yellow} !important;
+            box-shadow: 0 0 0 1px {accent_yellow} !important;
+        }}
+        div[data-testid="stSidebar"] label,
+        div[data-testid="stSidebar"] p,
+        div[data-testid="stSidebar"] span,
+        div[data-testid="stSidebar"] h1,
+        div[data-testid="stSidebar"] h2,
+        div[data-testid="stSidebar"] h3 {{
+            color: {text_color} !important;
+        }}
+        div[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{
+            color: {text_color} !important;
+        }}
+        div[data-testid="stSidebar"] hr {{
+            border-color: #3a3d40 !important;
         }}
     """
-    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;"
+    segmented_active_css = f"""
+        background: linear-gradient(135deg, {accent_color} 0%, #a83220 100%) !important;
+        color: #fff8e7 !important;
+        font-weight: 700 !important;
+        border: 1px solid {accent_yellow} !important;
+        box-shadow: 0 2px 7px rgba(0,0,0,0.38) !important;
+    """
 else:
     bg_color = "#f8fafc"
     card_bg = "#ffffff"
@@ -392,6 +430,19 @@ st.markdown(
         {sidebar_css}
     }}
     {sidebar_inputs_css}
+
+    /* Dark-mode finishing accents */
+    .section-title {{
+        text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    }}
+
+    .news-card, .notif-card {{
+        box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+    }}
+
+    .notif-popover {{
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }}
 
     /* Green Header Banner Setup */
     .header-banner {{
