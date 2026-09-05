@@ -380,7 +380,12 @@ st.markdown(
     .block-container {{
         padding-top: 1.5rem !important;
         padding-bottom: 2rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
         max-width: 800px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        box-sizing: border-box !important;
     }}
 
     div[data-testid="stSidebar"] {{
@@ -398,7 +403,11 @@ st.markdown(
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
         width: 100% !important;
         margin: 0 auto 15px auto !important;
-        box-sizing: border-box;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
     }}
     .header-banner h2 {{
         margin: 0 0 6px 0 !important;
@@ -416,6 +425,26 @@ st.markdown(
         color: #ecfdf5 !important;
         text-align: center !important;
         padding: 0 !important;
+    }}
+
+    /* HEADER + BELL: KEEP THE GREEN TITLE EXACTLY CENTERED */
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
+        display: grid !important;
+        grid-template-columns: 1fr minmax(0, 800px) 1fr !important;
+        align-items: start !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
+        grid-column: 2 !important;
+        width: 100% !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
+        grid-column: 3 !important;
+        width: 100% !important;
+        padding-left: 8px !important;
     }}
 
     /* FLEX CENTER CONTAINMENT */
@@ -441,6 +470,8 @@ st.markdown(
         background-color: transparent !important;
         padding: 4px !important;
         box-sizing: border-box !important;
+        flex-wrap: nowrap !important;
+        overflow: visible !important;
     }}
 
     /* LEFT & RIGHT TRANSPARENT BALANCING SPACERS */
@@ -481,20 +512,74 @@ st.markdown(
         border-color: {accent_color} !important;
     }}
 
-    /* Mobile Responsive Scaling (< 640px) */
+    /* Mobile Responsive Scaling (< 640px): KEEP TITLE AND 3 TABS CENTERED */
     @media (max-width: 640px) {{
-        .header-banner h2 {{
-            font-size: 1.1rem !important;
+        .block-container {{
+            padding-left: 0.55rem !important;
+            padding-right: 0.55rem !important;
+            max-width: 100% !important;
         }}
+
+        div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
+            grid-template-columns: minmax(0, 1fr) auto !important;
+            gap: 6px !important;
+        }}
+
+        div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
+            grid-column: 1 !important;
+        }}
+
+        div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
+            grid-column: 2 !important;
+            padding-left: 0 !important;
+        }}
+
+        .header-banner {{
+            min-height: 84px !important;
+            padding: 16px 10px !important;
+            margin-bottom: 12px !important;
+        }}
+
+        .header-banner h2 {{
+            font-size: 1.02rem !important;
+            line-height: 1.25 !important;
+        }}
+
         .header-banner p {{
-            font-size: 0.75rem !important;
+            font-size: 0.70rem !important;
+            line-height: 1.25 !important;
+        }}
+
+        div[data-testid="stSegmentedControl"] {{
+            margin: 0 auto 16px auto !important;
+        }}
+
+        div[data-testid="stSegmentedControl"] > div,
+        div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+            width: 100% !important;
+            max-width: 100% !important;
+            flex-wrap: nowrap !important;
+            gap: 2px !important;
+            padding: 2px !important;
+        }}
+
+        div[data-testid="stSegmentedControl"] > div::before,
+        div[data-testid="stSegmentedControl"] > div::after,
+        div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
+        div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
+            display: none !important;
         }}
 
         div[data-testid="stSegmentedControl"] button,
         div[data-testid="stSegmentedControl"] [role="option"] {{
-            font-size: 0.72rem !important;
-            padding: 7px 8px !important;
-            margin: 0 3px !important;
+            flex: 1 1 0 !important;
+            min-width: 0 !important;
+            white-space: nowrap !important;
+            font-size: clamp(0.56rem, 2.7vw, 0.72rem) !important;
+            padding: 7px 4px !important;
+            margin: 0 1px !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
         }}
     }}
 
