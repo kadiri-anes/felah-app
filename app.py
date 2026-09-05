@@ -101,22 +101,56 @@ DEFAULT_AGRI_LOCATIONS = [
     },
 ]
 
-VEGETABLE_LIMITS = {
-    "Potatoes (بطاطا)": 160000.0,
-    "Tomatoes (طماطم)": 25000.0,
-    "Onions (بصل)": 55000.0,
-    "Garlic (ثوم)": 12000.0,
-    "Carrots (جزر)": 20000.0,
+# Estimated cultivated areas in Algeria, rounded to the nearest 1,000 ha
+# for easier national target/quota management in this prototype.
+# The values are stored in hectares for compatibility with the database,
+# while the UI displays them in thousands of hectares (kha).
+VEGETABLE_TARGETS_KHA = {
+    "Potatoes (بطاطا)": 160,
+    "Tomatoes (طماطم)": 25,
+    "Onions (بصل)": 48,
+    "Garlic (ثوم)": 12,
+    "Carrots (جزر)": 19,
+    "Green Beans (فاصوليا خضراء)": 12,
+    "Melons (شمام)": 30,
+    "Watermelons (بطيخ)": 28,
+    "Artichokes (خرشوف)": 5,
+    "Peppers (فلفل)": 20,
+    "Zucchini (كوسة)": 12,
+    "Cucumbers (خيار)": 8,
+    "Lettuce (خس)": 10,
+    "Eggplant (باذنجان)": 8,
+    "Peas (جلبانة)": 8,
+    "Cabbage (ملفوف)": 10,
+    "Cauliflower (قرنبيط)": 6,
 }
 
-FRUIT_LIST = [
-    "Citrus / الموالح",
-    "Apples / تفاح",
-    "Dates / تمور",
-    "Olives / زيتون",
-    "Grapes / عنب",
-    "Pomegranates / رمان",
-]
+VEGETABLE_LIMITS = {
+    crop: float(area_kha * 1000)
+    for crop, area_kha in VEGETABLE_TARGETS_KHA.items()
+}
+
+# Estimated national cultivated area, rounded to the nearest 1,000 ha.
+# Fruit areas are shown as reference figures; the current declaration flow
+# does not enforce a national quota for fruit.
+FRUIT_TARGETS_KHA = {
+    "Olives / زيتون": 440,
+    "Dates / تمور": 174,
+    "Citrus / الموالح": 80,
+    "Grapes / عنب": 75,
+    "Figs / تين": 47,
+    "Almonds / لوز": 50,
+    "Apples / تفاح": 50,
+    "Apricots / مشمش": 25,
+    "Peaches & Nectarines / خوخ ونكتارين": 20,
+    "Plums / برقوق": 15,
+    "Pomegranates / رمان": 9,
+    "Pears / إجاص": 5,
+    "Cherries / كرز": 4,
+    "Quinces / سفرجل": 3,
+}
+
+FRUIT_LIST = list(FRUIT_TARGETS_KHA.keys())
 
 SUPPORT_SECTORS = {
     "Geomembrane Basin (أحواض الجيوممبران)": [
@@ -1102,8 +1136,10 @@ if st.session_state.active_tab == "home":
                 selected_c = st.selectbox(
                     "Select Fruit / اختر الفاكهة", FRUIT_LIST
                 )
+                fruit_target_kha = FRUIT_TARGETS_KHA[selected_c]
                 st.success(
-                    "Unlimited Capacity / بدون حد أقصى — Fruit cultivation is open without national hectare restrictions."
+                    f"Estimated cultivated area in Algeria: ≈ {fruit_target_kha:,}k Ha "
+                    f"({fruit_target_kha * 1000:,} Ha) — no national quota is enforced for fruit in this version."
                 )
             else:
                 selected_c = st.selectbox(
@@ -1119,8 +1155,11 @@ if st.session_state.active_tab == "home":
                     f"**National Area Quota Status ({selected_c}):**"
                 )
                 st.progress(percentage)
+                target_kha = VEGETABLE_TARGETS_KHA[selected_c]
                 st.caption(
-                    f"Currently Registered: {current_total:.1f} Ha | Your Input: {area_ha:.1f} Ha | Target Limit: {limit:.0f} Ha"
+                    f"Currently Registered: {current_total:,.1f} Ha | "
+                    f"Your Input: {area_ha:,.1f} Ha | "
+                    f"Estimated National Target: ≈ {target_kha:,}k Ha ({limit:,.0f} Ha)"
                 )
 
             if st.button("Submit & Generate QR Permit"):
