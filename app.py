@@ -311,19 +311,19 @@ def get_current_crop_area(crop_name: str) -> float:
 is_dark = st.session_state.theme_mode == "Dark"
 
 if is_dark:
-    bg_color = "#121212"
+    bg_color = "#0E1117"
     card_bg = "#1E1E1E"
     sidebar_bg = "#1E1E1E"
     text_color = "#FFFFFF"
     border_color = "#2D2D2D"
     subtext_color = "#A0A0A0"
-    accent_color = "#D32F2F"  # Red-Orange Primary
+    accent_color = "#D32F2F"  # Red-Orange Accent
     accent_hover = "#B71C1C"
 
     btn_css = f"""
         background-color: {accent_color} !important;
         color: #FFFFFF !important;
-        border-radius: 10px !important;
+        border-radius: 8px !important;
         border: none !important;
         font-weight: 700 !important;
         padding: 0.8rem 1.2rem !important;
@@ -331,10 +331,10 @@ if is_dark:
         transition: all 0.2s ease-in-out !important;
     """
     btn_hover_css = f"background-color: {accent_hover} !important; transform: translateY(-2px);"
-    sidebar_css = f"background-color: {sidebar_bg} !important; border-left: 1px solid {border_color};"
+    sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
     sidebar_inputs_css = f"""
         div[data-testid="stSidebar"] input {{
-            background-color: #121212 !important;
+            background-color: #0E1117 !important;
             color: #ffffff !important;
             border: 1px solid {accent_color} !important;
         }}
@@ -347,41 +347,36 @@ else:
     text_color = "#0f172a"
     border_color = "#cbd5e1"
     subtext_color = "#64748b"
-    accent_color = "#047857"
-    accent_hover = "#065f46"
+    accent_color = "#D32F2F"
+    accent_hover = "#B71C1C"
 
-    btn_css = """
-        background-color: #e2e8f0 !important;
-        color: #1e293b !important;
-        border-radius: 10px !important;
-        border: 1px solid #cbd5e1 !important;
-        font-weight: 600 !important;
-        padding: 0.65rem 1.25rem !important;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
+    btn_css = f"""
+        background-color: {accent_color} !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 700 !important;
+        padding: 0.8rem 1.2rem !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
         transition: all 0.2s ease-in-out !important;
     """
-    btn_hover_css = """
-        background-color: #cbd5e1 !important;
-        border-color: #94a3b8 !important;
-        color: #0f172a !important;
-    """
-    sidebar_css = f"background-color: {sidebar_bg} !important;"
+    btn_hover_css = f"background-color: {accent_hover} !important;"
+    sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
     sidebar_inputs_css = ""
-    segmented_active_css = "background-color: #ffffff !important; color: #047857 !important; font-weight: 700 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.12) !important;"
+    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; font-weight: 700 !important;"
 
 st.markdown(
     f"""
     <style>
-    /* App Container & Centering */
+    /* App Container */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: system-ui, -apple-system, sans-serif;
-        direction: rtl;
     }}
 
     .block-container {{
-        max-width: 1100px !important;
+        max-width: 1200px !important;
         padding-top: 1.5rem !important;
         padding-bottom: 2rem !important;
         margin: 0 auto !important;
@@ -397,7 +392,7 @@ st.markdown(
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
         padding: 22px 16px;
-        border-radius: 14px;
+        border-radius: 12px;
         text-align: center !important;
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
         width: 100% !important;
@@ -435,7 +430,6 @@ st.markdown(
     div[data-testid="stSegmentedControl"] > div,
     div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
-        flex-direction: row-reverse !important;
         justify-content: center !important;
         align-items: center !important;
         width: 100% !important;
@@ -446,18 +440,6 @@ st.markdown(
         box-sizing: border-box !important;
     }}
 
-    div[data-testid="stSegmentedControl"] > div::before,
-    div[data-testid="stSegmentedControl"] > div::after,
-    div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
-    div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
-        content: "" !important;
-        flex: 1 1 0% !important;
-        min-width: 10px !important;
-        height: 1px !important;
-        background: transparent !important;
-        pointer-events: none !important;
-    }}
-
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stSegmentedControl"] [role="option"] {{
         flex: 0 0 auto !important;
@@ -466,13 +448,12 @@ st.markdown(
         font-weight: 600 !important;
         padding: 8px 18px !important;
         text-align: center !important;
-        border-radius: 24px !important;
+        border-radius: 20px !important;
         border: 1px solid {border_color} !important;
         background-color: {card_bg} !important;
         color: {text_color} !important;
         margin: 0 6px !important;
         transition: all 0.2s ease-in-out !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
@@ -505,7 +486,6 @@ st.markdown(
         border-radius: 10px;
         margin-bottom: 12px;
         color: {text_color};
-        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
     }}
 
     .notif-popover {{
@@ -526,7 +506,7 @@ t = TEXTS[st.session_state.lang]
 unread_count = get_unread_notif_count()
 
 # ---------------------------------------------------------
-# SIDEBAR CONTROL PANEL
+# SIDEBAR CONTROL PANEL (Left Sidebar)
 # ---------------------------------------------------------
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
@@ -805,7 +785,7 @@ if st.session_state.active_tab == "home":
 
             if not st.session_state.logged_in:
                 st.warning(
-                    "⚠️ Please log in from the left menu ↗ to submit a support demand."
+                    "⚠️ Please log in from the left menu ↖ to submit a support demand."
                 )
             else:
                 selected_w_sup = st.selectbox(
