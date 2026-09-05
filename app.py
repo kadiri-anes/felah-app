@@ -436,7 +436,7 @@ st.markdown(
         margin: 0 auto !important;
     }}
 
-    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:nth-child(2) {{
         grid-column: 2 !important;
         width: 100% !important;
     }}
@@ -521,16 +521,20 @@ st.markdown(
         }}
 
         div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
-            grid-template-columns: minmax(0, 1fr) auto !important;
-            gap: 6px !important;
+            grid-template-columns: 1fr minmax(0, 11fr) 1fr !important;
+            gap: 0 !important;
         }}
 
         div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
             grid-column: 1 !important;
         }}
 
-        div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
+        div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:nth-child(2) {{
             grid-column: 2 !important;
+        }}
+
+        div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
+            grid-column: 3 !important;
             padding-left: 0 !important;
         }}
 
@@ -756,7 +760,7 @@ with st.sidebar:
 # ---------------------------------------------------------
 # HEADER BANNER & BELL ICON
 # ---------------------------------------------------------
-banner_col, bell_col = st.columns([11, 1])
+banner_spacer_col, banner_col, bell_col = st.columns([1, 11, 1])
 
 with banner_col:
     st.markdown(
@@ -825,6 +829,7 @@ selected_segmented_label = st.segmented_control(
     ),
     label_visibility="collapsed",
     key="sliding_tabs_control",
+    width="stretch",
 )
 
 if (
