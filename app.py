@@ -16,7 +16,7 @@ from streamlit_folium import st_folium
 st.set_page_config(
     page_title="برنامج التخطيط والتنسيق الفلاحي 2026",
     page_icon="🌾",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -210,7 +210,7 @@ TEXTS = {
 if "lang" not in st.session_state:
     st.session_state.lang = "AR"
 if "theme_mode" not in st.session_state:
-    st.session_state.theme_mode = "Light"
+    st.session_state.theme_mode = "Dark"
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "home"
 if "selected_service" not in st.session_state:
@@ -306,39 +306,40 @@ def get_current_crop_area(crop_name: str) -> float:
 
 
 # ---------------------------------------------------------
-# DYNAMIC CSS STYLING WITH BALANCING SIDE SPACERS
+# DYNAMIC CSS STYLING
 # ---------------------------------------------------------
 is_dark = st.session_state.theme_mode == "Dark"
 
 if is_dark:
-    bg_color = "#0d1117"
-    card_bg = "#161b22"
-    sidebar_bg = "#161b22"
-    text_color = "#f0f6fc"
-    border_color = "#30363d"
-    subtext_color = "#8b949e"
-    accent_color = "#f97316"
-    accent_hover = "#ea580c"
+    bg_color = "#121212"
+    card_bg = "#1E1E1E"
+    sidebar_bg = "#1E1E1E"
+    text_color = "#FFFFFF"
+    border_color = "#2D2D2D"
+    subtext_color = "#A0A0A0"
+    accent_color = "#D32F2F"  # Red-Orange Primary
+    accent_hover = "#B71C1C"
 
     btn_css = f"""
         background-color: {accent_color} !important;
-        color: #ffffff !important;
+        color: #FFFFFF !important;
         border-radius: 10px !important;
-        border: 1px solid {accent_hover} !important;
-        font-weight: 600 !important;
-        padding: 0.6rem 1.2rem !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+        border: none !important;
+        font-weight: 700 !important;
+        padding: 0.8rem 1.2rem !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        transition: all 0.2s ease-in-out !important;
     """
-    btn_hover_css = f"background-color: {accent_hover} !important;"
-    sidebar_css = f"background-color: {sidebar_bg} !important; border-right: 1px solid {border_color};"
+    btn_hover_css = f"background-color: {accent_hover} !important; transform: translateY(-2px);"
+    sidebar_css = f"background-color: {sidebar_bg} !important; border-left: 1px solid {border_color};"
     sidebar_inputs_css = f"""
         div[data-testid="stSidebar"] input {{
-            background-color: #0d1117 !important;
+            background-color: #121212 !important;
             color: #ffffff !important;
             border: 1px solid {accent_color} !important;
         }}
     """
-    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;"
+    segmented_active_css = f"background-color: {accent_color} !important; color: #ffffff !important; box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important;"
 else:
     bg_color = "#f8fafc"
     card_bg = "#ffffff"
@@ -347,6 +348,7 @@ else:
     border_color = "#cbd5e1"
     subtext_color = "#64748b"
     accent_color = "#047857"
+    accent_hover = "#065f46"
 
     btn_css = """
         background-color: #e2e8f0 !important;
@@ -370,17 +372,19 @@ else:
 st.markdown(
     f"""
     <style>
-    /* App Container */
+    /* App Container & Centering */
     .stApp {{
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: system-ui, -apple-system, sans-serif;
+        direction: rtl;
     }}
 
     .block-container {{
+        max-width: 1100px !important;
         padding-top: 1.5rem !important;
         padding-bottom: 2rem !important;
-        max-width: 800px !important;
+        margin: 0 auto !important;
     }}
 
     div[data-testid="stSidebar"] {{
@@ -388,7 +392,7 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    /* Green Header Banner Setup */
+    /* Green Header Banner */
     .header-banner {{
         background: linear-gradient(135deg, #047857 0%, #065f46 100%);
         color: #ffffff;
@@ -418,7 +422,7 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* FLEX CENTER CONTAINMENT */
+    /* FLEX CENTER SEGMENTED CONTROL */
     div[data-testid="stSegmentedControl"] {{
         display: flex !important;
         justify-content: center !important;
@@ -428,11 +432,10 @@ st.markdown(
         background: transparent !important;
     }}
 
-    /* Inner Bar Shell */
     div[data-testid="stSegmentedControl"] > div,
     div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: flex !important;
-        flex-direction: row-reverse !important; /* RTL Support */
+        flex-direction: row-reverse !important;
         justify-content: center !important;
         align-items: center !important;
         width: 100% !important;
@@ -443,59 +446,39 @@ st.markdown(
         box-sizing: border-box !important;
     }}
 
-    /* LEFT & RIGHT TRANSPARENT BALANCING SPACERS */
     div[data-testid="stSegmentedControl"] > div::before,
     div[data-testid="stSegmentedControl"] > div::after,
     div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
     div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
         content: "" !important;
-        flex: 1 1 0% !important; /* Pushes interactive buttons into exact horizontal center */
+        flex: 1 1 0% !important;
         min-width: 10px !important;
         height: 1px !important;
         background: transparent !important;
         pointer-events: none !important;
     }}
 
-    /* Individual Option Buttons with Gap Spacing */
     div[data-testid="stSegmentedControl"] button,
     div[data-testid="stSegmentedControl"] [role="option"] {{
         flex: 0 0 auto !important;
         white-space: nowrap !important;
         font-size: 0.84rem !important;
         font-weight: 600 !important;
-        padding: 8px 18px !important; /* Comfortable button padding */
+        padding: 8px 18px !important;
         text-align: center !important;
         border-radius: 24px !important;
         border: 1px solid {border_color} !important;
-        background-color: {card_bg} !important; /* Standard button color */
+        background-color: {card_bg} !important;
         color: {text_color} !important;
-        margin: 0 6px !important; /* Controlled gap distance between buttons */
+        margin: 0 6px !important;
         transition: all 0.2s ease-in-out !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
-    /* Active Highlighted Button */
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
     div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
         {segmented_active_css}
         border-color: {accent_color} !important;
-    }}
-
-    /* Mobile Responsive Scaling (< 640px) */
-    @media (max-width: 640px) {{
-        .header-banner h2 {{
-            font-size: 1.1rem !important;
-        }}
-        .header-banner p {{
-            font-size: 0.75rem !important;
-        }}
-
-        div[data-testid="stSegmentedControl"] button,
-        div[data-testid="stSegmentedControl"] [role="option"] {{
-            font-size: 0.72rem !important;
-            padding: 7px 8px !important;
-            margin: 0 3px !important;
-        }}
     }}
 
     .stButton>button {{
@@ -695,7 +678,6 @@ with bell_col:
         st.session_state.show_notif_popup = not st.session_state.show_notif_popup
         st.rerun()
 
-# Quick Notification Viewer Overlay
 if st.session_state.show_notif_popup:
     st.markdown('<div class="notif-popover">', unsafe_allow_html=True)
     st.markdown("#### 🔔 Quick Notifications Inbox")
@@ -722,7 +704,7 @@ if st.session_state.show_notif_popup:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# ALIGNED SLIDING TABS SWITCHER (WITH SIDE SPACERS)
+# ALIGNED SLIDING TABS SWITCHER
 # ---------------------------------------------------------
 tab_options_map = {
     f"{t['tab_home']}": "home",
