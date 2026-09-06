@@ -1478,14 +1478,35 @@ elif st.session_state.active_tab == "account":
     else:
         st.success("🔓 Authenticated as System Administrator")
 
-        adm_tab1, adm_tab2, adm_tab3, adm_tab4 = st.tabs([
-            "📢 Post News & Alerts",
+        adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5 = st.tabs([
+            "📰 Post News",
+            "🚨 Weather Alerts",
             "📨 Send Farmer Notifications",
             "📍 Add Map Location",
-            "📊 View All Database Records",
+            "🗃️ Manage Database",
         ])
 
         with adm_tab1:
+            st.markdown("#### Post Portal News Release")
+            news_title = st.text_input("Article Title")
+            news_cat = st.selectbox(
+                "News Category",
+                ["General", "Subsidies", "Weather", "Market Prices"],
+            )
+            news_body = st.text_area("Article Content Body")
+
+            if st.button("Publish News Release"):
+                try:
+                    supabase_client.table("portal_news").insert({
+                        "title": sanitize(news_title),
+                        "category": news_cat,
+                        "content": sanitize(news_body),
+                    }).execute()
+                    st.success("Official News Article Published!")
+                except Exception as e:
+                    st.error(f"Failed to publish news: {e}")
+
+        with adm_tab2:
             st.markdown("#### Post Weather Alert")
             al_title = st.text_input(
                 "Alert Title", placeholder="e.g. Sirocco Heatwave Warning"
@@ -1510,27 +1531,7 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Failed to post alert: {e}")
 
-            st.divider()
-            st.markdown("#### Post Portal News Release")
-            news_title = st.text_input("Article Title")
-            news_cat = st.selectbox(
-                "News Category",
-                ["General", "Subsidies", "Weather", "Market Prices"],
-            )
-            news_body = st.text_area("Article Content Body")
-
-            if st.button("Publish News Release"):
-                try:
-                    supabase_client.table("portal_news").insert({
-                        "title": sanitize(news_title),
-                        "category": news_cat,
-                        "content": sanitize(news_body),
-                    }).execute()
-                    st.success("Official News Article Published!")
-                except Exception as e:
-                    st.error(f"Failed to publish news: {e}")
-
-        with adm_tab2:
+        with adm_tab3:
             st.markdown("#### Send Targeted Notification to Farmer")
             target_email = st.text_input(
                 "Target Farmer Email", placeholder="farmer@domain.dz"
@@ -1594,8 +1595,13 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Failed to insert map point: {e}")
 
-        with adm_tab4:
-            st.markdown("#### System Database Inspector")
+        with adm_tab5:
+            st.markdown("#### System Database Inspector & Management")
+            st.caption(
+                "View records and manage individual rows by ID. Deletion is permanent. "
+                "For crop declarations you can also set the cultivated area to 0 without deleting the record."
+            )
+
             table_choice = st.selectbox(
                 "Select Database Table to Inspect",
                 [
@@ -1607,6 +1613,7 @@ elif st.session_state.active_tab == "account":
                     "portal_news",
                     "suppliers_directory",
                 ],
+                key="admin_table_choice",
             )
 
             try:
@@ -1615,11 +1622,114 @@ elif st.session_state.active_tab == "account":
                     .select("*")
                     .execute()
                 )
-                if res_all.data:
+                records = res_all.data if res_all.data else []
+
+                if records:
+                    df_admin = pd.DataFrame(records)
                     st.dataframe(
-                        pd.DataFrame(res_all.data),
+                        df_admin,
                         use_container_width=True,
+                        hide_index=True,
                     )
+
+                    # Every managed row must have its database ID available.
+                    id_values = [r.get("id") for r in records if r.get("id") is not None]
+
+                    if not id_values:
+                        st.warning(
+                            "No `id` column/value was found in this table. "
+                            "Individual management requires a primary key named `id`."
+                        )
+                    else:
+                        st.divider()
+                        st.markdown("##### Manage One Record by ID")
+                        record_id = st.selectbox(
+                            "Select Record ID",
+                            id_values,
+                            key=f"admin_record_id_{table_choice}",
+                        )
+
+                        selected_record = next(
+                            (r for r in records if r.get("id") == record_id),
+                            None,
+                        )
+
+                        if selected_record is not None:
+                            preview_cols = [
+                                k for k in [
+                                    "id", "title", "crop", "category", "area",
+                                    "farmer_email", "carte_num", "wilaya", "status"
+                                ]
+                                if k in selected_record
+                            ]
+                            if preview_cols:
+                                st.json({k: selected_record.get(k) for k in preview_cols})
+
+                        if table_choice == "declarations":
+                            st.markdown("**Crop Declaration Actions**")
+                            col_zero, col_delete = st.columns(2)
+
+                            with col_zero:
+                                if st.button(
+                                    "0️⃣ Set Area to 0",
+                                    key=f"zero_declaration_{record_id}",
+                                    use_container_width=True,
+                                ):
+                                    try:
+                                        supabase_client.table("declarations").update(
+                                            {"area": 0}
+                                        ).eq("id", record_id).execute()
+                                        st.success(
+                                            f"Declaration ID {record_id} area set to 0."
+                                        )
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed to set declaration area to 0: {e}")
+
+                            with col_delete:
+                                delete_declaration = st.checkbox(
+                                    "Confirm permanent deletion",
+                                    key=f"confirm_delete_dec_{record_id}",
+                                )
+                                if st.button(
+                                    "🗑️ Delete Declaration",
+                                    key=f"delete_declaration_{record_id}",
+                                    use_container_width=True,
+                                    disabled=not delete_declaration,
+                                ):
+                                    try:
+                                        supabase_client.table("declarations").delete().eq(
+                                            "id", record_id
+                                        ).execute()
+                                        st.success(
+                                            f"Declaration ID {record_id} deleted."
+                                        )
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed to delete declaration: {e}")
+                        else:
+                            confirm_delete = st.checkbox(
+                                "Confirm permanent deletion of this record",
+                                key=f"confirm_delete_{table_choice}_{record_id}",
+                            )
+                            if st.button(
+                                f"🗑️ Delete {table_choice} Record",
+                                key=f"delete_record_{table_choice}_{record_id}",
+                                use_container_width=True,
+                                disabled=not confirm_delete,
+                            ):
+                                try:
+                                    supabase_client.table(table_choice).delete().eq(
+                                        "id", record_id
+                                    ).execute()
+                                    st.success(
+                                        f"Record ID {record_id} deleted from `{table_choice}`."
+                                    )
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(
+                                        f"Failed to delete record from `{table_choice}`: {e}"
+                                    )
                 else:
                     st.info(
                         f"Table `{table_choice}` is currently empty."
