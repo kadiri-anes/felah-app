@@ -450,8 +450,8 @@ st.markdown(
     }}
 
     .block-container {{
-        padding-top: 1.5rem !important;
-        padding-bottom: 2rem !important;
+        padding-top: 0.45rem !important;
+        padding-bottom: 1rem !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
         max-width: 800px !important;
@@ -464,6 +464,24 @@ st.markdown(
         {sidebar_css}
     }}
     {sidebar_inputs_css}
+
+    /* Side-by-side Language / Theme controls */
+    div[data-testid="stSidebar"] div[data-testid="column"] {{
+        min-width: 0 !important;
+    }}
+
+    div[data-testid="stSidebar"] div[data-testid="column"] label {{
+        font-size: 0.88rem !important;
+    }}
+
+    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] {{
+        gap: 0.18rem !important;
+    }}
+
+    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label {{
+        white-space: nowrap !important;
+        font-size: 0.82rem !important;
+    }}
 
     /* Dark-mode finishing accents */
     .section-title {{
@@ -512,13 +530,19 @@ st.markdown(
         padding: 0 !important;
     }}
 
-    /* HEADER + BELL: KEEP THE GREEN TITLE EXACTLY CENTERED */
+    /* HEADER + BELL: CENTER THE BANNER AND KEEP THE BELL VISIBLE */
     div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
         display: grid !important;
-        grid-template-columns: 1fr minmax(0, 800px) 1fr !important;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 800px) minmax(48px, 1fr) !important;
         align-items: start !important;
         width: 100% !important;
         margin: 0 auto !important;
+        column-gap: 6px !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
+        grid-column: 1 !important;
+        width: 100% !important;
     }}
 
     div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:nth-child(2) {{
@@ -529,7 +553,20 @@ st.markdown(
     div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
         grid-column: 3 !important;
         width: 100% !important;
-        padding-left: 8px !important;
+        padding-left: 0 !important;
+        padding-top: 4px !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child .stButton {{
+        width: 100% !important;
+        min-width: 44px !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child .stButton > button {{
+        min-width: 44px !important;
+        min-height: 42px !important;
+        padding: 4px 6px !important;
+        font-size: 0.95rem !important;
     }}
 
     /* FLEX CENTER CONTAINMENT */
@@ -600,14 +637,25 @@ st.markdown(
     /* Mobile Responsive Scaling (< 640px): KEEP TITLE AND 3 TABS CENTERED */
     @media (max-width: 640px) {{
         .block-container {{
+            padding-top: 0.2rem !important;
             padding-left: 0.55rem !important;
             padding-right: 0.55rem !important;
+            padding-bottom: 0.7rem !important;
             max-width: 100% !important;
         }}
 
+        /* Keep sidebar controls side-by-side on narrow screens */
+        div[data-testid="stSidebar"] div[data-testid="column"] label {{
+            font-size: 0.74rem !important;
+        }}
+
+        div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label {{
+            font-size: 0.70rem !important;
+        }}
+
         div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
-            grid-template-columns: 1fr minmax(0, 11fr) 1fr !important;
-            gap: 0 !important;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 11fr) minmax(44px, 1fr) !important;
+            gap: 4px !important;
         }}
 
         div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:first-child {{
@@ -621,6 +669,7 @@ st.markdown(
         div[data-testid="stHorizontalBlock"]:has(.header-banner) > div:last-child {{
             grid-column: 3 !important;
             padding-left: 0 !important;
+            padding-top: 2px !important;
         }}
 
         .header-banner {{
@@ -682,10 +731,20 @@ st.markdown(
     .section-title {{
         text-align: center;
         color: {text_color};
-        margin-top: 10px;
-        margin-bottom: 20px;
+        margin-top: 4px;
+        margin-bottom: 12px;
         font-size: 1.35rem;
         font-weight: 700;
+    }}
+
+    /* Compact main-services area: less empty vertical space */
+    div[data-testid="stHorizontalBlock"]:has(#main-services-grid) {{
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"]:has(#main-services-grid) .stButton > button {{
+        min-height: 58px !important;
     }}
 
     .news-card, .notif-card {{
@@ -722,23 +781,30 @@ unread_count = get_unread_notif_count()
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
-    lang_choice = st.radio(
-        "اللغة / Language",
-        ["العربية", "English"],
-        index=0 if st.session_state.lang == "AR" else 1,
-        key="lang_radio_select",
-    )
+    # Language + Theme controls side-by-side
+    lang_col, theme_col = st.columns(2, gap="small")
+
+    with lang_col:
+        lang_choice = st.radio(
+            "اللغة / Language",
+            ["العربية", "English"],
+            index=0 if st.session_state.lang == "AR" else 1,
+            key="lang_radio_select",
+        )
+
+    with theme_col:
+        theme_choice = st.radio(
+            "المظهر / Theme",
+            ["Light ☀️", "Dark 🌙"],
+            index=0 if st.session_state.theme_mode == "Light" else 1,
+            key="theme_radio_select",
+        )
+
     new_lang = "AR" if lang_choice == "العربية" else "EN"
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
         st.rerun()
 
-    theme_choice = st.radio(
-        "المظهر / Theme Mode",
-        ["Light ☀️", "Dark 🌙"],
-        index=0 if st.session_state.theme_mode == "Light" else 1,
-        key="theme_radio_select",
-    )
     new_theme = "Dark" if "Dark" in theme_choice else "Light"
     if new_theme != st.session_state.theme_mode:
         st.session_state.theme_mode = new_theme
@@ -934,6 +1000,7 @@ if st.session_state.active_tab == "home":
             unsafe_allow_html=True,
         )
 
+        st.markdown("<div id='main-services-grid'></div>", unsafe_allow_html=True)
         srv_col1, srv_col2 = st.columns(2)
 
         with srv_col1:
