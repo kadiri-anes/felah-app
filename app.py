@@ -1659,7 +1659,7 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Dispatch failed: {e}")
 
-        with adm_tab3:
+        with adm_tab4:
             st.markdown("#### Add Location to Map Directory")
             loc_name = st.text_input("Facility Name")
             loc_wilaya = st.selectbox(
