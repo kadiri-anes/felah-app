@@ -1014,6 +1014,17 @@ if (
     st.rerun()
 
 # ---------------------------------------------------------
+# FAST SERVICE NAVIGATION
+# ---------------------------------------------------------
+def open_service(service_name):
+    st.session_state.selected_service = service_name
+
+
+def close_service():
+    st.session_state.selected_service = None
+
+
+# ---------------------------------------------------------
 # TAB 1: MAIN SERVICES VIEW
 # ---------------------------------------------------------
 if st.session_state.active_tab == "home":
@@ -1027,52 +1038,60 @@ if st.session_state.active_tab == "home":
         srv_col1, srv_col2 = st.columns(2)
 
         with srv_col1:
-            if st.button(
+            st.button(
                 f"🌾 {t['crop']}",
                 use_container_width=True,
                 key="srv_crop",
-            ):
-                st.session_state.selected_service = "crop"
-            if st.button(
+                on_click=open_service,
+                args=("crop",),
+            )
+            st.button(
                 f"📑 {t['support']}",
                 use_container_width=True,
                 key="srv_sup",
-            ):
-                st.session_state.selected_service = "support"
-            if st.button(
+                on_click=open_service,
+                args=("support",),
+            )
+            st.button(
                 f"💳 {t['pay']}",
                 use_container_width=True,
                 key="srv_pay",
-            ):
-                st.session_state.selected_service = "pay"
+                on_click=open_service,
+                args=("pay",),
+            )
 
         with srv_col2:
-            if st.button(
+            st.button(
                 f"📢 {t['news']}",
                 use_container_width=True,
                 key="srv_news",
-            ):
-                st.session_state.selected_service = "news"
-            if st.button(
+                on_click=open_service,
+                args=("news",),
+            )
+            st.button(
                 f"🌤️ {t['weather']}",
                 use_container_width=True,
                 key="srv_weather",
-            ):
-                st.session_state.selected_service = "weather"
-            if st.button(
+                on_click=open_service,
+                args=("weather",),
+            )
+            st.button(
                 f"🗺️ {t['suppliers']}",
                 use_container_width=True,
                 key="srv_map",
-            ):
-                st.session_state.selected_service = "suppliers"
+                on_click=open_service,
+                args=("suppliers",),
+            )
 
     else:
         back_col, back_spacer = st.columns([1.35, 8.65], gap="small")
         with back_col:
-            if st.button(t["back_btn"], use_container_width=True, key="back_btn"):
-                st.session_state.selected_service = None
-
-        st.markdown("<div class='service-content-start'></div>", unsafe_allow_html=True)
+            st.button(
+                t["back_btn"],
+                use_container_width=True,
+                key="back_btn",
+                on_click=close_service,
+            )
 
         # SERVICE 1: SUPPORT DEMAND
         if st.session_state.selected_service == "support":
