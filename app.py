@@ -450,7 +450,7 @@ st.markdown(
     }}
 
     .block-container {{
-        padding-top: 0.45rem !important;
+        padding-top: 1.5rem !important;
         padding-bottom: 1rem !important;
         padding-left: 1rem !important;
         padding-right: 1rem !important;
@@ -637,7 +637,7 @@ st.markdown(
     /* Mobile Responsive Scaling (< 640px): KEEP TITLE AND 3 TABS CENTERED */
     @media (max-width: 640px) {{
         .block-container {{
-            padding-top: 0.2rem !important;
+            padding-top: 1rem !important;
             padding-left: 0.55rem !important;
             padding-right: 0.55rem !important;
             padding-bottom: 0.7rem !important;
