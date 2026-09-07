@@ -447,6 +447,11 @@ st.markdown(
         background-color: {bg_color} !important;
         color: {text_color} !important;
         font-family: system-ui, -apple-system, sans-serif;
+        color-scheme: {"dark" if is_dark else "light"} !important;
+    }}
+
+    html, body {{
+        color-scheme: {"dark" if is_dark else "light"} !important;
     }}
 
     .block-container {{
@@ -644,6 +649,13 @@ st.markdown(
             max-width: 100% !important;
         }}
 
+        /* Compact service Back button on mobile */
+        div[data-testid="stHorizontalBlock"] .stButton > button {{
+            min-height: 38px !important;
+            padding: 5px 9px !important;
+            font-size: 0.78rem !important;
+        }}
+
         /* Keep sidebar controls side-by-side on narrow screens */
         div[data-testid="stSidebar"] div[data-testid="column"] label {{
             font-size: 0.74rem !important;
@@ -735,6 +747,17 @@ st.markdown(
         margin-bottom: 12px;
         font-size: 1.35rem;
         font-weight: 700;
+    }}
+
+    /* Service page: compact back button + immediate content */
+    .service-content-start {{
+        height: 2px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }}
+
+    div[data-testid="stHorizontalBlock"] .stButton {{
+        margin-bottom: 0 !important;
     }}
 
     /* Compact main-services area: less empty vertical space */
@@ -1010,21 +1033,18 @@ if st.session_state.active_tab == "home":
                 key="srv_crop",
             ):
                 st.session_state.selected_service = "crop"
-                st.rerun()
             if st.button(
                 f"📑 {t['support']}",
                 use_container_width=True,
                 key="srv_sup",
             ):
                 st.session_state.selected_service = "support"
-                st.rerun()
             if st.button(
                 f"💳 {t['pay']}",
                 use_container_width=True,
                 key="srv_pay",
             ):
                 st.session_state.selected_service = "pay"
-                st.rerun()
 
         with srv_col2:
             if st.button(
@@ -1033,28 +1053,26 @@ if st.session_state.active_tab == "home":
                 key="srv_news",
             ):
                 st.session_state.selected_service = "news"
-                st.rerun()
             if st.button(
                 f"🌤️ {t['weather']}",
                 use_container_width=True,
                 key="srv_weather",
             ):
                 st.session_state.selected_service = "weather"
-                st.rerun()
             if st.button(
                 f"🗺️ {t['suppliers']}",
                 use_container_width=True,
                 key="srv_map",
             ):
                 st.session_state.selected_service = "suppliers"
-                st.rerun()
 
     else:
-        if st.button(t["back_btn"], use_container_width=True, key="back_btn"):
-            st.session_state.selected_service = None
-            st.rerun()
+        back_col, back_spacer = st.columns([1.35, 8.65], gap="small")
+        with back_col:
+            if st.button(t["back_btn"], use_container_width=True, key="back_btn"):
+                st.session_state.selected_service = None
 
-        st.divider()
+        st.markdown("<div class='service-content-start'></div>", unsafe_allow_html=True)
 
         # SERVICE 1: SUPPORT DEMAND
         if st.session_state.selected_service == "support":
