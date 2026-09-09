@@ -495,36 +495,36 @@ st.markdown(
     {sidebar_inputs_css}
 
     /* Compact creative Language / Theme selectors */
-    div[data-testid="stSidebar"] div[data-testid="column"] {
+    div[data-testid="stSidebar"] div[data-testid="column"] {{
         min-width: 0 !important;
-    }
+    }}
 
-    div[data-testid="stSidebar"] div[data-testid="column"] > div {
+    div[data-testid="stSidebar"] div[data-testid="column"] > div {{
         margin-bottom: -4px !important;
-    }
+    }}
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] {
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] {{
         width: 100% !important;
-    }
+    }}
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] button {
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] button {{
         min-height: 28px !important;
         height: 28px !important;
         padding: 2px 7px !important;
         font-size: 0.72rem !important;
         line-height: 1 !important;
-    }
+    }}
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] + div {
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] + div {{
         display: none !important;
-    }
+    }}
 
-    div[data-testid="stSidebar"] .compact-control-label {
+    div[data-testid="stSidebar"] .compact-control-label {{
         font-size: 0.70rem !important;
         font-weight: 700 !important;
         margin-bottom: 2px !important;
         opacity: 0.85;
-    }
+    }}
 
     /* Dark-mode finishing accents */
     .section-title {{
