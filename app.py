@@ -500,16 +500,25 @@ st.markdown(
     }}
 
     div[data-testid="stSidebar"] div[data-testid="column"] label {{
-        font-size: 0.88rem !important;
+        font-size: 0.74rem !important;
+        line-height: 1.05 !important;
     }}
 
     div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] {{
-        gap: 0.18rem !important;
+        gap: 0.05rem !important;
+        margin-top: -3px !important;
     }}
 
     div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label {{
         white-space: nowrap !important;
-        font-size: 0.82rem !important;
+        font-size: 0.68rem !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }}
+
+    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label div {{
+        transform: scale(0.86) !important;
+        transform-origin: left center !important;
     }}
 
     /* Dark-mode finishing accents */
@@ -680,13 +689,26 @@ st.markdown(
             font-size: 0.78rem !important;
         }}
 
-        /* Keep sidebar controls side-by-side on narrow screens */
+        /* Keep sidebar controls side-by-side and compact on narrow screens */
         div[data-testid="stSidebar"] div[data-testid="column"] label {{
-            font-size: 0.74rem !important;
+            font-size: 0.64rem !important;
+            line-height: 1 !important;
+        }}
+
+        div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] {{
+            gap: 0 !important;
+            margin-top: -4px !important;
         }}
 
         div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label {{
-            font-size: 0.70rem !important;
+            font-size: 0.58rem !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+
+        div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label div {{
+            transform: scale(0.78) !important;
+            transform-origin: left center !important;
         }}
 
         div[data-testid="stHorizontalBlock"]:has(.header-banner) {{
@@ -931,9 +953,38 @@ with st.sidebar:
                         st.error(f"Registration Error: {e}")
 
         elif auth_mode == "Log In (دخول)":
+            # Clear notice immediately above the Login button so every user
+            # sees the student-project status before entering the application.
+            st.markdown(
+                f"""
+                <div style="
+                    border:1.5px solid #f59e0b;
+                    border-radius:9px;
+                    padding:9px 11px;
+                    margin:6px 0 7px 0;
+                    background:rgba(245,158,11,0.08);
+                ">
+                    <div style="font-weight:800; font-size:0.88rem;">
+                        {TERMS_TEXTS[st.session_state.lang]['badge']}
+                    </div>
+                    <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
+                        {TERMS_TEXTS[st.session_state.lang]['short']}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            login_terms_agreed = st.checkbox(
+                TERMS_TEXTS[st.session_state.lang]["agree"],
+                key="login_terms_agreed",
+            )
             st.caption(TERMS_TEXTS[st.session_state.lang]["continue"])
             if st.button("Login", use_container_width=True):
-                if email_input and pass_input and supabase_client:
+                if not login_terms_agreed:
+                    st.error(
+                        "Please accept the Terms of Use and Privacy Policy before logging in."
+                    )
+                elif email_input and pass_input and supabase_client:
                     try:
                         res = supabase_client.auth.sign_in_with_password(
                             {"email": email_input, "password": pass_input}
