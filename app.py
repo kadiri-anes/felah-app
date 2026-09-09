@@ -494,32 +494,37 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    /* Side-by-side Language / Theme controls */
-    div[data-testid="stSidebar"] div[data-testid="column"] {{
+    /* Compact creative Language / Theme selectors */
+    div[data-testid="stSidebar"] div[data-testid="column"] {
         min-width: 0 !important;
-    }}
+    }
 
-    div[data-testid="stSidebar"] div[data-testid="column"] label {{
-        font-size: 0.74rem !important;
-        line-height: 1.05 !important;
-    }}
+    div[data-testid="stSidebar"] div[data-testid="column"] > div {
+        margin-bottom: -4px !important;
+    }
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] {{
-        gap: 0.05rem !important;
-        margin-top: -3px !important;
-    }}
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] {
+        width: 100% !important;
+    }
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label {{
-        white-space: nowrap !important;
-        font-size: 0.68rem !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }}
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] button {
+        min-height: 28px !important;
+        height: 28px !important;
+        padding: 2px 7px !important;
+        font-size: 0.72rem !important;
+        line-height: 1 !important;
+    }
 
-    div[data-testid="stSidebar"] div[data-testid="column"] [role="radiogroup"] label div {{
-        transform: scale(0.86) !important;
-        transform-origin: left center !important;
-    }}
+    div[data-testid="stSidebar"] div[data-testid="column"] [data-testid="stSegmentedControl"] + div {
+        display: none !important;
+    }
+
+    div[data-testid="stSidebar"] .compact-control-label {
+        font-size: 0.70rem !important;
+        font-weight: 700 !important;
+        margin-bottom: 2px !important;
+        opacity: 0.85;
+    }
 
     /* Dark-mode finishing accents */
     .section-title {{
@@ -850,47 +855,46 @@ unread_count = get_unread_notif_count()
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
-    # Language + Theme controls side-by-side
+    # Compact Language + Theme controls
     lang_col, theme_col = st.columns(2, gap="small")
 
     with lang_col:
-        lang_choice = st.radio(
-            "اللغة / Language",
-            ["العربية", "English"],
-            index=0 if st.session_state.lang == "AR" else 1,
-            key="lang_radio_select",
+        st.markdown('<div class="compact-control-label">🌐 Language</div>', unsafe_allow_html=True)
+        lang_choice = st.segmented_control(
+            "Language",
+            options=["العربية", "EN"],
+            default="العربية" if st.session_state.lang == "AR" else "EN",
+            key="lang_segmented_select",
+            label_visibility="collapsed",
         )
 
     with theme_col:
-        theme_choice = st.radio(
-            "المظهر / Theme",
-            ["Light ☀️", "Dark 🌙"],
-            index=0 if st.session_state.theme_mode == "Light" else 1,
-            key="theme_radio_select",
+        st.markdown('<div class="compact-control-label">🎨 Theme</div>', unsafe_allow_html=True)
+        theme_choice = st.segmented_control(
+            "Theme",
+            options=["☀️", "🌙"],
+            default="☀️" if st.session_state.theme_mode == "Light" else "🌙",
+            key="theme_segmented_select",
+            label_visibility="collapsed",
         )
+
+    if lang_choice is None:
+        lang_choice = "العربية" if st.session_state.lang == "AR" else "EN"
+    if theme_choice is None:
+        theme_choice = "☀️" if st.session_state.theme_mode == "Light" else "🌙"
 
     new_lang = "AR" if lang_choice == "العربية" else "EN"
     if new_lang != st.session_state.lang:
         st.session_state.lang = new_lang
         st.rerun()
 
-    new_theme = "Dark" if "Dark" in theme_choice else "Light"
+    new_theme = "Dark" if theme_choice == "🌙" else "Light"
     if new_theme != st.session_state.theme_mode:
         st.session_state.theme_mode = new_theme
         st.rerun()
 
     st.divider()
 
-    # Permanent student-project notice in the sidebar
-    st.markdown(
-        f"""
-        <div style="border:2px solid #f59e0b; border-radius:10px; padding:10px 12px; background:rgba(245,158,11,0.08);">
-            <div style="font-weight:800;">{TERMS_TEXTS[st.session_state.lang]['badge']}</div>
-            <div style="font-size:0.82rem; margin-top:5px;">{TERMS_TEXTS[st.session_state.lang]['short']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     if st.button(f"📜 {TERMS_TEXTS[st.session_state.lang]['terms_title']} & {TERMS_TEXTS[st.session_state.lang]['privacy_title']}", use_container_width=True, key="sidebar_terms_btn"):
         st.session_state.show_terms = not st.session_state.show_terms
         st.rerun()
