@@ -308,10 +308,7 @@ def sanitize(text: str) -> str:
 
 
 def get_admin_password() -> str:
-    try:
-        return st.secrets["ADMIN_SECRET_KEY"]
-    except Exception:
-        return "greatdz"
+    return st.secrets["ADMIN_SECRET_KEY"]
 
 
 def get_unread_notif_count() -> int:
