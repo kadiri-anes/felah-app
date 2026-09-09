@@ -208,7 +208,7 @@ ALERT_STYLES = {
 TEXTS = {
     "AR": {
         "title": "برنامج التخطيط والتنسيق الفلاحي 2026",
-        "subtitle": "الجمهورية الجزائرية الديمقراطية الشعبية - وزارة الفلاحة والتنمية الريفية",
+        "subtitle": "مشروع طلابي تعليمي وتجريبي — ليس منصة حكومية رسمية",
         "tab_home": "الرئيسية 🏠",
         "tab_card": "بطاقاتي 💳",
         "tab_account": "حسابي وسجلاتي 🔔",
@@ -223,7 +223,7 @@ TEXTS = {
     },
     "EN": {
         "title": "Agricultural Planning & Coordination Program 2026",
-        "subtitle": "People's Democratic Republic of Algeria - Ministry of Agriculture",
+        "subtitle": "Educational Student Project — Not an Official Government Service",
         "tab_home": "Home Services 🏠",
         "tab_card": "Digital Farmer Card 💳",
         "tab_account": "Account & History 🔔",
@@ -235,6 +235,28 @@ TEXTS = {
         "pay": "Carte Fellah Renewal",
         "suppliers": "Map: CCLS, Fertilizers & Markets",
         "back_btn": "⬅️ Back to Main Services",
+    },
+}
+
+# ---------------------------------------------------------
+# TERMS OF USE & PRIVACY NOTICE
+# ---------------------------------------------------------
+TERMS_TEXTS = {
+    "AR": {
+        "badge": "⚠️ مشروع طلابي — ليس منصة حكومية رسمية",
+        "short": "هذا التطبيق مشروع تعليمي وتجريبي. لا يمثل وزارة الفلاحة أو أي هيئة حكومية جزائرية، ولا تحل المعلومات أو التصريحات أو الطلبات المقدمة من خلاله محل الإجراءات الرسمية.",
+        "continue": "باستخدامك للتطبيق، فإنك تقر بأنك فهمت طبيعته التعليمية والتجريبية وتوافق على شروط الاستخدام وسياسة الخصوصية.",
+        "terms_title": "📜 شروط الاستخدام",
+        "privacy_title": "🔒 سياسة الخصوصية",
+        "agree": "أوافق على شروط الاستخدام وسياسة الخصوصية",
+    },
+    "EN": {
+        "badge": "⚠️ STUDENT PROJECT — NOT AN OFFICIAL GOVERNMENT SERVICE",
+        "short": "This application is an educational and experimental student project. It is not an official platform of the Algerian government, Ministry of Agriculture, wilaya, commune, or any other public authority. Information, declarations, requests and alerts provided through it do not replace official procedures.",
+        "continue": "By using this application, you acknowledge its educational and experimental nature and agree to the Terms of Use and Privacy Policy.",
+        "terms_title": "📜 Terms of Use",
+        "privacy_title": "🔒 Privacy Policy",
+        "agree": "I have read and agree to the Terms of Use and Privacy Policy",
     },
 }
 
@@ -264,6 +286,8 @@ if "captcha_num1" not in st.session_state:
     st.session_state.captcha_num2 = random.randint(1, 9)
 if "show_notif_popup" not in st.session_state:
     st.session_state.show_notif_popup = False
+if "show_terms" not in st.session_state:
+    st.session_state.show_terms = False
 
 # ---------------------------------------------------------
 # SUPABASE CONNECTION SETUP
@@ -835,6 +859,20 @@ with st.sidebar:
 
     st.divider()
 
+    # Permanent student-project notice in the sidebar
+    st.markdown(
+        f"""
+        <div style="border:2px solid #f59e0b; border-radius:10px; padding:10px 12px; background:rgba(245,158,11,0.08);">
+            <div style="font-weight:800;">{TERMS_TEXTS[st.session_state.lang]['badge']}</div>
+            <div style="font-size:0.82rem; margin-top:5px;">{TERMS_TEXTS[st.session_state.lang]['short']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button(f"📜 {TERMS_TEXTS[st.session_state.lang]['terms_title']} & {TERMS_TEXTS[st.session_state.lang]['privacy_title']}", use_container_width=True, key="sidebar_terms_btn"):
+        st.session_state.show_terms = not st.session_state.show_terms
+        st.rerun()
+
     st.subheader("👤 Account / تسجيل الدخول")
     if not st.session_state.logged_in:
         auth_mode = st.radio(
@@ -857,8 +895,16 @@ with st.sidebar:
                 value=0,
             )
 
+            terms_agreed = st.checkbox(
+                TERMS_TEXTS[st.session_state.lang]["agree"],
+                key="register_terms_agreed",
+            )
+            st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+
             if st.button("Submit Registration", use_container_width=True):
-                if (
+                if not terms_agreed:
+                    st.error("Please accept the Terms of Use and Privacy Policy before registering.")
+                elif (
                     captcha_ans
                     != st.session_state.captcha_num1
                     + st.session_state.captcha_num2
@@ -885,6 +931,7 @@ with st.sidebar:
                         st.error(f"Registration Error: {e}")
 
         elif auth_mode == "Log In (دخول)":
+            st.caption(TERMS_TEXTS[st.session_state.lang]["continue"])
             if st.button("Login", use_container_width=True):
                 if email_input and pass_input and supabase_client:
                     try:
@@ -983,6 +1030,43 @@ if st.session_state.show_notif_popup:
         st.session_state.show_notif_popup = False
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# TERMS / PRIVACY PANEL
+# ---------------------------------------------------------
+if st.session_state.show_terms:
+    st.markdown(
+        f"""
+        <div style="border:2px solid #f59e0b; border-radius:14px; padding:18px; margin:8px 0 18px 0; background:{card_bg}; color:{text_color};">
+            <h3 style="margin-top:0;">{TERMS_TEXTS[st.session_state.lang]['badge']}</h3>
+            <p><b>{TERMS_TEXTS[st.session_state.lang]['short']}</b></p>
+            <hr style="border-color:{border_color};">
+            <h4>{TERMS_TEXTS[st.session_state.lang]['terms_title']}</h4>
+            <ul>
+                <li>Educational, experimental and demonstration use only.</li>
+                <li>No official governmental, administrative, legal, financial or professional agricultural service is provided.</li>
+                <li>Information, calculations, maps, agricultural recommendations, alerts and estimates are provided without a guarantee of completeness, accuracy or permanent availability.</li>
+                <li>Declarations and support requests submitted through this application do not replace official administrative procedures.</li>
+                <li>Users are responsible for the information and documents they submit and must not misuse, attack, overload, scrape or attempt unauthorized access to the service.</li>
+                <li>The service may be modified, interrupted, suspended or discontinued as the student project evolves.</li>
+                <li>External services and links may have their own terms and privacy practices.</li>
+                <li>To the extent permitted by applicable law, the project team is not responsible for decisions made solely on the basis of information provided by the application.</li>
+            </ul>
+            <h4>{TERMS_TEXTS[st.session_state.lang]['privacy_title']}</h4>
+            <ul>
+                <li>The application may process account information, contact details, agricultural declarations, support requests and uploaded documents to provide its features and maintain security.</li>
+                <li>Users should only submit information and documents they are authorized to provide.</li>
+                <li>Personal data should be retained only for the purposes and period needed for the project, subject to applicable law and the technical configuration of the service.</li>
+                <li>Users may request correction or deletion of their information through the project contact channel, subject to applicable law and technical limitations.</li>
+            </ul>
+            <p style="font-size:0.82rem; opacity:0.8; margin-bottom:0;">Last updated: September 2026 — Student project terms. This is not a substitute for professional legal advice.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("✕ Close / إغلاق", key="close_terms_panel"):
+        st.session_state.show_terms = False
+        st.rerun()
 
 # ---------------------------------------------------------
 # ALIGNED SLIDING TABS SWITCHER (WITH SIDE SPACERS)
@@ -1659,7 +1743,7 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Dispatch failed: {e}")
 
-        with adm_tab4:
+        with adm_tab3:
             st.markdown("#### Add Location to Map Directory")
             loc_name = st.text_input("Facility Name")
             loc_wilaya = st.selectbox(
