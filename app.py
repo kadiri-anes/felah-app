@@ -761,19 +761,22 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
-    /* Collapsed sidebar opener: make it unmistakably the MENU / LOGIN / SETTINGS opener. */
+    /* Collapsed sidebar opener: always show the same clear MENU / القائمة label. */
     [data-testid="stSidebarCollapsedControl"] {{
-        padding: 10px !important;
+        width: 210px !important;
+        min-width: 210px !important;
+        max-width: 210px !important;
+        padding: 8px !important;
         z-index: 1000 !important;
+        overflow: visible !important;
     }}
 
-    /* Streamlit versions use slightly different selectors for the collapsed-sidebar button.
-       Target both so the visible opener stays large and labeled. */
+    /* Keep the opener large and make its purpose obvious even while the sidebar is closed. */
     [data-testid="stSidebarCollapsedControl"] button,
     [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
-        min-width: 158px !important;
-        width: 158px !important;
-        max-width: 158px !important;
+        min-width: 194px !important;
+        width: 194px !important;
+        max-width: 194px !important;
         min-height: 50px !important;
         height: 50px !important;
         padding: 8px 14px !important;
@@ -784,8 +787,8 @@ st.markdown(
         box-shadow: 0 2px 9px rgba(0,0,0,0.12) !important;
         display: inline-flex !important;
         align-items: center !important;
-        justify-content: center !important;
-        gap: 8px !important;
+        justify-content: flex-start !important;
+        gap: 9px !important;
         white-space: nowrap !important;
         overflow: visible !important;
     }}
@@ -795,48 +798,53 @@ st.markdown(
         background: {card_bg} !important;
     }}
 
-    /* The text explains what the button opens: settings + account/login. */
+    /* Always-visible label: this is the opener for the whole MENU / login / settings sidebar. */
     [data-testid="stSidebarCollapsedControl"] button::after,
     [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
-        content: "MENU • LOGIN & SETTINGS" !important;
+        content: "⚙️ MENU / القائمة" !important;
         display: inline-block !important;
-        font-size: 0.76rem !important;
+        font-size: 0.88rem !important;
         font-weight: 800 !important;
-        line-height: 1.05 !important;
-        letter-spacing: 0.01em !important;
+        line-height: 1 !important;
+        letter-spacing: 0 !important;
         color: {text_color} !important;
         white-space: nowrap !important;
+        visibility: visible !important;
+        opacity: 1 !important;
     }}
 
     [data-testid="stSidebarCollapsedControl"] button svg,
     [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] svg {{
-        width: 1.35rem !important;
-        height: 1.35rem !important;
-        min-width: 1.35rem !important;
+        width: 1.25rem !important;
+        height: 1.25rem !important;
+        min-width: 1.25rem !important;
         flex: 0 0 auto !important;
     }}
 
-    /* Keep the collapsed opener clearly usable on small screens too. */
+    /* Keep the exact same clear label on small screens; only reduce the button dimensions slightly. */
     @media (max-width: 640px) {{
         [data-testid="stSidebarCollapsedControl"] {{
-            padding: 8px !important;
+            width: 184px !important;
+            min-width: 184px !important;
+            max-width: 184px !important;
+            padding: 7px !important;
         }}
 
         [data-testid="stSidebarCollapsedControl"] button,
         [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
-            min-width: 145px !important;
-            width: 145px !important;
-            max-width: 145px !important;
+            min-width: 168px !important;
+            width: 168px !important;
+            max-width: 168px !important;
             min-height: 48px !important;
             height: 48px !important;
-            padding: 7px 11px !important;
-            gap: 6px !important;
+            padding: 7px 10px !important;
+            gap: 7px !important;
         }}
 
         [data-testid="stSidebarCollapsedControl"] button::after,
         [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
-            content: "MENU • LOGIN & SETTINGS" !important;
-            font-size: 0.68rem !important;
+            content: "⚙️ MENU / القائمة" !important;
+            font-size: 0.72rem !important;
         }}
     }}
 
