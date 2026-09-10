@@ -554,27 +554,27 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    .terms-shell {
-    max-width: 980px;
-    margin: 0 auto 1rem auto;
-}
-.terms-hero {
-    padding: 1.35rem 1.5rem;
-    border-radius: 18px;
-    border: 1px solid rgba(80, 170, 105, 0.30);
-    background: linear-gradient(135deg, rgba(44, 120, 69, 0.18), rgba(210, 160, 45, 0.10));
-    text-align: center;
-}
-.terms-hero h2 { margin: 0.55rem 0 0.4rem 0; }
-.terms-hero p { margin: 0; opacity: 0.86; line-height: 1.65; }
-.terms-badge {
-    display: inline-block;
-    padding: 0.38rem 0.75rem;
-    border-radius: 999px;
-    font-size: 0.82rem;
-    font-weight: 700;
-    border: 1px solid rgba(220, 155, 45, 0.38);
-}
+    .terms-shell {{
+        max-width: 980px;
+        margin: 0 auto 1rem auto;
+    }}
+    .terms-hero {{
+        padding: 1.35rem 1.5rem;
+        border-radius: 18px;
+        border: 1px solid rgba(80, 170, 105, 0.30);
+        background: linear-gradient(135deg, rgba(44, 120, 69, 0.18), rgba(210, 160, 45, 0.10));
+        text-align: center;
+    }}
+    .terms-hero h2 {{ margin: 0.55rem 0 0.4rem 0; }}
+    .terms-hero p {{ margin: 0; opacity: 0.86; line-height: 1.65; }}
+    .terms-badge {{
+        display: inline-block;
+        padding: 0.38rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        border: 1px solid rgba(220, 155, 45, 0.38);
+    }}
 
 /* Compact creative Language / Theme selectors */
     div[data-testid="stSidebar"] div[data-testid="column"] {{
