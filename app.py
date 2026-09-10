@@ -761,6 +761,60 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
+    /* Collapsed sidebar opener: make it obvious that it opens the MENU / Account area. */
+    [data-testid="stSidebarCollapsedControl"] {
+        padding: 10px !important;
+        z-index: 1000 !important;
+    }
+
+    [data-testid="stSidebarCollapsedControl"] button,
+    button[data-testid="stSidebarCollapseButton"] {
+        min-width: 52px !important;
+        width: auto !important;
+        min-height: 46px !important;
+        height: 46px !important;
+        padding: 8px 12px !important;
+        border: 1px solid {border_color} !important;
+        border-radius: 12px !important;
+        background: {card_bg} !important;
+        color: {text_color} !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.10) !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 7px !important;
+    }
+
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    button[data-testid="stSidebarCollapseButton"]:hover {
+        border-color: {accent_color} !important;
+        background: {card_bg} !important;
+    }
+
+    [data-testid="stSidebarCollapsedControl"] button::after {
+        content: "MENU" !important;
+        font-size: 0.82rem !important;
+        font-weight: 750 !important;
+        line-height: 1 !important;
+        color: {text_color} !important;
+    }
+
+    [data-testid="stSidebarCollapsedControl"] button svg,
+    button[data-testid="stSidebarCollapseButton"] svg {
+        width: 1.25rem !important;
+        height: 1.25rem !important;
+    }
+
+    /* Expanded sidebar close button remains compact and clear. */
+    div[data-testid="stSidebar"] button[data-testid="stSidebarCollapseButton"] {
+        min-width: 40px !important;
+        width: 40px !important;
+        min-height: 40px !important;
+        height: 40px !important;
+        padding: 6px !important;
+        border-radius: 10px !important;
+    }
+
     /* Account expander: large, obvious header/arrow for touch devices. */
     div[data-testid="stSidebar"] details summary {{
         min-height: 52px !important;
@@ -782,13 +836,13 @@ st.markdown(
         background-color: rgba(100, 116, 139, 0.10) !important;
     }}
 
-    /* Main 3-item navigation: fixed three equal columns on every screen size. */
+    /* Main 3-item navigation: keep the original full-width placement and force only the 3 items to stay in one row. */
     section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div,
     section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
         display: grid !important;
         grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
         width: 100% !important;
-        max-width: 600px !important;
+        max-width: none !important;
         gap: 4px !important;
         padding: 4px !important;
         box-sizing: border-box !important;
