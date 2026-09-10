@@ -243,22 +243,83 @@ TEXTS = {
 # ---------------------------------------------------------
 TERMS_TEXTS = {
     "AR": {
-        "badge": "⚠️ مشروع طلابي — ليس منصة حكومية رسمية",
-        "short": "هذا التطبيق مشروع تعليمي وتجريبي. لا يمثل وزارة الفلاحة أو أي هيئة حكومية جزائرية، ولا تحل المعلومات أو التصريحات أو الطلبات المقدمة من خلاله محل الإجراءات الرسمية.",
-        "continue": "باستخدامك للتطبيق، فإنك تقر بأنك فهمت طبيعته التعليمية والتجريبية وتوافق على شروط الاستخدام وسياسة الخصوصية.",
-        "terms_title": "📜 شروط الاستخدام",
-        "privacy_title": "🔒 سياسة الخصوصية",
+        "badge": "🌾 مشروع طلابي تعليمي وتجريبي — ليس منصة حكومية رسمية",
+        "short": "فلاح منصة تعليمية وتجريبية، وليست خدمة حكومية رسمية. المعلومات والتصريحات والطلبات داخل التطبيق لا تحل محل الإجراءات الرسمية.",
+        "continue": "باستمرارك، تقر بأنك قرأت شروط الاستخدام وسياسة الخصوصية وتوافق عليهما.",
+        "terms_title": "شروط الاستخدام",
+        "privacy_title": "سياسة الخصوصية",
         "agree": "أوافق على شروط الاستخدام وسياسة الخصوصية",
+        "terms_sections": [
+            ("1. حول منصة فلاح", "فلاح هي منصة فلاحية تعليمية وتجريبية تم تطويرها في إطار مشروع طلابي. تهدف إلى عرض وتجربة أدوات رقمية للتخطيط الفلاحي، التصريحات، طلبات الدعم، المعلومات، التنبيهات والخدمات التجريبية الأخرى.\n\nفلاح ليست منصة حكومية رسمية، ولا يتم تشغيلها من طرف الحكومة الجزائرية أو وزارة الفلاحة أو أي ولاية أو مديرية للمصالح الفلاحية أو أي مؤسسة عمومية أخرى. ولا تُعتبر المعلومات أو التصريحات المقدمة عبرها تصريحاً أو ترخيصاً أو طلباً أو تسجيلاً حكومياً رسمياً إلا إذا أكدت الجهة المختصة ذلك عبر قناة رسمية."),
+            ("2. هدف المنصة", "تم تطوير فلاح لأغراض التعليم والتعلم والبحث والتجريب وعرض الخدمات الرقمية الفلاحية واختبار النماذج الرقمية وتقديم معلومات فلاحية عامة. قد يتم تعديل الخدمات أو توقيفها أو حذفها مع تطور المشروع."),
+            ("3. حسابات المستخدمين", "قد تتطلب بعض الخدمات إنشاء حساب. يتحمل المستخدم مسؤولية تقديم معلومات صحيحة والمحافظة على سرية بيانات الدخول وعدم السماح لغير المصرح لهم باستعمال حسابه وإبلاغ مسؤول المشروع عند الاشتباه في اختراق الحساب. يُمنع إنشاء حساب بمعلومات كاذبة أو انتحال شخصية الغير."),
+            ("4. التصريحات والمعلومات الفلاحية", "قد تسمح المنصة بإدخال معلومات وتصريحات فلاحية لأغراض التخطيط والتجربة. التصريح المقدم عبر فلاح لا يكتسب تلقائياً صفة قانونية أو إدارية رسمية. عند الحاجة إلى إجراء رسمي، يجب إتمامه لدى الهيئة المختصة."),
+            ("5. المعلومات والتوصيات الفلاحية", "قد توفر فلاح معلومات أو تقديرات أو توصيات أو تنبيهات أو أدوات للتخطيط. هذه المعلومات عامة وتعليمية. تختلف القرارات الفلاحية حسب التربة والمناخ والمياه والصنف والآفات والممارسات والتنظيمات المحلية. يتحمل المستخدم مسؤولية التحقق والاستعانة بمختص عند الحاجة، ولا تضمن فلاح مردودية أو ربحاً معيناً."),
+            ("6. الوثائق والملفات", "قد تسمح بعض الخدمات برفع وثائق أو ملفات. ينبغي رفع الملفات الضرورية فقط. يُمنع رفع محتوى غير قانوني أو ملفات ضارة أو وثائق تخص الغير دون تصريح. وقد يتم تخزين الملفات ومعالجتها بواسطة خدمات تقنية خارجية يعتمد عليها المشروع."),
+            ("7. خدمات الدفع", "قد تتضمن المنصة واجهات دفع أو خدمات تجريبية لأغراض العرض. ما لم يُذكر خلاف ذلك، لا يعني وجود واجهة دفع أن فلاح تعالج دفعة حكومية أو إعانة أو ضريبة أو معاملة رسمية. يجب التحقق من المعاملات عبر الخدمة الرسمية المعنية."),
+            ("8. الاستخدامات الممنوعة", "يُمنع محاولة الدخول غير المصرح به، تجاوز الحماية، تغيير أو حذف البيانات دون تصريح، رفع ملفات ضارة، انتحال شخصية الغير، تقديم معلومات كاذبة عمداً، إساءة استعمال المنصة، تعطيلها أو القيام بأي نشاط غير قانوني."),
+            ("9. توفر المنصة", "فلاح مشروع طلابي وتجريبي، لذلك لا يمكن ضمان توفرها بشكل دائم. قد تتوقف بسبب الصيانة أو المشاكل التقنية أو تحديثات البرامج أو الإجراءات الأمنية أو تطوير المشروع."),
+            ("10. الخدمات الخارجية", "قد تعتمد فلاح على خدمات خارجية لقواعد البيانات والمصادقة والتخزين والاستضافة والخرائط والطقس وغيرها. قد تكون بعض هذه الخدمات خارج السيطرة المباشرة لفريق المشروع."),
+            ("11. الملكية الفكرية", "قد تكون البرمجيات والواجهة والرسومات والشعارات والمحتويات الأصلية الخاصة بالمشروع محمية بموجب قوانين الملكية الفكرية. لا يجوز نسخ أو تعديل أو إعادة توزيع أو استغلال المكونات المحمية تجارياً دون تصريح مناسب."),
+            ("12. حدود المسؤولية", "يتم توفير فلاح «كما هي» و«حسب توفرها» لأغراض تعليمية وتجريبية. لا تضمن المنصة، في حدود ما يسمح به القانون، اكتمال المعلومات أو خلوها من الأخطاء أو استمرار الخدمة أو دقة التقديرات في جميع الظروف أو أن تؤدي التصريحات إلى إجراء رسمي. يتحمل المستخدم مسؤولية القرارات التي يتخذها بناءً على معلومات المنصة."),
+            ("13. تعديل الشروط", "قد يتم تحديث شروط الاستخدام مع تطور المشروع، ويمكن عرض النسخة الجديدة داخل المنصة عند إجراء تغييرات مهمة."),
+            ("14. الموافقة", "عند إنشاء حساب أو استخدام خدمة تتطلب الموافقة، يقر المستخدم بأنه يعلم أن فلاح مشروع طلابي وتجريبي وليست خدمة حكومية رسمية، وأنه قرأ الشروط وفهمها ويوافق على الاستخدام المسؤول والقانوني."),
+        ],
+        "privacy_sections": [
+            ("1. مقدمة", "تحترم فلاح خصوصية مستخدميها. توضح سياسة الخصوصية نوع المعلومات التي قد يتم جمعها وأسباب استخدامها وكيف يمكن تخزينها والمبادئ العامة لحمايتها. فلاح مشروع طلابي تعليمي وتجريبي وليست منصة حكومية رسمية."),
+            ("2. المعلومات التي قد يتم جمعها", "حسب الخدمات المستخدمة، قد يتم جمع: معلومات الحساب مثل الاسم والبريد الإلكتروني ومعلومات المصادقة؛ معلومات فلاحية مثل الولاية والقطاع والمحاصيل والمساحة والتصريحات وطلبات الدعم؛ والملفات التي يرفعها المستخدم اختيارياً. وقد تعالج الخدمات التقنية معلومات لازمة للتشغيل والأمن."),
+            ("3. لماذا يتم استخدام المعلومات؟", "يمكن استخدام المعلومات لإدارة الحسابات، توفير الخدمات، معالجة التصريحات وطلبات الدعم، إرسال التنبيهات، تطوير المشروع، حماية المنصة، اكتشاف الاستخدام غير المصرح به، واختبار وتقييم الخدمات الرقمية الفلاحية."),
+            ("4. مشاركة المعلومات", "لا تهدف فلاح إلى بيع المعلومات الشخصية للمستخدمين. وقد تتم معالجة بعض المعلومات بواسطة مزودي الخدمات التقنية الضرورية مثل الاستضافة وقواعد البيانات والمصادقة والتخزين والخرائط وغيرها. وقد يتم الكشف عن المعلومات عندما يقتضي القانون ذلك أو لحماية أمن وسلامة المنصة."),
+            ("5. حماية البيانات", "يُسعى إلى تطبيق إجراءات تقنية وتنظيمية مناسبة لحماية المعلومات من الوصول أو التعديل أو الكشف أو الإتلاف غير المصرح به. ومع ذلك، لا يمكن ضمان أمن أي نظام متصل بالإنترنت بشكل مطلق، لذلك يُنصح بعدم إدخال معلومات حساسة غير ضرورية."),
+            ("6. الاحتفاظ بالبيانات", "قد يتم الاحتفاظ بالمعلومات للمدة اللازمة بشكل معقول لتشغيل المشروع وحمايته وتطويره وتحقيق أهدافه التعليمية، أو وفق الالتزامات القانونية. وقد تختلف مدة الاحتفاظ حسب نوع المعلومات."),
+            ("7. حقوق المستخدم", "حسب القانون الجزائري وطبيعة معالجة البيانات، قد يتمتع المستخدم بحقوق تتعلق بمعلوماته الشخصية، بما في ذلك الوصول أو التصحيح وغيرها من الحقوق القانونية. يمكن توجيه الطلبات إلى مسؤول المشروع عبر وسيلة الاتصال المتاحة داخل المنصة."),
+            ("8. خصوصية الأطفال", "لم يتم تصميم فلاح خصيصاً للأطفال. ولا ينبغي تقديم معلومات شخصية تخص طفل عبر المنصة دون التصريح المناسب."),
+            ("9. البنية التحتية والخدمات الخارجية", "قد تستخدم فلاح خدمات خارجية للمصادقة وقواعد البيانات وتخزين الملفات والاستضافة والخرائط ومعلومات الطقس وغيرها. وقد تعالج هذه الجهات المعلومات وفق شروطها وسياسات الخصوصية الخاصة بها."),
+            ("10. الروابط الخارجية", "قد تحتوي فلاح على روابط لمواقع خارجية. عند مغادرة المنصة، تنطبق سياسات الخصوصية الخاصة بالموقع الخارجي، وينبغي مراجعتها قبل تقديم معلومات شخصية إليه."),
+            ("11. تعديل سياسة الخصوصية", "قد يتم تحديث سياسة الخصوصية مع تطور المشروع. وتُعرض النسخة الأحدث داخل المنصة، مع مراعاة المتطلبات القانونية المعمول بها."),
+            ("12. الاتصال", "للاستفسار حول شروط الاستخدام أو سياسة الخصوصية، يمكن التواصل مع مسؤول المشروع عبر معلومات الاتصال المتوفرة داخل المنصة."),
+        ],
     },
     "EN": {
-        "badge": "⚠️ STUDENT PROJECT — NOT AN OFFICIAL GOVERNMENT SERVICE",
-        "short": "This application is an educational and experimental student project. It is not an official platform of the Algerian government, Ministry of Agriculture, wilaya, commune, or any other public authority. Information, declarations, requests and alerts provided through it do not replace official procedures.",
-        "continue": "By using this application, you acknowledge its educational and experimental nature and agree to the Terms of Use and Privacy Policy.",
-        "terms_title": "📜 Terms of Use",
-        "privacy_title": "🔒 Privacy Policy",
-        "agree": "I have read and agree to the Terms of Use and Privacy Policy",
+        "badge": "🌾 Educational Student Project — Not an Official Government Service",
+        "short": "Felah is an educational and experimental student project, not an official government service. Information, declarations and requests submitted through it do not replace official procedures.",
+        "continue": "By continuing, you acknowledge that you have read and agree to the Terms of Use and Privacy Policy.",
+        "terms_title": "Terms of Use",
+        "privacy_title": "Privacy Policy",
+        "agree": "I agree to the Terms of Use and Privacy Policy",
+        "terms_sections": [
+            ("1. About Felah", "Felah is an educational and experimental agricultural platform developed as a student project. It is intended to demonstrate and test digital tools for agricultural planning, declarations, support requests, information, alerts, directories and other experimental services.\n\nFelah is not an official government platform and is not operated by the Algerian government, Ministry of Agriculture, any Wilaya, Directorate of Agricultural Services, or other public authority. Information or declarations submitted through Felah do not constitute an official administrative declaration, authorization, permit, application or registration unless explicitly confirmed by the competent authority through an official channel."),
+            ("2. Purpose of the Platform", "Felah is provided for education, learning, research, experimentation, demonstration of agricultural digital services, testing of digital workflows and general agricultural information. Features may be modified, suspended or removed as the project develops."),
+            ("3. User Accounts", "Certain features may require an account. Users are responsible for providing accurate information, keeping credentials confidential, preventing unauthorized use and notifying the project administrator if an account may have been compromised. False information and impersonation are prohibited."),
+            ("4. Agricultural Information and Declarations", "The platform may allow agricultural information and declarations to be entered for planning and experimental purposes. A declaration submitted through Felah does not automatically have legal or administrative validity. Official procedures must be completed through the appropriate authority."),
+            ("5. Agricultural Information and Recommendations", "Felah may provide information, estimates, recommendations, alerts or planning tools for general educational purposes. Agricultural decisions depend on soil, climate, water, variety, planting material, pests, practices and local regulations. Users remain responsible for verification and professional advice when needed. Felah does not guarantee a specific yield, profit or economic result."),
+            ("6. Documents and Files", "Some features may allow users to upload documents or files. Only necessary files should be uploaded. Illegal content, malicious files, or documents belonging to others without authorization must not be uploaded. Files may be stored and processed using third-party technical infrastructure used by the project."),
+            ("7. Payments and Demonstration Features", "Some payment interfaces or features may be experimental or demonstrational. Unless explicitly stated otherwise, a payment interface does not mean Felah is processing a real government payment, subsidy, tax or official transaction. Users should verify financial transactions through the relevant official service."),
+            ("8. Prohibited Activities", "Users may not attempt unauthorized access, bypass security controls, alter or delete data without authorization, upload malicious files, impersonate others, intentionally submit false information, abuse or disrupt the platform, or conduct unlawful activities."),
+            ("9. Availability", "Because Felah is an educational and experimental project, continuous availability is not guaranteed. The platform may be unavailable because of maintenance, technical problems, updates, security measures or project development."),
+            ("10. Third-Party Services", "Felah may rely on external services for databases, authentication, storage, hosting, maps, weather information and other functions. Their availability and operation may be outside the direct control of the project team."),
+            ("11. Intellectual Property", "The Felah platform, including original software, interface, graphics, logos and project-specific content, may be protected by applicable intellectual-property laws. Protected components may not be copied, modified, redistributed or commercially exploited without appropriate authorization."),
+            ("12. Limitation of Responsibility", "Felah is provided on an “as is” and “as available” basis for educational and experimental purposes. To the extent permitted by applicable law, the platform does not guarantee that information is complete or error-free, that the service will always be available, that estimates will always reflect real-world conditions, or that declarations will result in official action. Users are responsible for decisions based on information available through the platform."),
+            ("13. Changes to These Terms", "These Terms of Use may be updated as the project develops. Significant changes may be presented to users through the platform."),
+            ("14. Acceptance", "By creating an account or using a feature that requires acceptance, you acknowledge that Felah is a student and experimental project, not an official government service, that you have read and understood these Terms, and that you agree to use the platform responsibly and lawfully."),
+        ],
+        "privacy_sections": [
+            ("1. Introduction", "Felah respects user privacy. This Privacy Policy explains what information may be collected, why it may be used, how it may be stored, and the general principles applied to its protection. Felah is an educational and experimental student project and is not an official government platform."),
+            ("2. Information We May Collect", "Depending on the features used, the platform may collect account information such as name, email address and authentication-related information; agricultural information such as Wilaya, sector, crops, cultivated area, declarations and support requests; and files voluntarily uploaded by users. Technical services may also process information necessary for operation and security."),
+            ("3. Why Information Is Used", "Information may be used to manage accounts, provide platform functionality, process agricultural declarations and support requests, display notifications, improve the educational project, maintain security, detect unauthorized activity, and test and evaluate digital agricultural workflows."),
+            ("4. Data Sharing", "Felah does not intend to sell users’ personal information. Information may be processed by technical providers required to operate the platform, such as hosting, database, authentication, storage, mapping and other providers. Information may also be disclosed where required by law or necessary to protect platform security and integrity."),
+            ("5. Data Security", "Reasonable technical and organizational measures are intended to protect stored information against unauthorized access, alteration, disclosure or destruction. However, no internet-based system can be guaranteed completely secure. Users should avoid submitting unnecessary sensitive information."),
+            ("6. Data Retention", "Information may be retained for as long as reasonably necessary for operation, security, development and educational purposes, or as required by applicable obligations. Retention periods may vary by information type."),
+            ("7. Your Rights", "Depending on applicable Algerian law and the circumstances of processing, users may have rights concerning their personal information, including access, correction and other legally applicable protections. Requests may be directed to the project administrator through the available contact method."),
+            ("8. Children’s Privacy", "Felah is not specifically designed for children. Users should not provide personal information belonging to a child without appropriate authorization."),
+            ("9. Third-Party Infrastructure", "Felah may use third-party services for authentication, databases, file storage, hosting, maps, weather information and other functions. These providers may process information under their own terms and privacy policies."),
+            ("10. External Links", "Felah may contain links to external websites. Once you leave Felah, the external website’s privacy practices apply. Users should review its privacy policy before providing personal information."),
+            ("11. Changes to This Privacy Policy", "This Privacy Policy may be updated as the project develops. The latest version presented through the platform will apply, subject to applicable legal requirements."),
+            ("12. Contact", "For questions concerning these Terms of Use or Privacy Policy, users may contact the project administrator through the contact information provided within the platform."),
+        ],
     },
 }
+
 
 # ---------------------------------------------------------
 # INITIALIZE SESSION STATE
@@ -308,7 +369,9 @@ def sanitize(text: str) -> str:
 
 
 def get_admin_password() -> str:
-    return st.secrets["ADMIN_SECRET_KEY"]
+    # Read the admin code from Streamlit Secrets without a hard-coded fallback.
+    # If the secret is missing, return an empty value so the app does not crash.
+    return str(st.secrets.get("ADMIN_SECRET_KEY", "")).strip()
 
 
 def get_unread_notif_count() -> int:
@@ -491,7 +554,29 @@ st.markdown(
     }}
     {sidebar_inputs_css}
 
-    /* Compact creative Language / Theme selectors */
+    .terms-shell {
+    max-width: 980px;
+    margin: 0 auto 1rem auto;
+}
+.terms-hero {
+    padding: 1.35rem 1.5rem;
+    border-radius: 18px;
+    border: 1px solid rgba(80, 170, 105, 0.30);
+    background: linear-gradient(135deg, rgba(44, 120, 69, 0.18), rgba(210, 160, 45, 0.10));
+    text-align: center;
+}
+.terms-hero h2 { margin: 0.55rem 0 0.4rem 0; }
+.terms-hero p { margin: 0; opacity: 0.86; line-height: 1.65; }
+.terms-badge {
+    display: inline-block;
+    padding: 0.38rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border: 1px solid rgba(220, 155, 45, 0.38);
+}
+
+/* Compact creative Language / Theme selectors */
     div[data-testid="stSidebar"] div[data-testid="column"] {{
         min-width: 0 !important;
     }}
@@ -1087,35 +1172,34 @@ if st.session_state.show_notif_popup:
 # TERMS / PRIVACY PANEL
 # ---------------------------------------------------------
 if st.session_state.show_terms:
+    terms_data = TERMS_TEXTS[st.session_state.lang]
     st.markdown(
         f"""
-        <div style="border:2px solid #f59e0b; border-radius:14px; padding:18px; margin:8px 0 18px 0; background:{card_bg}; color:{text_color};">
-            <h3 style="margin-top:0;">{TERMS_TEXTS[st.session_state.lang]['badge']}</h3>
-            <p><b>{TERMS_TEXTS[st.session_state.lang]['short']}</b></p>
-            <hr style="border-color:{border_color};">
-            <h4>{TERMS_TEXTS[st.session_state.lang]['terms_title']}</h4>
-            <ul>
-                <li>Educational, experimental and demonstration use only.</li>
-                <li>No official governmental, administrative, legal, financial or professional agricultural service is provided.</li>
-                <li>Information, calculations, maps, agricultural recommendations, alerts and estimates are provided without a guarantee of completeness, accuracy or permanent availability.</li>
-                <li>Declarations and support requests submitted through this application do not replace official administrative procedures.</li>
-                <li>Users are responsible for the information and documents they submit and must not misuse, attack, overload, scrape or attempt unauthorized access to the service.</li>
-                <li>The service may be modified, interrupted, suspended or discontinued as the student project evolves.</li>
-                <li>External services and links may have their own terms and privacy practices.</li>
-                <li>To the extent permitted by applicable law, the project team is not responsible for decisions made solely on the basis of information provided by the application.</li>
-            </ul>
-            <h4>{TERMS_TEXTS[st.session_state.lang]['privacy_title']}</h4>
-            <ul>
-                <li>The application may process account information, contact details, agricultural declarations, support requests and uploaded documents to provide its features and maintain security.</li>
-                <li>Users should only submit information and documents they are authorized to provide.</li>
-                <li>Personal data should be retained only for the purposes and period needed for the project, subject to applicable law and the technical configuration of the service.</li>
-                <li>Users may request correction or deletion of their information through the project contact channel, subject to applicable law and technical limitations.</li>
-            </ul>
-            <p style="font-size:0.82rem; opacity:0.8; margin-bottom:0;">Last updated: September 2026 — Student project terms. This is not a substitute for professional legal advice.</p>
+        <div class="terms-shell">
+            <div class="terms-hero">
+                <div class="terms-badge">{terms_data['badge']}</div>
+                <h2>{terms_data['terms_title']} &amp; {terms_data['privacy_title']}</h2>
+                <p>{terms_data['short']}</p>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    terms_tab, privacy_tab = st.tabs([
+        f"📄 {terms_data['terms_title']}",
+        f"🔒 {terms_data['privacy_title']}",
+    ])
+    with terms_tab:
+        for title, body in terms_data['terms_sections']:
+            st.markdown(f"### {title}")
+            st.markdown(body)
+            st.divider()
+    with privacy_tab:
+        for title, body in terms_data['privacy_sections']:
+            st.markdown(f"### {title}")
+            st.markdown(body)
+            st.divider()
+    st.info(terms_data['continue'])
     if st.button("✕ Close / إغلاق", key="close_terms_panel"):
         st.session_state.show_terms = False
         st.rerun()
