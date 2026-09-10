@@ -608,6 +608,15 @@ st.markdown(
         opacity: 0.85;
     }}
 
+    /* Clear, touch-friendly account action selector */
+    div[data-testid="stSidebar"] [data-testid="stSelectbox"] > div {{
+        min-height: 44px !important;
+    }}
+    div[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {{
+        min-height: 42px !important;
+        font-weight: 600 !important;
+    }}
+
     /* Dark-mode finishing accents */
     .section-title {{
         text-shadow: 0 1px 2px rgba(0,0,0,0.35);
@@ -752,6 +761,59 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
+    /* Account expander: large, obvious header/arrow for touch devices. */
+    div[data-testid="stSidebar"] details summary {{
+        min-height: 52px !important;
+        padding: 10px 12px !important;
+        border-radius: 12px !important;
+        font-size: 1.02rem !important;
+        font-weight: 750 !important;
+        cursor: pointer !important;
+    }}
+
+    div[data-testid="stSidebar"] details summary svg {{
+        width: 1.25rem !important;
+        height: 1.25rem !important;
+        min-width: 1.25rem !important;
+        min-height: 1.25rem !important;
+    }}
+
+    div[data-testid="stSidebar"] details summary:hover {{
+        background-color: rgba(100, 116, 139, 0.10) !important;
+    }}
+
+    /* Main 3-item navigation: fixed three equal columns on every screen size. */
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div,
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        width: 100% !important;
+        max-width: 600px !important;
+        gap: 4px !important;
+        padding: 4px !important;
+        box-sizing: border-box !important;
+        margin: 0 auto !important;
+    }}
+
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div::before,
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div::after,
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
+        display: none !important;
+    }}
+
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] button,
+    section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="option"] {{
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        box-sizing: border-box !important;
+    }}
+
     /* Active Highlighted Button */
     div[data-testid="stSegmentedControl"] button[data-checked="true"],
     div[data-testid="stSegmentedControl"] [aria-selected="true"] {{
@@ -759,7 +821,14 @@ st.markdown(
         border-color: {accent_color} !important;
     }}
 
-    /* Mobile Responsive Scaling (< 640px): KEEP TITLE AND 3 TABS CENTERED */
+    /* Main navigation marker: keep the navigation bar compact and centered. */
+    #main-navigation-marker {{
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }}
+
+    /* Mobile Responsive Scaling (< 640px): KEEP MAIN NAVIGATION IN ONE ROW */
     @media (max-width: 640px) {{
         .block-container {{
             padding-top: 2rem !important;
@@ -776,7 +845,25 @@ st.markdown(
             font-size: 0.78rem !important;
         }}
 
-        /* Keep sidebar controls side-by-side and compact on narrow screens */
+        /* Make the Account expander header easy to see and tap on phones. */
+        div[data-testid="stSidebar"] details summary {{
+            min-height: 56px !important;
+            padding: 11px 12px !important;
+            font-size: 0.98rem !important;
+        }}
+
+        div[data-testid="stSidebar"] details summary svg {{
+            width: 1.35rem !important;
+            height: 1.35rem !important;
+        }}
+
+        /* Keep the Account action selector easy to see and tap on phones. */
+        div[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {{
+            min-height: 44px !important;
+            font-size: 0.86rem !important;
+        }}
+
+        /* Keep sidebar language/theme controls compact */
         div[data-testid="stSidebar"] div[data-testid="column"] label {{
             font-size: 0.64rem !important;
             line-height: 1 !important;
@@ -837,32 +924,62 @@ st.markdown(
             margin: 0 auto 16px auto !important;
         }}
 
-        div[data-testid="stSegmentedControl"] > div,
-        div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+        /* Force the three main navigation options to remain one horizontal row.
+           Equal-width grid cells prevent long English labels from wrapping into
+           a second/third row on phones. */
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div,
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
             width: 100% !important;
             max-width: 100% !important;
-            flex-wrap: nowrap !important;
-            gap: 2px !important;
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 3px !important;
             padding: 2px !important;
+            box-sizing: border-box !important;
+            flex-wrap: nowrap !important;
         }}
 
-        div[data-testid="stSegmentedControl"] > div::before,
-        div[data-testid="stSegmentedControl"] > div::after,
-        div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
-        div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div::before,
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] > div::after,
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"]::before,
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="radiogroup"]::after {{
             display: none !important;
         }}
 
-        div[data-testid="stSegmentedControl"] button,
-        div[data-testid="stSegmentedControl"] [role="option"] {{
-            flex: 1 1 0 !important;
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] button,
+        section[data-testid="stMain"] div[data-testid="stSegmentedControl"] [role="option"] {{
+            width: 100% !important;
             min-width: 0 !important;
+            max-width: 100% !important;
             white-space: nowrap !important;
-            font-size: clamp(0.56rem, 2.7vw, 0.72rem) !important;
-            padding: 7px 4px !important;
-            margin: 0 1px !important;
+            font-size: clamp(0.53rem, 2.35vw, 0.72rem) !important;
+            line-height: 1.1 !important;
+            padding: 7px 2px !important;
+            margin: 0 !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
+            box-sizing: border-box !important;
+        }}
+
+        /* Sidebar Language/Theme still use their own two-option horizontal layout. */
+        div[data-testid="stSidebar"] div[data-testid="stSegmentedControl"] > div,
+        div[data-testid="stSidebar"] div[data-testid="stSegmentedControl"] [role="radiogroup"] {{
+            display: flex !important;
+            flex-direction: row !important;
+            grid-template-columns: none !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            gap: 0 !important;
+            padding: 2px !important;
+        }}
+
+        div[data-testid="stSidebar"] div[data-testid="stSegmentedControl"] button,
+        div[data-testid="stSidebar"] div[data-testid="stSegmentedControl"] [role="option"] {{
+            flex: 1 1 0 !important;
+            width: auto !important;
+            max-width: none !important;
+            font-size: 0.62rem !important;
+            padding: 5px 3px !important;
         }}
     }}
 
@@ -981,139 +1098,142 @@ with st.sidebar:
         st.session_state.show_terms = not st.session_state.show_terms
         st.rerun()
 
-    st.subheader("👤 Account / تسجيل الدخول")
-    if not st.session_state.logged_in:
-        auth_mode = st.radio(
-            "Action:",
-            ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password"],
-        )
-
-        email_input = st.text_input("Email / البريد الإلكتروني")
-        pass_input = st.text_input("Password / كلمة السر", type="password")
-
-        if auth_mode == "Register (إنشاء حساب)":
-            name_input = st.text_input("Full Name / الاسم الكامل")
-            carte_input = st.text_input(
-                "Carte Fellah N° / رقم بطاقة الفلاح", placeholder="DZ-2026-XXXX"
+    # Expandable account area with a large, clearly visible arrow.
+    # The whole header is tappable, which is easier to use on phones.
+    with st.expander("👤 Account / تسجيل الدخول", expanded=not st.session_state.logged_in):
+        if not st.session_state.logged_in:
+            auth_mode = st.selectbox(
+                "Action / الإجراء",
+                ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password"],
+                key="auth_mode_select",
             )
 
-            captcha_ans = st.number_input(
-                f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
-                step=1,
-                value=0,
-            )
+            email_input = st.text_input("Email / البريد الإلكتروني")
+            pass_input = st.text_input("Password / كلمة السر", type="password")
 
-            terms_agreed = st.checkbox(
-                TERMS_TEXTS[st.session_state.lang]["agree"],
-                key="register_terms_agreed",
-            )
-            st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+            if auth_mode == "Register (إنشاء حساب)":
+                name_input = st.text_input("Full Name / الاسم الكامل")
+                carte_input = st.text_input(
+                    "Carte Fellah N° / رقم بطاقة الفلاح", placeholder="DZ-2026-XXXX"
+                )
 
-            if st.button("Submit Registration", use_container_width=True):
-                if not terms_agreed:
-                    st.error("Please accept the Terms of Use and Privacy Policy before registering.")
-                elif (
-                    captcha_ans
-                    != st.session_state.captcha_num1
-                    + st.session_state.captcha_num2
-                ):
-                    st.error("Incorrect CAPTCHA answer.")
-                elif email_input and pass_input and supabase_client:
-                    try:
-                        res = supabase_client.auth.sign_up(
-                            {
-                                "email": email_input,
-                                "password": pass_input,
-                                "options": {
-                                    "data": {
-                                        "full_name": name_input,
-                                        "carte_num": carte_input,
-                                    }
-                                },
-                            }
-                        )
-                        st.success(
-                            "Account created successfully! You may now log in."
-                        )
-                    except Exception as e:
-                        st.error(f"Registration Error: {e}")
+                captcha_ans = st.number_input(
+                    f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
+                    step=1,
+                    value=0,
+                )
 
-        elif auth_mode == "Log In (دخول)":
-            # Clear notice immediately above the Login button so every user
-            # sees the student-project status before entering the application.
-            st.markdown(
-                f"""
-                <div style="
-                    border:1.5px solid #f59e0b;
-                    border-radius:9px;
-                    padding:9px 11px;
-                    margin:6px 0 7px 0;
-                    background:rgba(245,158,11,0.08);
-                ">
-                    <div style="font-weight:800; font-size:0.88rem;">
-                        {TERMS_TEXTS[st.session_state.lang]['badge']}
+                terms_agreed = st.checkbox(
+                    TERMS_TEXTS[st.session_state.lang]["agree"],
+                    key="register_terms_agreed",
+                )
+                st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+
+                if st.button("Submit Registration", use_container_width=True):
+                    if not terms_agreed:
+                        st.error("Please accept the Terms of Use and Privacy Policy before registering.")
+                    elif (
+                        captcha_ans
+                        != st.session_state.captcha_num1
+                        + st.session_state.captcha_num2
+                    ):
+                        st.error("Incorrect CAPTCHA answer.")
+                    elif email_input and pass_input and supabase_client:
+                        try:
+                            res = supabase_client.auth.sign_up(
+                                {
+                                    "email": email_input,
+                                    "password": pass_input,
+                                    "options": {
+                                        "data": {
+                                            "full_name": name_input,
+                                            "carte_num": carte_input,
+                                        }
+                                    },
+                                }
+                            )
+                            st.success(
+                                "Account created successfully! You may now log in."
+                            )
+                        except Exception as e:
+                            st.error(f"Registration Error: {e}")
+
+            elif auth_mode == "Log In (دخول)":
+                # Clear notice immediately above the Login button so every user
+                # sees the student-project status before entering the application.
+                st.markdown(
+                    f"""
+                    <div style="
+                        border:1.5px solid #f59e0b;
+                        border-radius:9px;
+                        padding:9px 11px;
+                        margin:6px 0 7px 0;
+                        background:rgba(245,158,11,0.08);
+                    ">
+                        <div style="font-weight:800; font-size:0.88rem;">
+                            {TERMS_TEXTS[st.session_state.lang]['badge']}
+                        </div>
+                        <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
+                            {TERMS_TEXTS[st.session_state.lang]['short']}
+                        </div>
                     </div>
-                    <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
-                        {TERMS_TEXTS[st.session_state.lang]['short']}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            login_terms_agreed = st.checkbox(
-                TERMS_TEXTS[st.session_state.lang]["agree"],
-                key="login_terms_agreed",
-            )
-            st.caption(TERMS_TEXTS[st.session_state.lang]["continue"])
-            if st.button("Login", use_container_width=True):
-                if not login_terms_agreed:
-                    st.error(
-                        "Please accept the Terms of Use and Privacy Policy before logging in."
-                    )
-                elif email_input and pass_input and supabase_client:
-                    try:
-                        res = supabase_client.auth.sign_in_with_password(
-                            {"email": email_input, "password": pass_input}
+                    """,
+                    unsafe_allow_html=True,
+                )
+                login_terms_agreed = st.checkbox(
+                    TERMS_TEXTS[st.session_state.lang]["agree"],
+                    key="login_terms_agreed",
+                )
+                st.caption(TERMS_TEXTS[st.session_state.lang]["continue"])
+                if st.button("Login", use_container_width=True):
+                    if not login_terms_agreed:
+                        st.error(
+                            "Please accept the Terms of Use and Privacy Policy before logging in."
                         )
-                        st.session_state.logged_in = True
-                        st.session_state.farmer_email = email_input
-                        user_metadata = (
-                            res.user.user_metadata if res.user else {}
-                        )
-                        st.session_state.farmer_name = user_metadata.get(
-                            "full_name", email_input.split("@")[0]
-                        )
-                        st.session_state.carte_num = user_metadata.get(
-                            "carte_num", "DZ-2026-1088"
-                        )
-                        st.success("Logged in successfully!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Authentication Failed: {e}")
-                else:
-                    st.error("Please enter email and password.")
+                    elif email_input and pass_input and supabase_client:
+                        try:
+                            res = supabase_client.auth.sign_in_with_password(
+                                {"email": email_input, "password": pass_input}
+                            )
+                            st.session_state.logged_in = True
+                            st.session_state.farmer_email = email_input
+                            user_metadata = (
+                                res.user.user_metadata if res.user else {}
+                            )
+                            st.session_state.farmer_name = user_metadata.get(
+                                "full_name", email_input.split("@")[0]
+                            )
+                            st.session_state.carte_num = user_metadata.get(
+                                "carte_num", "DZ-2026-1088"
+                            )
+                            st.success("Logged in successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Authentication Failed: {e}")
+                    else:
+                        st.error("Please enter email and password.")
 
-        elif auth_mode == "Forgot Password":
-            if st.button("Send Reset Link", use_container_width=True):
-                if email_input and supabase_client:
-                    try:
-                        supabase_client.auth.reset_password_for_email(
-                            email_input
-                        )
-                        st.info("Password reset link sent to your email.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-    else:
-        st.success(f"Logged in: {st.session_state.farmer_name}")
-        st.caption(f"Carte N°: {st.session_state.carte_num}")
-        if unread_count > 0:
-            st.warning(f"🔔 You have {unread_count} unread notifications!")
+            elif auth_mode == "Forgot Password":
+                if st.button("Send Reset Link", use_container_width=True):
+                    if email_input and supabase_client:
+                        try:
+                            supabase_client.auth.reset_password_for_email(
+                                email_input
+                            )
+                            st.info("Password reset link sent to your email.")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+        else:
+            st.success(f"Logged in: {st.session_state.farmer_name}")
+            st.caption(f"Carte N°: {st.session_state.carte_num}")
+            if unread_count > 0:
+                st.warning(f"🔔 You have {unread_count} unread notifications!")
 
-        if st.button("Log Out / خروج", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.farmer_email = ""
-            st.session_state.admin_authenticated = False
-            st.rerun()
+            if st.button("Log Out / خروج", use_container_width=True):
+                st.session_state.logged_in = False
+                st.session_state.farmer_email = ""
+                st.session_state.admin_authenticated = False
+                st.rerun()
 
 # ---------------------------------------------------------
 # HEADER BANNER & BELL ICON
@@ -1214,6 +1334,8 @@ tab_options_map = {
 }
 
 reverse_map = {v: k for k, v in tab_options_map.items()}
+
+st.markdown('<div id="main-navigation-marker"></div>', unsafe_allow_html=True)
 
 selected_segmented_label = st.segmented_control(
     label="Navigation Tabs",
@@ -1879,7 +2001,7 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Dispatch failed: {e}")
 
-        with adm_tab3:
+        with adm_tab4:
             st.markdown("#### Add Location to Map Directory")
             loc_name = st.text_input("Facility Name")
             loc_wilaya = st.selectbox(
