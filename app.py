@@ -761,48 +761,83 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
-    /* Collapsed sidebar opener: make it obvious that it opens the MENU / Account area. */
+    /* Collapsed sidebar opener: make it unmistakably the MENU / LOGIN / SETTINGS opener. */
     [data-testid="stSidebarCollapsedControl"] {{
         padding: 10px !important;
         z-index: 1000 !important;
     }}
 
+    /* Streamlit versions use slightly different selectors for the collapsed-sidebar button.
+       Target both so the visible opener stays large and labeled. */
     [data-testid="stSidebarCollapsedControl"] button,
-    button[data-testid="stSidebarCollapseButton"] {{
-        min-width: 52px !important;
-        width: auto !important;
-        min-height: 46px !important;
-        height: 46px !important;
-        padding: 8px 12px !important;
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
+        min-width: 158px !important;
+        width: 158px !important;
+        max-width: 158px !important;
+        min-height: 50px !important;
+        height: 50px !important;
+        padding: 8px 14px !important;
         border: 1px solid {border_color} !important;
-        border-radius: 12px !important;
+        border-radius: 13px !important;
         background: {card_bg} !important;
         color: {text_color} !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.10) !important;
+        box-shadow: 0 2px 9px rgba(0,0,0,0.12) !important;
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
-        gap: 7px !important;
+        gap: 8px !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
     }}
 
-    [data-testid="stSidebarCollapsedControl"] button:hover,
-    button[data-testid="stSidebarCollapseButton"]:hover {{
+    [data-testid="stSidebarCollapsedControl"] button:hover {{
         border-color: {accent_color} !important;
         background: {card_bg} !important;
     }}
 
-    [data-testid="stSidebarCollapsedControl"] button::after {{
-        content: "MENU" !important;
-        font-size: 0.82rem !important;
-        font-weight: 750 !important;
-        line-height: 1 !important;
+    /* The text explains what the button opens: settings + account/login. */
+    [data-testid="stSidebarCollapsedControl"] button::after,
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
+        content: "MENU • LOGIN & SETTINGS" !important;
+        display: inline-block !important;
+        font-size: 0.76rem !important;
+        font-weight: 800 !important;
+        line-height: 1.05 !important;
+        letter-spacing: 0.01em !important;
         color: {text_color} !important;
+        white-space: nowrap !important;
     }}
 
     [data-testid="stSidebarCollapsedControl"] button svg,
-    button[data-testid="stSidebarCollapseButton"] svg {{
-        width: 1.25rem !important;
-        height: 1.25rem !important;
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] svg {{
+        width: 1.35rem !important;
+        height: 1.35rem !important;
+        min-width: 1.35rem !important;
+        flex: 0 0 auto !important;
+    }}
+
+    /* Keep the collapsed opener clearly usable on small screens too. */
+    @media (max-width: 640px) {{
+        [data-testid="stSidebarCollapsedControl"] {{
+            padding: 8px !important;
+        }}
+
+        [data-testid="stSidebarCollapsedControl"] button,
+        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
+            min-width: 145px !important;
+            width: 145px !important;
+            max-width: 145px !important;
+            min-height: 48px !important;
+            height: 48px !important;
+            padding: 7px 11px !important;
+            gap: 6px !important;
+        }}
+
+        [data-testid="stSidebarCollapsedControl"] button::after,
+        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
+            content: "MENU • LOGIN & SETTINGS" !important;
+            font-size: 0.68rem !important;
+        }}
     }}
 
     /* Expanded sidebar close button remains compact and clear. */
