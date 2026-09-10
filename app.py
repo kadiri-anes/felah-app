@@ -762,13 +762,13 @@ st.markdown(
     }}
 
     /* Collapsed sidebar opener: make it obvious that it opens the MENU / Account area. */
-    [data-testid="stSidebarCollapsedControl"] {
+    [data-testid="stSidebarCollapsedControl"] {{
         padding: 10px !important;
         z-index: 1000 !important;
-    }
+    }}
 
     [data-testid="stSidebarCollapsedControl"] button,
-    button[data-testid="stSidebarCollapseButton"] {
+    button[data-testid="stSidebarCollapseButton"] {{
         min-width: 52px !important;
         width: auto !important;
         min-height: 46px !important;
@@ -783,37 +783,37 @@ st.markdown(
         align-items: center !important;
         justify-content: center !important;
         gap: 7px !important;
-    }
+    }}
 
     [data-testid="stSidebarCollapsedControl"] button:hover,
-    button[data-testid="stSidebarCollapseButton"]:hover {
+    button[data-testid="stSidebarCollapseButton"]:hover {{
         border-color: {accent_color} !important;
         background: {card_bg} !important;
-    }
+    }}
 
-    [data-testid="stSidebarCollapsedControl"] button::after {
+    [data-testid="stSidebarCollapsedControl"] button::after {{
         content: "MENU" !important;
         font-size: 0.82rem !important;
         font-weight: 750 !important;
         line-height: 1 !important;
         color: {text_color} !important;
-    }
+    }}
 
     [data-testid="stSidebarCollapsedControl"] button svg,
-    button[data-testid="stSidebarCollapseButton"] svg {
+    button[data-testid="stSidebarCollapseButton"] svg {{
         width: 1.25rem !important;
         height: 1.25rem !important;
-    }
+    }}
 
     /* Expanded sidebar close button remains compact and clear. */
-    div[data-testid="stSidebar"] button[data-testid="stSidebarCollapseButton"] {
+    div[data-testid="stSidebar"] button[data-testid="stSidebarCollapseButton"] {{
         min-width: 40px !important;
         width: 40px !important;
         min-height: 40px !important;
         height: 40px !important;
         padding: 6px !important;
         border-radius: 10px !important;
-    }
+    }}
 
     /* Account expander: large, obvious header/arrow for touch devices. */
     div[data-testid="stSidebar"] details summary {{
