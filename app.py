@@ -2234,146 +2234,347 @@ elif st.session_state.active_tab == "account":
                     st.error(f"Failed to insert map point: {e}")
 
         with adm_tab5:
-            st.markdown("#### System Database Inspector & Management")
+            st.markdown("#### 📊 Agricultural Intelligence & Database Management")
             st.caption(
-                "View records and manage individual rows by ID. Deletion is permanent. "
-                "For crop declarations you can also set the cultivated area to 0 without deleting the record."
+                "Live planning dashboard based on farmer crop declarations. "
+                "The first version measures declared cultivated area against the national planning targets."
             )
 
-            table_choice = st.selectbox(
-                "Select Database Table to Inspect",
-                [
-                    "farmer_profiles",
-                    "declarations",
-                    "support_requests",
-                    "farmer_notifications",
-                    "weather_alerts",
-                    "portal_news",
-                    "suppliers_directory",
-                ],
-                key="admin_table_choice",
-            )
-
+            # -------------------------------------------------
+            # LIVE AGRICULTURAL BOARD
+            # -------------------------------------------------
             try:
-                res_all = (
-                    supabase_client.table(table_choice)
-                    .select("*")
+                res_live = (
+                    supabase_client.table("declarations")
+                    .select("crop, category, area, wilaya, start_date")
                     .execute()
                 )
-                records = res_all.data if res_all.data else []
+                live_records = res_live.data if res_live.data else []
+                df_live = pd.DataFrame(live_records)
 
-                if records:
-                    df_admin = pd.DataFrame(records)
+                if not df_live.empty:
+                    df_live["area"] = pd.to_numeric(
+                        df_live["area"], errors="coerce"
+                    ).fillna(0.0)
+                else:
+                    df_live = pd.DataFrame(
+                        columns=["crop", "category", "area", "wilaya", "start_date"]
+                    )
+
+                # Planning targets used by the declaration system.
+                # Fruits are shown as reference planning areas; they are not
+                # treated as legal quotas by the declaration form.
+                all_crop_targets = {}
+                all_crop_targets.update(VEGETABLE_LIMITS)
+                all_crop_targets.update({
+                    crop: float(area_kha * 1000)
+                    for crop, area_kha in FRUIT_TARGETS_KHA.items()
+                })
+
+                national_rows = []
+                for crop, target_area in all_crop_targets.items():
+                    declared_area = (
+                        float(df_live.loc[df_live["crop"] == crop, "area"].sum())
+                        if not df_live.empty
+                        else 0.0
+                    )
+                    coverage = (declared_area / target_area * 100) if target_area else 0.0
+                    if coverage > 110:
+                        status = "🔴 Over target"
+                    elif coverage >= 90:
+                        status = "🟢 Near target"
+                    else:
+                        status = "🟡 Under target"
+
+                    national_rows.append({
+                        "Crop": crop,
+                        "Target Area (Ha)": target_area,
+                        "Declared Area (Ha)": declared_area,
+                        "% of Target": coverage,
+                        "Status": status,
+                    })
+
+                df_national = pd.DataFrame(national_rows)
+                df_national = df_national.sort_values(
+                    "% of Target", ascending=False
+                ).reset_index(drop=True)
+
+                total_declared = float(df_live["area"].sum()) if not df_live.empty else 0.0
+                over_count = int((df_national["% of Target"] > 110).sum())
+                near_count = int(
+                    ((df_national["% of Target"] >= 90) &
+                     (df_national["% of Target"] <= 110)).sum()
+                )
+                under_count = int((df_national["% of Target"] < 90).sum())
+
+                metric_cols = st.columns(4)
+                with metric_cols[0]:
+                    st.metric("🌾 Declared Area", f"{total_declared:,.1f} Ha")
+                with metric_cols[1]:
+                    st.metric("🔴 Over Target", over_count)
+                with metric_cols[2]:
+                    st.metric("🟢 Near Target", near_count)
+                with metric_cols[3]:
+                    st.metric("🟡 Under Target", under_count)
+
+                board_tab, wilaya_tab, db_tab = st.tabs([
+                    "📡 Live National Board",
+                    "🗺️ Wilaya × Crop Analysis",
+                    "🗃️ Database Records",
+                ])
+
+                with board_tab:
+                    st.markdown("##### 🇩🇿 National Crop Balance")
+                    st.caption(
+                        "Coverage = declared cultivated area ÷ planning target area. "
+                        "🔴 >110% = over target, 🟢 90–110% = near target, 🟡 <90% = under target."
+                    )
+
+                    display_national = df_national.copy()
+                    display_national["Target Area (Ha)"] = display_national["Target Area (Ha)"].map(
+                        lambda x: f"{x:,.0f}"
+                    )
+                    display_national["Declared Area (Ha)"] = display_national["Declared Area (Ha)"].map(
+                        lambda x: f"{x:,.1f}"
+                    )
+                    display_national["% of Target"] = display_national["% of Target"].map(
+                        lambda x: f"{x:.1f}%"
+                    )
                     st.dataframe(
-                        df_admin,
+                        display_national,
                         use_container_width=True,
                         hide_index=True,
                     )
 
-                    # Every managed row must have its database ID available.
-                    id_values = [r.get("id") for r in records if r.get("id") is not None]
+                    st.markdown("##### 📈 Highest Coverage Crops")
+                    top_crops = df_national.head(8).copy()
+                    top_crops = top_crops.set_index("Crop")[["% of Target"]]
+                    st.bar_chart(top_crops, y="% of Target")
 
-                    if not id_values:
-                        st.warning(
-                            "No `id` column/value was found in this table. "
-                            "Individual management requires a primary key named `id`."
-                        )
+                with wilaya_tab:
+                    st.markdown("##### 🗺️ Crop Distribution by Wilaya")
+
+                    if df_live.empty:
+                        st.info("No farmer declarations are available yet.")
                     else:
-                        st.divider()
-                        st.markdown("##### Manage One Record by ID")
-                        record_id = st.selectbox(
-                            "Select Record ID",
-                            id_values,
-                            key=f"admin_record_id_{table_choice}",
-                        )
-
-                        selected_record = next(
-                            (r for r in records if r.get("id") == record_id),
-                            None,
-                        )
-
-                        if selected_record is not None:
-                            preview_cols = [
-                                k for k in [
-                                    "id", "title", "crop", "category", "area",
-                                    "farmer_email", "carte_num", "wilaya", "status"
-                                ]
-                                if k in selected_record
-                            ]
-                            if preview_cols:
-                                st.json({k: selected_record.get(k) for k in preview_cols})
-
-                        if table_choice == "declarations":
-                            st.markdown("**Crop Declaration Actions**")
-                            col_zero, col_delete = st.columns(2)
-
-                            with col_zero:
-                                if st.button(
-                                    "0️⃣ Set Area to 0",
-                                    key=f"zero_declaration_{record_id}",
-                                    use_container_width=True,
-                                ):
-                                    try:
-                                        supabase_client.table("declarations").update(
-                                            {"area": 0}
-                                        ).eq("id", record_id).execute()
-                                        st.success(
-                                            f"Declaration ID {record_id} area set to 0."
-                                        )
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Failed to set declaration area to 0: {e}")
-
-                            with col_delete:
-                                delete_declaration = st.checkbox(
-                                    "Confirm permanent deletion",
-                                    key=f"confirm_delete_dec_{record_id}",
-                                )
-                                if st.button(
-                                    "🗑️ Delete Declaration",
-                                    key=f"delete_declaration_{record_id}",
-                                    use_container_width=True,
-                                    disabled=not delete_declaration,
-                                ):
-                                    try:
-                                        supabase_client.table("declarations").delete().eq(
-                                            "id", record_id
-                                        ).execute()
-                                        st.success(
-                                            f"Declaration ID {record_id} deleted."
-                                        )
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Failed to delete declaration: {e}")
+                        available_crops = [c for c in all_crop_targets if c in set(df_live["crop"].dropna())]
+                        if not available_crops:
+                            st.info("No recognized crop declarations are available yet.")
                         else:
-                            confirm_delete = st.checkbox(
-                                "Confirm permanent deletion of this record",
-                                key=f"confirm_delete_{table_choice}_{record_id}",
+                            selected_analysis_crop = st.selectbox(
+                                "Select Crop",
+                                available_crops,
+                                key="admin_live_analysis_crop",
                             )
-                            if st.button(
-                                f"🗑️ Delete {table_choice} Record",
-                                key=f"delete_record_{table_choice}_{record_id}",
+
+                            crop_df = df_live[df_live["crop"] == selected_analysis_crop].copy()
+                            crop_wilaya = (
+                                crop_df.groupby("wilaya", dropna=False)["area"]
+                                .sum()
+                                .reset_index()
+                                .rename(columns={"area": "Declared Area (Ha)"})
+                                .sort_values("Declared Area (Ha)", ascending=False)
+                            )
+
+                            national_target = all_crop_targets[selected_analysis_crop]
+                            national_declared = float(crop_wilaya["Declared Area (Ha)"].sum())
+                            national_coverage = (
+                                national_declared / national_target * 100
+                                if national_target
+                                else 0.0
+                            )
+
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                st.metric("National Target", f"{national_target:,.0f} Ha")
+                            with c2:
+                                st.metric("Declared", f"{national_declared:,.1f} Ha")
+                            with c3:
+                                st.metric("Target Coverage", f"{national_coverage:.1f}%")
+
+                            crop_wilaya["Share of Declared Crop"] = crop_wilaya["Declared Area (Ha)"].apply(
+                                lambda x: (x / national_declared * 100) if national_declared else 0
+                            )
+                            crop_wilaya["Share of Declared Crop"] = crop_wilaya["Share of Declared Crop"].map(
+                                lambda x: f"{x:.1f}%"
+                            )
+                            crop_wilaya["Declared Area (Ha)"] = crop_wilaya["Declared Area (Ha)"].map(
+                                lambda x: f"{x:,.1f}"
+                            )
+
+                            st.dataframe(
+                                crop_wilaya,
                                 use_container_width=True,
-                                disabled=not confirm_delete,
-                            ):
-                                try:
-                                    supabase_client.table(table_choice).delete().eq(
-                                        "id", record_id
-                                    ).execute()
-                                    st.success(
-                                        f"Record ID {record_id} deleted from `{table_choice}`."
-                                    )
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(
-                                        f"Failed to delete record from `{table_choice}`: {e}"
-                                    )
-                else:
-                    st.info(
-                        f"Table `{table_choice}` is currently empty."
+                                hide_index=True,
+                            )
+
+                            chart_df = (
+                                df_live[df_live["crop"] == selected_analysis_crop]
+                                .groupby("wilaya")["area"]
+                                .sum()
+                                .sort_values(ascending=False)
+                                .head(15)
+                                .to_frame()
+                            )
+                            st.markdown("##### Top 15 Wilayas by Declared Area")
+                            st.bar_chart(chart_df, y="area")
+
+                            st.info(
+                                "💡 Wilaya-level over/under-production optimization will be added in the next phase. "
+                                "At this stage, the system can show where each crop is concentrated, but it does not yet have "
+                                "wilaya-specific production targets or yield data."
+                            )
+
+                with db_tab:
+                    st.markdown("##### System Database Inspector & Management")
+                    st.caption(
+                        "View records and manage individual rows by ID. Deletion is permanent. "
+                        "For crop declarations you can also set the cultivated area to 0 without deleting the record."
                     )
+
+                    table_choice = st.selectbox(
+                        "Select Database Table to Inspect",
+                        [
+                            "farmer_profiles",
+                            "declarations",
+                            "support_requests",
+                            "farmer_notifications",
+                            "weather_alerts",
+                            "portal_news",
+                            "suppliers_directory",
+                        ],
+                        key="admin_table_choice",
+                    )
+
+                    try:
+                        res_all = (
+                            supabase_client.table(table_choice)
+                            .select("*")
+                            .execute()
+                        )
+                        records = res_all.data if res_all.data else []
+
+                        if records:
+                            df_admin = pd.DataFrame(records)
+                            st.dataframe(
+                                df_admin,
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            id_values = [
+                                r.get("id") for r in records if r.get("id") is not None
+                            ]
+
+                            if not id_values:
+                                st.warning(
+                                    "No `id` column/value was found in this table. "
+                                    "Individual management requires a primary key named `id`."
+                                )
+                            else:
+                                st.divider()
+                                st.markdown("##### Manage One Record by ID")
+                                record_id = st.selectbox(
+                                    "Select Record ID",
+                                    id_values,
+                                    key=f"admin_record_id_{table_choice}",
+                                )
+
+                                selected_record = next(
+                                    (r for r in records if r.get("id") == record_id),
+                                    None,
+                                )
+
+                                if selected_record is not None:
+                                    preview_cols = [
+                                        k for k in [
+                                            "id", "title", "crop", "category", "area",
+                                            "farmer_email", "carte_num", "wilaya", "status"
+                                        ]
+                                        if k in selected_record
+                                    ]
+                                    if preview_cols:
+                                        st.json({
+                                            k: selected_record.get(k)
+                                            for k in preview_cols
+                                        })
+
+                                if table_choice == "declarations":
+                                    st.markdown("**Crop Declaration Actions**")
+                                    col_zero, col_delete = st.columns(2)
+
+                                    with col_zero:
+                                        if st.button(
+                                            "0️⃣ Set Area to 0",
+                                            key=f"zero_declaration_{record_id}",
+                                            use_container_width=True,
+                                        ):
+                                            try:
+                                                supabase_client.table("declarations").update(
+                                                    {"area": 0}
+                                                ).eq("id", record_id).execute()
+                                                st.success(
+                                                    f"Declaration ID {record_id} area set to 0."
+                                                )
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(
+                                                    f"Failed to set declaration area to 0: {e}"
+                                                )
+
+                                    with col_delete:
+                                        delete_declaration = st.checkbox(
+                                            "Confirm permanent deletion",
+                                            key=f"confirm_delete_dec_{record_id}",
+                                        )
+                                        if st.button(
+                                            "🗑️ Delete Declaration",
+                                            key=f"delete_declaration_{record_id}",
+                                            use_container_width=True,
+                                            disabled=not delete_declaration,
+                                        ):
+                                            try:
+                                                supabase_client.table("declarations").delete().eq(
+                                                    "id", record_id
+                                                ).execute()
+                                                st.success(
+                                                    f"Declaration ID {record_id} deleted."
+                                                )
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(
+                                                    f"Failed to delete declaration: {e}"
+                                                )
+                                else:
+                                    confirm_delete = st.checkbox(
+                                        "Confirm permanent deletion of this record",
+                                        key=f"confirm_delete_{table_choice}_{record_id}",
+                                    )
+                                    if st.button(
+                                        f"🗑️ Delete {table_choice} Record",
+                                        key=f"delete_record_{table_choice}_{record_id}",
+                                        use_container_width=True,
+                                        disabled=not confirm_delete,
+                                    ):
+                                        try:
+                                            supabase_client.table(table_choice).delete().eq(
+                                                "id", record_id
+                                            ).execute()
+                                            st.success(
+                                                f"Record ID {record_id} deleted from `{table_choice}`."
+                                            )
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(
+                                                f"Failed to delete record from `{table_choice}`: {e}"
+                                            )
+                        else:
+                            st.info(f"Table `{table_choice}` is currently empty.")
+                    except Exception as e:
+                        st.error(f"Failed to query table: {e}")
+
             except Exception as e:
-                st.error(f"Failed to query table: {e}")
+                st.error(f"Unable to load the agricultural live board: {e}")
 
         if st.button("🔒 Lock Admin Console"):
             st.session_state.admin_authenticated = False
