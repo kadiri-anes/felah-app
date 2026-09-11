@@ -7,6 +7,7 @@ import folium
 import pandas as pd
 import qrcode
 import streamlit as st
+import streamlit.components.v1 as components
 from st_supabase_connection import SupabaseConnection
 from streamlit_folium import st_folium
 
@@ -761,102 +762,54 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
-    /* Collapsed sidebar opener: large, obvious dark-orange MENU button. */
-    [data-testid="stSidebarCollapsedControl"] {{
-        width: 214px !important;
-        min-width: 214px !important;
-        max-width: 214px !important;
-        height: 58px !important;
-        min-height: 58px !important;
-        padding: 6px !important;
-        z-index: 1000 !important;
-        overflow: visible !important;
-    }}
-
-    [data-testid="stSidebarCollapsedControl"] button,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"],
-    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] {{
-        width: 202px !important;
-        min-width: 202px !important;
-        max-width: 202px !important;
-        height: 50px !important;
-        min-height: 50px !important;
-        padding: 8px 14px !important;
+    /*
+       Streamlit's collapsed sidebar control is framework-owned.
+       The visible large MENU opener is rendered by render_sidebar_toggle()
+       below using a tiny iframe that forwards the click to Streamlit's native
+       [data-testid="stSidebarCollapseButton"].
+    */
+    .st-key-sidebar_toggle_iframe {{
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 220px !important;
+        height: 70px !important;
+        min-width: 220px !important;
+        min-height: 70px !important;
+        padding: 0 !important;
         margin: 0 !important;
-        border: 1px solid #b45309 !important;
-        border-radius: 13px !important;
-        background: #c96a18 !important;
-        color: #ffffff !important;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.18) !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: flex-start !important;
-        gap: 9px !important;
-        white-space: nowrap !important;
+        z-index: 2147483646 !important;
+        pointer-events: none !important;
         overflow: visible !important;
-        font-size: 0 !important;
     }}
 
-    [data-testid="stSidebarCollapsedControl"] button:hover,
-    [data-testid="stSidebarCollapsedControl"] button:focus,
-    [data-testid="stSidebarCollapsedControl"] button:active {{
-        background: #b85d12 !important;
-        border-color: #92400e !important;
-        color: #ffffff !important;
+    .st-key-sidebar_toggle_iframe iframe,
+    .st-key-sidebar_toggle_iframe [data-testid="stIFrame"] {{
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 220px !important;
+        height: 70px !important;
+        min-width: 220px !important;
+        min-height: 70px !important;
+        border: 0 !important;
+        background: transparent !important;
+        pointer-events: auto !important;
+        z-index: 2147483647 !important;
     }}
 
-    /* Hide Streamlit's tiny chevron and replace it with a clear opener label. */
-    [data-testid="stSidebarCollapsedControl"] button svg,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] svg,
-    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] svg {{
-        display: none !important;
-    }}
-
-    [data-testid="stSidebarCollapsedControl"] button::before,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::before,
-    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"]::before {{
-        content: "⚙️ MENU / القائمة" !important;
-        display: block !important;
-        width: 100% !important;
-        color: #ffffff !important;
-        font-size: 1rem !important;
-        font-weight: 800 !important;
-        line-height: 1 !important;
-        text-align: center !important;
-        white-space: nowrap !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-    }}
-
-    /* Keep the large opener on phones; slightly reduce width only to fit narrow screens. */
     @media (max-width: 640px) {{
-        [data-testid="stSidebarCollapsedControl"] {{
-            width: 178px !important;
-            min-width: 178px !important;
-            max-width: 178px !important;
-            height: 54px !important;
-            min-height: 54px !important;
-            padding: 5px !important;
-        }}
-
-        [data-testid="stSidebarCollapsedControl"] button,
-        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"],
-        [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] {{
-            width: 168px !important;
-            min-width: 168px !important;
-            max-width: 168px !important;
-            height: 46px !important;
-            min-height: 46px !important;
-            padding: 7px 8px !important;
-        }}
-
-        [data-testid="stSidebarCollapsedControl"] button::before,
-        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::before,
-        [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"]::before {{
-            content: "⚙️ MENU / القائمة" !important;
-            font-size: 0.78rem !important;
+        .st-key-sidebar_toggle_iframe,
+        .st-key-sidebar_toggle_iframe iframe,
+        .st-key-sidebar_toggle_iframe [data-testid="stIFrame"] {{
+            width: 190px !important;
+            min-width: 190px !important;
         }}
     }}
+
+    [data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"] {
+        cursor: pointer !important;
+    }
 
     /* Expanded sidebar close button remains compact and clear. */
     div[data-testid="stSidebar"] button[data-testid="stSidebarCollapseButton"] {{
@@ -1158,6 +1111,135 @@ unread_count = get_unread_notif_count()
 # ---------------------------------------------------------
 # SIDEBAR CONTROL PANEL
 # ---------------------------------------------------------
+def render_sidebar_toggle():
+    """Render a large custom opener that forwards its click to Streamlit's native sidebar toggle."""
+    toggle_html = r"""
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      #felah-sidebar-toggle {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        width: 202px;
+        height: 50px;
+        padding: 0 14px;
+        border: 1px solid #9a4d0d;
+        border-radius: 13px;
+        background: #c96a18;
+        color: #ffffff;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+        font-family: Arial, sans-serif;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.1px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        white-space: nowrap;
+        z-index: 2147483647;
+        transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      #felah-sidebar-toggle:hover {
+        background: #b85d12;
+        box-shadow: 0 5px 16px rgba(0,0,0,0.28);
+        transform: translateY(-1px);
+      }
+
+      #felah-sidebar-toggle:active {
+        transform: translateY(0);
+      }
+
+      #felah-sidebar-toggle.hidden {
+        display: none;
+      }
+
+      #felah-sidebar-toggle .icon {
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      @media (max-width: 640px) {
+        #felah-sidebar-toggle {
+          top: 7px;
+          left: 7px;
+          width: 174px;
+          height: 46px;
+          padding: 0 8px;
+          border-radius: 12px;
+          font-size: 12.5px;
+          gap: 7px;
+        }
+
+        #felah-sidebar-toggle .icon {
+          font-size: 18px;
+        }
+      }
+    </style>
+
+    <button id="felah-sidebar-toggle" type="button" aria-label="Open menu and account settings">
+      <span class="icon">⚙️</span>
+      <span>MENU / القائمة</span>
+    </button>
+
+    <script>
+      (function () {
+        const button = document.getElementById("felah-sidebar-toggle");
+
+        function nativeSidebarButton() {
+          try {
+            return window.parent.document.querySelector(
+              '[data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"]'
+            ) || window.parent.document.querySelector(
+              '[data-testid="stSidebarCollapseButton"] button'
+            );
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function syncVisibility() {
+          try {
+            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+            const isExpanded = sidebar && sidebar.getAttribute("aria-expanded") === "true";
+            button.classList.toggle("hidden", !!isExpanded);
+          } catch (e) {
+            // Keep the opener visible if the parent DOM cannot be inspected.
+            button.classList.remove("hidden");
+          }
+        }
+
+        button.addEventListener("click", function () {
+          const nativeButton = nativeSidebarButton();
+          if (nativeButton) {
+            nativeButton.click();
+            setTimeout(syncVisibility, 80);
+            setTimeout(syncVisibility, 350);
+          }
+        });
+
+        syncVisibility();
+        setInterval(syncVisibility, 300);
+      })();
+    </script>
+    """
+
+    # The keyed container lets us position only this iframe, without affecting
+    # maps or any other iframe-based widgets used elsewhere in the app.
+    with st.container(key="sidebar_toggle_iframe"):
+        components.html(toggle_html, height=70, width=220, scrolling=False)
+
+
 with st.sidebar:
     st.title("⚙️ MENU / القائمة")
 
@@ -1341,6 +1423,9 @@ with st.sidebar:
                 st.session_state.farmer_email = ""
                 st.session_state.admin_authenticated = False
                 st.rerun()
+
+# Large custom opener for the collapsed sidebar. It disappears while the sidebar is open.
+render_sidebar_toggle()
 
 # ---------------------------------------------------------
 # HEADER BANNER & BELL ICON
