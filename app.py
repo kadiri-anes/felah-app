@@ -154,6 +154,51 @@ FRUIT_TARGETS_KHA = {
 
 FRUIT_LIST = list(FRUIT_TARGETS_KHA.keys())
 
+# Built-in planning yield benchmarks (t/ha). These are fallback values only.
+# Where an official Algerian source is available, the app labels that source;
+# otherwise the value is clearly labeled as a planning estimate until a MADR/technical
+# institute benchmark is entered in Supabase.
+BUILTIN_YIELD_BENCHMARKS = {
+    # Historical ONS benchmark values (2018-2019 campaign)
+    "Potatoes / بطاطا": 31.8,
+    "Tomatoes / طماطم": 59.12,
+    "Onions / بصل": 32.07,
+    # Planning estimates pending crop-specific official benchmark entry
+    "Garlic / ثوم": 8.0,
+    "Carrots / جزر": 25.0,
+    "Green Beans / فاصوليا خضراء": 10.0,
+    "Melons / شمام": 25.0,
+    "Watermelons / بطيخ": 35.0,
+    "Artichokes / خرشوف": 10.0,
+    "Peppers / فلفل": 25.0,
+    "Zucchini / كوسة": 20.0,
+    "Cucumbers / خيار": 30.0,
+    "Lettuce / خس": 25.0,
+    "Eggplant / باذنجان": 30.0,
+    "Peas / جلبانة": 8.0,
+    "Cabbage / ملفوف": 30.0,
+    "Cauliflower / قرنبيط": 20.0,
+    "Olives / زيتون": 1.5,
+    "Dates / تمور": 6.0,
+    "Citrus / الموالح": 20.0,
+    "Grapes / عنب": 8.0,
+    "Figs / تين": 3.0,
+    "Almonds / لوز": 1.2,
+    "Apples / تفاح": 20.0,
+    "Apricots / مشمش": 8.0,
+    "Peaches & Nectarines / خوخ ونكتارين": 12.0,
+    "Plums / برقوق": 10.0,
+    "Pomegranates / رمان": 10.0,
+    "Pears / إجاص": 15.0,
+    "Cherries / كرز": 5.0,
+    "Quinces / سفرجل": 12.0,
+}
+
+BUILTIN_OFFICIAL_BENCHMARKS = {
+    "Potatoes / بطاطا", "Tomatoes / طماطم", "Onions / بصل"
+}
+
+
 SUPPORT_SECTORS = {
     "Geomembrane Basin (أحواض الجيوممبران)": [
         "Farmer Card (بطاقة الفلاح)",
@@ -2497,9 +2542,9 @@ elif st.session_state.active_tab == "account":
                     if df_live.empty:
                         st.info("No farmer declarations are available yet.")
                     else:
-                        available_crops = [c for c in all_crop_targets if c in set(df_live["crop"].dropna())]
+                        available_crops = list(all_crop_targets.keys())
                         if not available_crops:
-                            st.info("No recognized crop declarations are available yet.")
+                            st.info("No crop targets are configured yet.")
                         else:
                             selected_analysis_crop = st.selectbox(
                                 "Select Crop",
@@ -2513,8 +2558,12 @@ elif st.session_state.active_tab == "account":
                                 .sum()
                                 .reset_index()
                                 .rename(columns={"area": "Declared Area (Ha)"})
-                                .sort_values("Declared Area (Ha)", ascending=False)
                             )
+                            crop_wilaya = pd.DataFrame({"wilaya": WILAYAS_48}).merge(
+                                crop_wilaya, on="wilaya", how="left"
+                            )
+                            crop_wilaya["Declared Area (Ha)"] = crop_wilaya["Declared Area (Ha)"].fillna(0.0)
+                            crop_wilaya = crop_wilaya.sort_values("Declared Area (Ha)", ascending=False)
 
                             national_target = all_crop_targets[selected_analysis_crop]
                             national_declared = float(crop_wilaya["Declared Area (Ha)"].sum())
@@ -2560,9 +2609,8 @@ elif st.session_state.active_tab == "account":
                             st.bar_chart(chart_df, y="area")
 
                             st.info(
-                                "💡 Wilaya-level over/under-production optimization will be added in the next phase. "
-                                "At this stage, the system can show where each crop is concentrated, but it does not yet have "
-                                "wilaya-specific production targets or yield data."
+                                "💡 This analysis now works with all 48 Wilayas. It shows crop concentration, including Wilayas with zero declarations. "
+                                "Production and surplus/deficit calculations are available in the Production & Balance and Wilaya Optimization tabs."
                             )
 
                 with production_tab:
@@ -2605,11 +2653,15 @@ elif st.session_state.active_tab == "account":
                         else:
                             national_benchmarks[crop_name] = yld
 
+                    # Built-in fallback benchmarks keep the analyzer usable while official MADR/technical
+                    # institute figures are being collected. Supabase values always override these defaults.
+                    for crop_name, fallback_yield in BUILTIN_YIELD_BENCHMARKS.items():
+                        national_benchmarks.setdefault(crop_name, fallback_yield)
+
                     if not benchmark_table_ready:
                         st.warning(
-                            "⚙️ Supabase update required for production analysis: create "
-                            "`crop_yield_benchmarks` with `crop`, `wilaya`, and `yield_t_ha`. "
-                            "Until then, this tab cannot claim real production estimates."
+                            "⚙️ `crop_yield_benchmarks` is not available yet. The analyzer will use its built-in planning benchmarks for now. "
+                            "When you obtain official MADR/technical-institute figures, add them to Supabase and they will override the built-ins."
                         )
                         with st.expander("SQL to add the required Supabase table"):
                             st.code(
@@ -2632,11 +2684,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             "and, when available, a specific benchmark for each Wilaya."
                         )
 
-                    available_production_crops = [
-                        c for c in all_crop_targets
-                        if c in set(df_live["crop"].dropna())
-                        and (c in national_benchmarks or any(k[0] == c for k in benchmark_map))
-                    ] if not df_live.empty else []
+                    available_production_crops = list(all_crop_targets.keys()) if not df_live.empty else []
 
                     if available_production_crops:
                         selected_prod_crop = st.selectbox(
@@ -2664,7 +2712,15 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         wilaya_prod["Benchmark Source"] = wilaya_prod["wilaya"].apply(
                             lambda w: "Wilaya benchmark"
                             if (selected_prod_crop, "" if pd.isna(w) else str(w).strip()) in benchmark_map
-                            else ("National benchmark" if selected_prod_crop in national_benchmarks else "Missing")
+                            else (
+                                "National benchmark (Supabase)"
+                                if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
+                                else (
+                                    "Official historical ONS benchmark"
+                                    if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
+                                    else "Planning estimate (pending official source)"
+                                )
+                            )
                         )
 
                         national_yield = national_benchmarks.get(selected_prod_crop)
@@ -2684,7 +2740,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                                 st.metric("Production Coverage", f"{production_coverage:.1f}%")
                         else:
                             st.info(
-                                "No national yield benchmark exists for this crop. Add one in Supabase to calculate the national production estimate."
+                                "No benchmark is available for this crop yet."
                             )
 
                         # Show every one of the 48 Wilayas, including zero-declaration Wilayas.
@@ -2698,7 +2754,15 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
                         full_wilaya_prod["Estimated Production (t)"] = full_wilaya_prod["Estimated Production (t)"].fillna(0.0)
                         full_wilaya_prod["Benchmark Source"] = full_wilaya_prod["Benchmark Source"].fillna(
-                            "National benchmark" if selected_prod_crop in national_benchmarks else "Missing"
+                            (
+                                "National benchmark (Supabase)"
+                                if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
+                                else (
+                                    "Official historical ONS benchmark"
+                                    if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
+                                    else "Planning estimate (pending official source)"
+                                )
+                            )
                         )
 
                         st.markdown("##### All 48 Wilayas — one row per Wilaya")
@@ -2728,9 +2792,9 @@ on public.crop_yield_benchmarks (crop, wilaya);
                                 st.success("National signal: estimated declared production is close to the planning target.")
 
                         st.info(
-                            "Next optimization phase: add `wilaya_crop_targets` (target area/production for every crop × Wilaya) "
-                            "and then the system can calculate true Wilaya surplus/deficit and recommend transfers between Wilayas. "
-                            "The optimizer should use distance, transport cost, perishability, storage and harvest timing rather than simply moving surplus to the nearest Wilaya."
+                            "ℹ️ Benchmark policy: Supabase Wilaya-specific values override everything. If none exists, the app uses a national Supabase benchmark; "
+                            "if that is also absent, it uses the built-in fallback. Potato, tomato and onion use historical ONS yield figures; other built-ins are planning estimates "
+                            "pending an official MADR/technical-institute source. Replace them in Supabase when official values are available."
                         )
                     else:
                         st.info(
@@ -2952,6 +3016,10 @@ on public.wilaya_logistics_constraints (wilaya);
                                     opt_benchmark_map[str(w).strip()] = yld
                                 else:
                                     opt_national_yield = yld
+
+                            # Fall back to the same built-in benchmark policy used by Production & Balance.
+                            if opt_national_yield is None:
+                                opt_national_yield = BUILTIN_YIELD_BENCHMARKS.get(selected_opt_crop)
 
                             crop_targets = target_df[target_df["crop"] == selected_opt_crop].copy().set_index("wilaya")
                             opt_rows = []
