@@ -280,6 +280,205 @@ def get_builtin_wilaya_yield(crop_name, wilaya_name):
     return round(float(base) * factor, 2)
 
 
+def _ai_percent(value, decimals=1):
+    try:
+        return f"{float(value):,.{decimals}f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _ai_float(value, default=0.0):
+    try:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def ai_build_crop_summary(df_live, all_crop_targets, benchmark_map, national_benchmarks):
+    """Deterministic agricultural facts used by the local AI agent."""
+    rows = []
+    if df_live is None or df_live.empty:
+        return pd.DataFrame(columns=[
+            "Crop", "Declared Area (Ha)", "Target Area (Ha)", "Coverage (%)",
+            "Estimated Production (t)", "Wilayas Active", "Top Wilaya", "Top Wilaya Share (%)"
+        ])
+
+    work = df_live.copy()
+    work["area"] = pd.to_numeric(work.get("area"), errors="coerce").fillna(0.0)
+    work["crop"] = work.get("crop", pd.Series(dtype=str)).astype(str).str.strip()
+    work["wilaya"] = work.get("wilaya", pd.Series(dtype=str)).astype(str).str.strip()
+
+    for crop, target in all_crop_targets.items():
+        crop_df = work[work["crop"] == crop]
+        area = float(crop_df["area"].sum()) if not crop_df.empty else 0.0
+        target = _ai_float(target)
+        coverage = area / target * 100 if target > 0 else 0.0
+        est_prod = 0.0
+        for wilaya, area_w in crop_df.groupby("wilaya")["area"].sum().items():
+            yld = benchmark_map.get((crop, wilaya), national_benchmarks.get(crop))
+            if yld is None:
+                yld = get_builtin_wilaya_yield(crop, wilaya)
+            est_prod += float(area_w) * _ai_float(yld)
+        active = int(crop_df["wilaya"].nunique()) if not crop_df.empty else 0
+        top_w = "—"
+        top_share = 0.0
+        if not crop_df.empty and area > 0:
+            by_w = crop_df.groupby("wilaya")["area"].sum().sort_values(ascending=False)
+            if len(by_w):
+                top_w = str(by_w.index[0])
+                top_share = float(by_w.iloc[0]) / area * 100
+        rows.append({
+            "Crop": crop,
+            "Declared Area (Ha)": area,
+            "Target Area (Ha)": target,
+            "Coverage (%)": coverage,
+            "Estimated Production (t)": est_prod,
+            "Wilayas Active": active,
+            "Top Wilaya": top_w,
+            "Top Wilaya Share (%)": top_share,
+        })
+    return pd.DataFrame(rows)
+
+
+def ai_detect_declaration_anomalies(df_live):
+    """Flag unusually large individual declarations using a robust IQR rule."""
+    if df_live is None or df_live.empty:
+        return pd.DataFrame()
+    work = df_live.copy()
+    work["area"] = pd.to_numeric(work.get("area"), errors="coerce")
+    work = work.dropna(subset=["area"]).copy()
+    if work.empty:
+        return pd.DataFrame()
+    q1 = float(work["area"].quantile(0.25))
+    q3 = float(work["area"].quantile(0.75))
+    iqr = q3 - q1
+    if iqr <= 0:
+        threshold = max(q3 * 3, 1.0)
+    else:
+        threshold = q3 + 1.5 * iqr
+    out = work[work["area"] > threshold].copy()
+    out["Anomaly Threshold (Ha)"] = threshold
+    out = out.sort_values("area", ascending=False)
+    return out
+
+
+def ai_trend_analysis(df_live):
+    """Analyze declaration-area trends by crop when usable dates exist."""
+    if df_live is None or df_live.empty or "start_date" not in df_live.columns:
+        return pd.DataFrame()
+    work = df_live.copy()
+    work["area"] = pd.to_numeric(work.get("area"), errors="coerce").fillna(0.0)
+    work["start_date"] = pd.to_datetime(work["start_date"], errors="coerce")
+    work = work.dropna(subset=["start_date"]).copy()
+    if work.empty:
+        return pd.DataFrame()
+    work["Year"] = work["start_date"].dt.year.astype(int)
+    annual = work.groupby(["Year", "crop"], dropna=False)["area"].sum().reset_index()
+    results = []
+    for crop, g in annual.groupby("crop"):
+        g = g.sort_values("Year")
+        if len(g) < 2:
+            continue
+        first = float(g.iloc[0]["area"])
+        last = float(g.iloc[-1]["area"])
+        change = ((last - first) / first * 100) if first > 0 else None
+        results.append({
+            "Crop": str(crop),
+            "First Year": int(g.iloc[0]["Year"]),
+            "Last Year": int(g.iloc[-1]["Year"]),
+            "First Area (Ha)": first,
+            "Last Area (Ha)": last,
+            "Change (%)": change,
+        })
+    return pd.DataFrame(results)
+
+
+def ai_concentration_analysis(df_live):
+    if df_live is None or df_live.empty:
+        return pd.DataFrame()
+    work = df_live.copy()
+    work["area"] = pd.to_numeric(work.get("area"), errors="coerce").fillna(0.0)
+    work["crop"] = work.get("crop", pd.Series(dtype=str)).astype(str).str.strip()
+    work["wilaya"] = work.get("wilaya", pd.Series(dtype=str)).astype(str).str.strip()
+    rows = []
+    for crop, g in work.groupby("crop"):
+        total = float(g["area"].sum())
+        if total <= 0:
+            continue
+        by_w = g.groupby("wilaya")["area"].sum().sort_values(ascending=False)
+        top_share = float(by_w.iloc[0]) / total * 100 if len(by_w) else 0.0
+        rows.append({"Crop": crop, "Top Wilaya": str(by_w.index[0]) if len(by_w) else "—", "Top Wilaya Share (%)": top_share, "Active Wilayas": int(len(by_w))})
+    return pd.DataFrame(rows).sort_values("Top Wilaya Share (%)", ascending=False) if rows else pd.DataFrame()
+
+
+def ai_agent_answer(question, df_live, crop_summary, trend_df, concentration_df, anomaly_df):
+    """Small tool-using local agent: routes the question to deterministic analytics."""
+    q = (question or "").strip().lower()
+    if not q:
+        return "Ask me about crops, Wilayas, trends, concentration, anomalies, coverage, production estimates, or missing data."
+
+    if any(k in q for k in ["missing", "data quality", "بيانات ناق", "البيانات", "نقص"]):
+        n_records = 0 if df_live is None else len(df_live)
+        missing_area = int(pd.to_numeric(df_live["area"], errors="coerce").isna().sum()) if df_live is not None and not df_live.empty and "area" in df_live else 0
+        missing_w = int(df_live["wilaya"].isna().sum()) if df_live is not None and not df_live.empty and "wilaya" in df_live else 0
+        missing_crop = int(df_live["crop"].isna().sum()) if df_live is not None and not df_live.empty and "crop" in df_live else 0
+        return (f"📋 Data quality: {n_records:,} declaration records. Missing/invalid area: {missing_area:,}; "
+                f"missing Wilaya: {missing_w:,}; missing crop: {missing_crop:,}. "
+                "For real ML learning, historical production/yield and market-demand records are still the most important missing datasets.")
+
+    if any(k in q for k in ["concentr", "one wilaya", "most concentrated", "تركز", "متركز"]):
+        if concentration_df is None or concentration_df.empty:
+            return "I cannot measure crop concentration yet because there are no usable declaration records."
+        r = concentration_df.iloc[0]
+        return (f"🎯 Most concentrated crop: {r['Crop']}. Its largest declared Wilaya is {r['Top Wilaya']}, "
+                f"representing about {float(r['Top Wilaya Share (%)']):,.1f}% of declared area across {int(r['Active Wilayas'])} active Wilayas.")
+
+    if any(k in q for k in ["trend", "fastest", "grown", "growth", "تطور", "نمو", "أسرع"]):
+        if trend_df is None or trend_df.empty:
+            return "📈 I need declarations from at least two different years for a reliable growth/trend comparison."
+        valid = trend_df.dropna(subset=["Change (%)"]).sort_values("Change (%)", ascending=False)
+        if valid.empty:
+            return "No usable multi-year crop trend is available yet."
+        up = valid.iloc[0]
+        down = valid.iloc[-1]
+        return (f"📈 Fastest increase in the available history: {up['Crop']} ({float(up['Change (%)']):+,.1f}%). "
+                f"Largest decrease: {down['Crop']} ({float(down['Change (%)']):+,.1f}%). "
+                "This is a declaration-area trend, not a production trend.")
+
+    if any(k in q for k in ["anomal", "outlier", "unusual", "غير عادي", "شاذ"]):
+        if anomaly_df is None or anomaly_df.empty:
+            return "🔎 No unusually large declaration was detected by the current IQR rule."
+        r = anomaly_df.iloc[0]
+        return (f"🔎 Largest flagged declaration: {r.get('crop', 'Unknown')} in {r.get('wilaya', 'Unknown')}, "
+                f"{float(r['area']):,.1f} ha. The IQR-based threshold is about {float(r['Anomaly Threshold (Ha)']):,.1f} ha. "
+                "This is a review flag, not proof of an error or fraud.")
+
+    # Crop-specific question: search exact crop label first.
+    if crop_summary is not None and not crop_summary.empty:
+        for crop in crop_summary["Crop"].astype(str):
+            if crop.lower() in q:
+                r = crop_summary[crop_summary["Crop"] == crop].iloc[0]
+                return (f"🌱 {crop}: {float(r['Declared Area (Ha)']):,.1f} ha declared vs "
+                        f"{float(r['Target Area (Ha)']):,.1f} ha planning target ({float(r['Coverage (%)']):,.1f}% coverage). "
+                        f"Estimated production: {float(r['Estimated Production (t)']):,.1f} t. "
+                        f"Active Wilayas: {int(r['Wilayas Active'])}; most represented: {r['Top Wilaya']} ({float(r['Top Wilaya Share (%)']):,.1f}%).")
+
+    if any(k in q for k in ["under", "over", "target", "coverage", "نقص", "فائض", "هدف"]):
+        if crop_summary is None or crop_summary.empty:
+            return "No crop declarations are available for coverage analysis."
+        low = crop_summary.sort_values("Coverage (%)").iloc[0]
+        high = crop_summary.sort_values("Coverage (%)", ascending=False).iloc[0]
+        return (f"🧭 Lowest coverage: {low['Crop']} at {float(low['Coverage (%)']):,.1f}% of its planning area target. "
+                f"Highest coverage: {high['Crop']} at {float(high['Coverage (%)']):,.1f}%. "
+                "Coverage is based on declared area, not confirmed harvest production.")
+
+    return ("🤖 I can currently analyze: (1) crop coverage, (2) Wilaya concentration, (3) multi-year declaration trends, "
+            "(4) unusual declarations, and (5) data quality. Ask a direct question such as 'Which crop is most concentrated?' "
+            "or 'What data is missing for real AI forecasting?'")
+
+
 SUPPORT_SECTORS = {
     "Geomembrane Basin (أحواض الجيوممبران)": [
         "Farmer Card (بطاقة الفلاح)",
@@ -2380,11 +2579,12 @@ elif st.session_state.active_tab == "account":
     else:
         st.success("🔓 Authenticated as System Administrator")
 
-        adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5 = st.tabs([
+        adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5, adm_tab6 = st.tabs([
             "📰 Post News",
             "🚨 Weather Alerts",
             "📨 Send Farmer Notifications",
             "📍 Add Map Location",
+            "🤖 AI Agricultural Analyst",
             "🗃️ Manage Database",
         ])
 
@@ -2497,7 +2697,156 @@ elif st.session_state.active_tab == "account":
                 except Exception as e:
                     st.error(f"Failed to insert map point: {e}")
 
+
+
         with adm_tab5:
+            st.markdown("#### 🤖 AI Agricultural Analyst")
+            st.caption(
+                "Local tool-using agricultural AI v1. It analyzes the live Supabase declarations with deterministic statistics, "
+                "then explains the results. It does not invent production numbers. ML forecasting/retraining becomes active "
+                "once historical production, yield, weather and market data accumulate."
+            )
+
+            # Reuse the same live declaration source as the Agricultural Intelligence board.
+            try:
+                ai_res = (
+                    supabase_client.table("declarations")
+                    .select("crop, category, area, wilaya, start_date")
+                    .execute()
+                )
+                ai_records = ai_res.data if ai_res.data else []
+                ai_df = pd.DataFrame(ai_records)
+                if ai_df.empty:
+                    ai_df = pd.DataFrame(columns=["crop", "category", "area", "wilaya", "start_date"])
+                else:
+                    ai_df["area"] = pd.to_numeric(ai_df["area"], errors="coerce")
+                    ai_df["crop"] = ai_df["crop"].astype(str).str.strip()
+                    ai_df["wilaya"] = ai_df["wilaya"].astype(str).str.strip()
+
+                # Build targets independently so this tab remains usable even if the
+                # internal intelligence tabs are changed later.
+                ai_targets = {str(k): _ai_float(v) for k, v in VEGETABLE_LIMITS.items()}
+                ai_targets.update({str(k): _ai_float(v) * 1000.0 for k, v in FRUIT_TARGETS_KHA.items()})
+
+                ai_benchmark_rows = []
+                try:
+                    ai_yields = (
+                        supabase_client.table("crop_yield_benchmarks")
+                        .select("crop, wilaya, yield_t_ha")
+                        .execute()
+                    )
+                    ai_benchmark_rows = ai_yields.data if ai_yields.data else []
+                except Exception:
+                    ai_benchmark_rows = []
+
+                ai_benchmark_map = {}
+                ai_national = {}
+                for row in ai_benchmark_rows:
+                    crop = str(row.get("crop", "")).strip()
+                    w = row.get("wilaya")
+                    y = _ai_float(row.get("yield_t_ha"), 0)
+                    if not crop or y <= 0:
+                        continue
+                    if w and str(w).strip() not in {"National", "National / وطني"}:
+                        ai_benchmark_map[(crop, str(w).strip())] = y
+                    else:
+                        ai_national[crop] = y
+                for crop, base_yield in BUILTIN_YIELD_BENCHMARKS.items():
+                    ai_national.setdefault(crop, base_yield)
+                    for w in WILAYAS_48:
+                        ai_benchmark_map.setdefault((crop, w), get_builtin_wilaya_yield(crop, w))
+
+                ai_crop_summary = ai_build_crop_summary(ai_df, ai_targets, ai_benchmark_map, ai_national)
+                ai_trends = ai_trend_analysis(ai_df)
+                ai_concentration = ai_concentration_analysis(ai_df)
+                ai_anomalies = ai_detect_declaration_anomalies(ai_df)
+
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric("📋 Declarations", f"{len(ai_df):,}")
+                with m2:
+                    st.metric("🌱 Active Crops", f"{int((ai_crop_summary['Declared Area (Ha)'] > 0).sum()) if not ai_crop_summary.empty else 0}")
+                with m3:
+                    st.metric("🗺️ Active Wilayas", f"{ai_df['wilaya'].nunique() if not ai_df.empty else 0}")
+                with m4:
+                    st.metric("🔎 Review Flags", f"{len(ai_anomalies):,}")
+
+                ai_tab1, ai_tab2, ai_tab3 = st.tabs([
+                    "🧠 Ask the Agent",
+                    "📈 Automatic Analysis",
+                    "🧪 Learning Readiness",
+                ])
+
+                with ai_tab1:
+                    st.markdown("##### Ask the agricultural agent")
+                    st.write("Examples: *Which crop is most concentrated?* · *What crop has the lowest coverage?* · *What data is missing for real forecasting?*")
+                    ai_question = st.text_input(
+                        "Question / السؤال",
+                        placeholder="Which crop is most concentrated in one Wilaya?",
+                        key="ai_agri_question",
+                    )
+                    if st.button("🤖 Analyze", key="ai_agri_analyze"):
+                        answer = ai_agent_answer(
+                            ai_question, ai_df, ai_crop_summary, ai_trends, ai_concentration, ai_anomalies
+                        )
+                        st.markdown("##### Agent finding")
+                        st.info(answer)
+
+                with ai_tab2:
+                    st.markdown("##### Automatic findings")
+                    if ai_crop_summary.empty:
+                        st.info("No declarations are available yet. The agent will start analyzing as farmer data arrives.")
+                    else:
+                        low = ai_crop_summary.sort_values("Coverage (%)").iloc[0]
+                        high = ai_crop_summary.sort_values("Coverage (%)", ascending=False).iloc[0]
+                        conc = ai_concentration.iloc[0] if not ai_concentration.empty else None
+                        st.write(f"🟡 **Lowest declared-area coverage:** {low['Crop']} — {float(low['Coverage (%)']):,.1f}% of target.")
+                        st.write(f"🔵 **Highest declared-area coverage:** {high['Crop']} — {float(high['Coverage (%)']):,.1f}% of target.")
+                        if conc is not None:
+                            st.write(f"🎯 **Highest geographic concentration:** {conc['Crop']} — {conc['Top Wilaya']} holds about {float(conc['Top Wilaya Share (%)']):,.1f}% of declared area.")
+                        if not ai_anomalies.empty:
+                            r = ai_anomalies.iloc[0]
+                            st.write(f"🔎 **Largest review flag:** {r.get('crop', 'Unknown')} / {r.get('wilaya', 'Unknown')} — {float(r['area']):,.1f} ha.")
+                        else:
+                            st.write("🔎 **Anomaly scan:** no unusually large declaration was flagged by the current IQR rule.")
+
+                        st.markdown("##### Crop analytical table")
+                        display_ai = ai_crop_summary.copy()
+                        for c in ["Declared Area (Ha)", "Target Area (Ha)", "Estimated Production (t)"]:
+                            display_ai[c] = display_ai[c].map(lambda x: f"{float(x):,.1f}")
+                        display_ai["Coverage (%)"] = display_ai["Coverage (%)"].map(lambda x: f"{float(x):,.1f}%")
+                        display_ai["Top Wilaya Share (%)"] = display_ai["Top Wilaya Share (%)"].map(lambda x: f"{float(x):,.1f}%")
+                        st.dataframe(display_ai, use_container_width=True, hide_index=True)
+
+                        if not ai_trends.empty:
+                            st.markdown("##### Historical declaration trends")
+                            trend_display = ai_trends.copy()
+                            trend_display["Change (%)"] = trend_display["Change (%)"].map(lambda x: "—" if pd.isna(x) else f"{float(x):+,.1f}%")
+                            st.dataframe(trend_display, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Trend learning is waiting for declarations from at least two different years.")
+
+                with ai_tab3:
+                    st.markdown("##### What the agent can learn from next")
+                    st.write("The current agent learns its analytical baseline from the accumulated declaration database on every run. For genuine predictive learning, it needs historical labeled outcomes.")
+                    readiness = pd.DataFrame([
+                        {"Data stream": "Farmer declarations", "Current role": "Live analysis", "Learning status": "✅ Available"},
+                        {"Data stream": "Yield / production history", "Current role": "Train yield models", "Learning status": "🟡 Needed for ML forecasting"},
+                        {"Data stream": "Weather by Wilaya", "Current role": "Explain yield variation", "Learning status": "🟡 Needed"},
+                        {"Data stream": "Market prices / demand", "Current role": "Demand & price forecasting", "Learning status": "🟡 Needed"},
+                        {"Data stream": "Official ONS/MADR data", "Current role": "Ground truth / validation", "Learning status": "🟡 Add historical series"},
+                        {"Data stream": "Logistics / transport", "Current role": "Distribution optimization", "Learning status": "✅ Optimization engine active"},
+                    ])
+                    st.dataframe(readiness, use_container_width=True, hide_index=True)
+                    st.info(
+                        "🧠 Architecture: Supabase data → analytical tools → ML models when enough historical labels exist → AI agent explanation → optimization. "
+                        "The LLM layer can be connected later so it can call these tools and explain results in natural language without inventing numeric facts."
+                    )
+
+            except Exception as e:
+                st.error(f"Unable to run the agricultural AI analyst: {e}")
+
+        with adm_tab6:
             st.markdown("#### 📊 Agricultural Intelligence & Database Management")
             st.caption(
                 "Live planning dashboard based on farmer crop declarations. "
