@@ -761,90 +761,100 @@ st.markdown(
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }}
 
-    /* Collapsed sidebar opener: always show the same clear MENU / القائمة label. */
+    /* Collapsed sidebar opener: large, obvious dark-orange MENU button. */
     [data-testid="stSidebarCollapsedControl"] {{
-        width: 210px !important;
-        min-width: 210px !important;
-        max-width: 210px !important;
-        padding: 8px !important;
+        width: 214px !important;
+        min-width: 214px !important;
+        max-width: 214px !important;
+        height: 58px !important;
+        min-height: 58px !important;
+        padding: 6px !important;
         z-index: 1000 !important;
         overflow: visible !important;
     }}
 
-    /* Keep the opener large and make its purpose obvious even while the sidebar is closed. */
     [data-testid="stSidebarCollapsedControl"] button,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
-        min-width: 194px !important;
-        width: 194px !important;
-        max-width: 194px !important;
-        min-height: 50px !important;
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"],
+    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] {{
+        width: 202px !important;
+        min-width: 202px !important;
+        max-width: 202px !important;
         height: 50px !important;
+        min-height: 50px !important;
         padding: 8px 14px !important;
-        border: 1px solid {border_color} !important;
+        margin: 0 !important;
+        border: 1px solid #b45309 !important;
         border-radius: 13px !important;
-        background: {card_bg} !important;
-        color: {text_color} !important;
-        box-shadow: 0 2px 9px rgba(0,0,0,0.12) !important;
-        display: inline-flex !important;
+        background: #c96a18 !important;
+        color: #ffffff !important;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.18) !important;
+        display: flex !important;
         align-items: center !important;
         justify-content: flex-start !important;
         gap: 9px !important;
         white-space: nowrap !important;
         overflow: visible !important;
+        font-size: 0 !important;
     }}
 
-    [data-testid="stSidebarCollapsedControl"] button:hover {{
-        border-color: {accent_color} !important;
-        background: {card_bg} !important;
+    [data-testid="stSidebarCollapsedControl"] button:hover,
+    [data-testid="stSidebarCollapsedControl"] button:focus,
+    [data-testid="stSidebarCollapsedControl"] button:active {{
+        background: #b85d12 !important;
+        border-color: #92400e !important;
+        color: #ffffff !important;
     }}
 
-    /* Always-visible label: this is the opener for the whole MENU / login / settings sidebar. */
-    [data-testid="stSidebarCollapsedControl"] button::after,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
+    /* Hide Streamlit's tiny chevron and replace it with a clear opener label. */
+    [data-testid="stSidebarCollapsedControl"] button svg,
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] svg,
+    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] svg {{
+        display: none !important;
+    }}
+
+    [data-testid="stSidebarCollapsedControl"] button::before,
+    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::before,
+    [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"]::before {{
         content: "⚙️ MENU / القائمة" !important;
-        display: inline-block !important;
-        font-size: 0.88rem !important;
+        display: block !important;
+        width: 100% !important;
+        color: #ffffff !important;
+        font-size: 1rem !important;
         font-weight: 800 !important;
         line-height: 1 !important;
-        letter-spacing: 0 !important;
-        color: {text_color} !important;
+        text-align: center !important;
         white-space: nowrap !important;
         visibility: visible !important;
         opacity: 1 !important;
     }}
 
-    [data-testid="stSidebarCollapsedControl"] button svg,
-    [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] svg {{
-        width: 1.25rem !important;
-        height: 1.25rem !important;
-        min-width: 1.25rem !important;
-        flex: 0 0 auto !important;
-    }}
-
-    /* Keep the exact same clear label on small screens; only reduce the button dimensions slightly. */
+    /* Keep the large opener on phones; slightly reduce width only to fit narrow screens. */
     @media (max-width: 640px) {{
         [data-testid="stSidebarCollapsedControl"] {{
-            width: 184px !important;
-            min-width: 184px !important;
-            max-width: 184px !important;
-            padding: 7px !important;
+            width: 178px !important;
+            min-width: 178px !important;
+            max-width: 178px !important;
+            height: 54px !important;
+            min-height: 54px !important;
+            padding: 5px !important;
         }}
 
         [data-testid="stSidebarCollapsedControl"] button,
-        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"] {{
-            min-width: 168px !important;
+        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"],
+        [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"] {{
             width: 168px !important;
+            min-width: 168px !important;
             max-width: 168px !important;
-            min-height: 48px !important;
-            height: 48px !important;
-            padding: 7px 10px !important;
-            gap: 7px !important;
+            height: 46px !important;
+            min-height: 46px !important;
+            padding: 7px 8px !important;
         }}
 
-        [data-testid="stSidebarCollapsedControl"] button::after,
-        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::after {{
+        [data-testid="stSidebarCollapsedControl"] button::before,
+        [data-testid="stSidebarCollapsedControl"] button[data-testid="stBaseButton-headerNoPadding"]::before,
+        [data-testid="stSidebarCollapsedControl"] button[aria-label*="Expand"]::before {{
             content: "⚙️ MENU / القائمة" !important;
-            font-size: 0.72rem !important;
+            font-size: 0.78rem !important;
         }}
     }}
 
