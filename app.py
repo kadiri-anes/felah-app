@@ -257,9 +257,50 @@ CROP_WILAYA_GROUP_FACTORS = {
     },
 }
 
+def get_builtin_base_yield(crop_name):
+    """Return a built-in yield while accepting the app's two crop-name formats.
+
+    The declaration lists historically used both ``Crop (Arabic)`` and
+    ``Crop / Arabic``. Benchmark lookup must treat them as the same crop so
+    the analytical board never loses a yield just because of punctuation.
+    """
+    name = str(crop_name or "").strip()
+    base = BUILTIN_YIELD_BENCHMARKS.get(name)
+    if base is not None:
+        return float(base)
+
+    # Convert: Potatoes (بطاطا) <-> Potatoes / بطاطا
+    if "(" in name and name.endswith(")"):
+        left, arabic = name.rsplit("(", 1)
+        alias = f"{left.strip()} / {arabic[:-1].strip()}"
+        base = BUILTIN_YIELD_BENCHMARKS.get(alias)
+    elif " / " in name:
+        left, arabic = name.split(" / ", 1)
+        alias = f"{left.strip()} ({arabic.strip()})"
+        base = BUILTIN_YIELD_BENCHMARKS.get(alias)
+
+    return float(base) if base is not None else None
+
+
+def is_builtin_official_crop(crop_name):
+    """True when the crop corresponds to one of the historical ONS base benchmarks."""
+    name = str(crop_name or "").strip()
+    if name in BUILTIN_OFFICIAL_BENCHMARKS:
+        return True
+    if "(" in name and name.endswith(")"):
+        left, arabic = name.rsplit("(", 1)
+        alias = f"{left.strip()} / {arabic[:-1].strip()}"
+        return alias in BUILTIN_OFFICIAL_BENCHMARKS
+    if " / " in name:
+        left, arabic = name.split(" / ", 1)
+        alias = f"{left.strip()} ({arabic.strip()})"
+        return alias in BUILTIN_OFFICIAL_BENCHMARKS
+    return False
+
+
 def get_builtin_wilaya_yield(crop_name, wilaya_name):
     """Return a transparent fallback t/ha estimate for any crop + Wilaya."""
-    base = BUILTIN_YIELD_BENCHMARKS.get(crop_name)
+    base = get_builtin_base_yield(crop_name)
     if base is None:
         return None
     factor = WILAYA_YIELD_ZONE_FACTORS.get(str(wilaya_name).strip(), 0.85)
@@ -2752,9 +2793,14 @@ elif st.session_state.active_tab == "account":
                     else:
                         ai_national[crop] = y
                 for crop, base_yield in BUILTIN_YIELD_BENCHMARKS.items():
-                    ai_national.setdefault(crop, base_yield)
-                    for w in WILAYAS_48:
-                        ai_benchmark_map.setdefault((crop, w), get_builtin_wilaya_yield(crop, w))
+                    crop_aliases = {crop}
+                    if " / " in crop:
+                        left, arabic = crop.split(" / ", 1)
+                        crop_aliases.add(f"{left.strip()} ({arabic.strip()})")
+                    for crop_alias in crop_aliases:
+                        ai_national.setdefault(crop_alias, base_yield)
+                        for w in WILAYAS_48:
+                            ai_benchmark_map.setdefault((crop_alias, w), get_builtin_wilaya_yield(crop_alias, w))
 
                 ai_crop_summary = ai_build_crop_summary(ai_df, ai_targets, ai_benchmark_map, ai_national)
                 ai_trends = ai_trend_analysis(ai_df)
@@ -3096,14 +3142,22 @@ elif st.session_state.active_tab == "account":
                     # Built-in fallback benchmarks keep the analyzer usable while official MADR/technical
                     # institute figures are being collected. Supabase values always override these defaults.
                     for crop_name, fallback_yield in BUILTIN_YIELD_BENCHMARKS.items():
-                        national_benchmarks.setdefault(crop_name, fallback_yield)
-                        # Create a fallback for every crop × Wilaya pair.
-                        # Explicit Supabase Wilaya values remain higher priority.
-                        for w in WILAYAS_48:
-                            benchmark_map.setdefault(
-                                (crop_name, w),
-                                get_builtin_wilaya_yield(crop_name, w)
-                            )
+                        # Store both historical naming styles so declarations such as
+                        # ``Potatoes (بطاطا)`` still resolve the benchmark stored as
+                        # ``Potatoes / بطاطا`` (and vice versa).
+                        crop_aliases = {crop_name}
+                        if " / " in crop_name:
+                            left, arabic = crop_name.split(" / ", 1)
+                            crop_aliases.add(f"{left.strip()} ({arabic.strip()})")
+                        for crop_alias in crop_aliases:
+                            national_benchmarks.setdefault(crop_alias, fallback_yield)
+                            # Create a fallback for every crop × Wilaya pair.
+                            # Explicit Supabase Wilaya values remain higher priority.
+                            for w in WILAYAS_48:
+                                benchmark_map.setdefault(
+                                    (crop_alias, w),
+                                    get_builtin_wilaya_yield(crop_alias, w)
+                                )
 
                     if not benchmark_table_ready:
                         st.warning(
@@ -3127,8 +3181,8 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             )
                     elif not benchmark_rows:
                         st.info(
-                            "The benchmark table exists but has no yield data yet. Add one benchmark for each crop "
-                            "and, when available, a specific benchmark for each Wilaya."
+                            "No Supabase benchmark rows yet. Built-in planning benchmarks are active for all crops and all 48 Wilayas; "
+                            "you can later add official values in Supabase and they will override these estimates."
                         )
 
                     available_production_crops = list(all_crop_targets.keys()) if not df_live.empty else []
@@ -3169,7 +3223,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                                     if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
                                     else (
                                         "Official historical ONS benchmark (national base)"
-                                        if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
+                                        if is_builtin_official_crop(selected_prod_crop)
                                         else "Planning estimate (Wilaya fallback)"
                                     )
                                 )
@@ -3177,6 +3231,8 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
 
                         national_yield = national_benchmarks.get(selected_prod_crop)
+                        if national_yield is None:
+                            national_yield = get_builtin_base_yield(selected_prod_crop)
                         if national_yield:
                             national_declared_prod = float(wilaya_prod["Declared Area (Ha)"].sum()) * national_yield
                             national_target_prod = float(all_crop_targets[selected_prod_crop]) * national_yield
@@ -3202,8 +3258,19 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             wilaya_prod, on="wilaya", how="left"
                         )
                         full_wilaya_prod["Declared Area (Ha)"] = full_wilaya_prod["Declared Area (Ha)"].fillna(0.0)
-                        full_wilaya_prod["Yield (t/Ha)"] = full_wilaya_prod["Yield (t/Ha)"].fillna(
-                            national_benchmarks.get(selected_prod_crop, float("nan"))
+                        full_wilaya_prod["Yield (t/Ha)"] = full_wilaya_prod.apply(
+                            lambda row: (
+                                row["Yield (t/Ha)"]
+                                if pd.notna(row["Yield (t/Ha)"])
+                                else benchmark_map.get(
+                                    (selected_prod_crop, str(row["wilaya"]).strip()),
+                                    national_benchmarks.get(
+                                        selected_prod_crop,
+                                        get_builtin_base_yield(selected_prod_crop)
+                                    )
+                                )
+                            ),
+                            axis=1,
                         )
                         full_wilaya_prod["Estimated Production (t)"] = full_wilaya_prod["Estimated Production (t)"].fillna(0.0)
                         full_wilaya_prod["Benchmark Source"] = full_wilaya_prod["Benchmark Source"].fillna(
@@ -3460,7 +3527,7 @@ on public.wilaya_logistics_constraints (wilaya);
 
                             # Fall back to the same built-in benchmark policy used by Production & Balance.
                             if opt_national_yield is None:
-                                opt_national_yield = BUILTIN_YIELD_BENCHMARKS.get(selected_opt_crop)
+                                opt_national_yield = get_builtin_base_yield(selected_opt_crop)
 
                             crop_targets = target_df[target_df["crop"] == selected_opt_crop].copy().set_index("wilaya")
                             opt_rows = []
