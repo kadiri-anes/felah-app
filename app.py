@@ -2447,12 +2447,22 @@ elif st.session_state.active_tab == "account":
                 # Planning targets used by the declaration system.
                 # Fruits are shown as reference planning areas; they are not
                 # treated as legal quotas by the declaration form.
+                # Normalize all planning targets to real numeric values.
+                # Supabase/Streamlit can sometimes return numeric-looking values
+                # as strings; never allow those strings into arithmetic below.
+                def _safe_number(value, default=0.0):
+                    try:
+                        if value is None or (isinstance(value, str) and not value.strip()):
+                            return float(default)
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return float(default)
+
                 all_crop_targets = {}
-                all_crop_targets.update(VEGETABLE_LIMITS)
-                all_crop_targets.update({
-                    crop: float(area_kha * 1000)
-                    for crop, area_kha in FRUIT_TARGETS_KHA.items()
-                })
+                for crop, target_area in VEGETABLE_LIMITS.items():
+                    all_crop_targets[str(crop)] = _safe_number(target_area)
+                for crop, area_kha in FRUIT_TARGETS_KHA.items():
+                    all_crop_targets[str(crop)] = _safe_number(area_kha) * 1000.0
 
                 national_rows = []
                 for crop, target_area in all_crop_targets.items():
