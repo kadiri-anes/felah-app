@@ -1,3 +1,4 @@
+import math
 import random
 import re
 from datetime import date
@@ -363,6 +364,143 @@ except Exception:
 # ---------------------------------------------------------
 # HELPER & UTILITY FUNCTIONS
 # ---------------------------------------------------------
+def haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two coordinates in kilometers."""
+    r = 6371.0
+    p1 = math.radians(float(lat1))
+    p2 = math.radians(float(lat2))
+    dp = math.radians(float(lat2) - float(lat1))
+    dl = math.radians(float(lon2) - float(lon1))
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(min(1.0, a)))
+
+
+def min_cost_transfer_plan(surplus_rows, deficit_rows, distance_map, cost_per_t_km, road_factor=1.25):
+    """
+    Solve the surplus -> deficit transportation problem with a pure-Python
+    successive-shortest-path min-cost-flow algorithm.
+    Returns transfer rows and total transport cost.
+    """
+    if not surplus_rows or not deficit_rows:
+        return [], 0.0
+
+    # Node layout: source -> surplus -> deficit -> sink.
+    source = 0
+    surplus_start = 1
+    deficit_start = surplus_start + len(surplus_rows)
+    sink = deficit_start + len(deficit_rows)
+    n = sink + 1
+    graph = [[] for _ in range(n)]
+
+    def add_edge(u, v, capacity, cost, meta=None):
+        graph[u].append({"to": v, "rev": len(graph[v]), "cap": float(capacity), "cost": float(cost), "meta": meta})
+        graph[v].append({"to": u, "rev": len(graph[u]) - 1, "cap": 0.0, "cost": -float(cost), "meta": None})
+
+    for i, row in enumerate(surplus_rows):
+        add_edge(source, surplus_start + i, row["amount"], 0.0)
+
+    for j, row in enumerate(deficit_rows):
+        add_edge(deficit_start + j, sink, row["amount"], 0.0)
+
+    for i, srow in enumerate(surplus_rows):
+        for j, drow in enumerate(deficit_rows):
+            key = (srow["wilaya"], drow["wilaya"])
+            distance = distance_map.get(key)
+            if distance is None or distance <= 0:
+                continue
+            unit_cost = float(distance) * float(road_factor) * float(cost_per_t_km)
+            add_edge(
+                surplus_start + i,
+                deficit_start + j,
+                min(srow["amount"], drow["amount"]),
+                unit_cost,
+                meta={
+                    "from": srow["wilaya"],
+                    "to": drow["wilaya"],
+                    "distance_km": float(distance),
+                    "road_distance_km": float(distance) * float(road_factor),
+                },
+            )
+
+    transfers = []
+    total_cost = 0.0
+    eps = 1e-8
+
+    while True:
+        # Bellman-Ford on the residual graph. The graph is small (48 Wilayas),
+        # and this also handles negative reverse-edge costs safely.
+        dist = [float("inf")] * n
+        prev = [None] * n
+        dist[source] = 0.0
+        for _ in range(n - 1):
+            changed = False
+            for u in range(n):
+                if not math.isfinite(dist[u]):
+                    continue
+                for ei, edge in enumerate(graph[u]):
+                    if edge["cap"] <= eps:
+                        continue
+                    nd = dist[u] + edge["cost"]
+                    if nd < dist[edge["to"]] - 1e-10:
+                        dist[edge["to"]] = nd
+                        prev[edge["to"]] = (u, ei)
+                        changed = True
+            if not changed:
+                break
+
+        if prev[sink] is None:
+            break
+
+        path_cap = float("inf")
+        node = sink
+        while node != source:
+            u, ei = prev[node]
+            path_cap = min(path_cap, graph[u][ei]["cap"])
+            node = u
+
+        if path_cap <= eps:
+            break
+
+        node = sink
+        path_edges = []
+        while node != source:
+            u, ei = prev[node]
+            edge = graph[u][ei]
+            path_edges.append((u, ei, edge))
+            node = u
+        path_edges.reverse()
+
+        for u, ei, edge in path_edges:
+            reverse_index = edge["rev"]
+            edge["cap"] -= path_cap
+            graph[edge["to"]][reverse_index]["cap"] += path_cap
+            if edge.get("meta"):
+                meta = edge["meta"]
+                transfers.append({
+                    "From Wilaya": meta["from"],
+                    "To Wilaya": meta["to"],
+                    "Transfer (t)": path_cap,
+                    "Straight-line Distance (km)": meta["distance_km"],
+                    "Estimated Road Distance (km)": meta["road_distance_km"],
+                    "Transport Cost (DZD)": path_cap * meta["road_distance_km"] * float(cost_per_t_km),
+                })
+                total_cost += path_cap * meta["road_distance_km"] * float(cost_per_t_km)
+
+    # Residual-path augmentation can touch the same route more than once.
+    if transfers:
+        transfer_df = pd.DataFrame(transfers)
+        transfer_df = (
+            transfer_df.groupby(
+                ["From Wilaya", "To Wilaya", "Straight-line Distance (km)", "Estimated Road Distance (km)"],
+                as_index=False,
+            )[["Transfer (t)", "Transport Cost (DZD)"]]
+            .sum()
+        )
+        transfers = transfer_df.to_dict("records")
+
+    return transfers, total_cost
+
+
 def sanitize(text: str) -> str:
     if not text:
         return ""
@@ -2601,12 +2739,11 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
 
                 with optimization_tab:
-                    st.markdown("##### 🔄 Wilaya Surplus / Deficit Optimization")
+                    st.markdown("##### 🔄 Wilaya Logistics Optimization")
                     st.caption(
-                        "This phase compares estimated production with a target for each individual Wilaya and "
-                        "calculates how much surplus could cover another Wilaya's deficit. No Wilayas are merged. "
-                        "The first optimizer is transparent and production-based; transport distance/cost will be "
-                        "added as a separate logistics layer later."
+                        "This phase adds transport distance and cost to the surplus/deficit model. "
+                        "The quantities are still based on estimated production, while the transport plan is solved "
+                        "mathematically to minimize estimated transport cost."
                     )
 
                     target_table_ready = True
@@ -2621,11 +2758,23 @@ on public.crop_yield_benchmarks (crop, wilaya);
                     except Exception:
                         target_table_ready = False
 
+                    location_table_ready = True
+                    location_rows = []
+                    try:
+                        res_locations = (
+                            supabase_client.table("wilaya_locations")
+                            .select("wilaya, latitude, longitude")
+                            .execute()
+                        )
+                        location_rows = res_locations.data if res_locations.data else []
+                    except Exception:
+                        location_table_ready = False
+
                     if not target_table_ready:
                         st.warning(
-                            "⚙️ Supabase update required for Wilaya optimization: create `wilaya_crop_targets`."
+                            "⚙️ Supabase update required: `wilaya_crop_targets` is needed for Wilaya production targets."
                         )
-                        with st.expander("SQL to add the required Wilaya target table"):
+                        with st.expander("SQL — Wilaya production targets"):
                             st.code(
                                 """create table if not exists public.wilaya_crop_targets (
   id bigint generated by default as identity primary key,
@@ -2642,23 +2791,56 @@ on public.wilaya_crop_targets (crop, wilaya);
 """,
                                 language="sql",
                             )
-                    elif not target_rows:
-                        st.info(
-                            "The target table exists but has no Wilaya targets yet. Add one target row for each "
-                            "crop × Wilaya combination you want the optimizer to evaluate."
-                        )
 
-                    if target_rows and not df_live.empty:
+                    if not location_table_ready:
+                        st.warning(
+                            "⚙️ Supabase update required for logistics: create `wilaya_locations` and add the coordinates "
+                            "of the 48 Wilaya capitals. Coordinates are used only to estimate distance; they are not road distances."
+                        )
+                        with st.expander("SQL — Wilaya coordinates"):
+                            st.code(
+                                """create table if not exists public.wilaya_locations (
+  id bigint generated by default as identity primary key,
+  wilaya text not null unique,
+  latitude numeric not null check (latitude between -90 and 90),
+  longitude numeric not null check (longitude between -180 and 180),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_wilaya_locations_wilaya
+on public.wilaya_locations (wilaya);
+
+-- Add one row for every Wilaya using the exact names already used by the app,
+-- for example:
+-- insert into public.wilaya_locations (wilaya, latitude, longitude)
+-- values ('16 - Alger', 36.7538, 3.0588);
+""",
+                                language="sql",
+                            )
+
+                    if target_rows and location_rows and not df_live.empty:
                         target_df = pd.DataFrame(target_rows)
                         target_df["target_production_t"] = pd.to_numeric(
                             target_df["target_production_t"], errors="coerce"
                         )
-                        target_df["target_area_ha"] = pd.to_numeric(
-                            target_df.get("target_area_ha", pd.Series(dtype=float)), errors="coerce"
-                        )
                         target_df = target_df[
                             target_df["crop"].notna() & target_df["wilaya"].notna()
                         ].copy()
+
+                        location_df = pd.DataFrame(location_rows)
+                        location_df["latitude"] = pd.to_numeric(location_df["latitude"], errors="coerce")
+                        location_df["longitude"] = pd.to_numeric(location_df["longitude"], errors="coerce")
+                        location_df = location_df.dropna(subset=["latitude", "longitude"]).copy()
+                        location_df["wilaya"] = location_df["wilaya"].astype(str).str.strip()
+                        location_df = location_df.drop_duplicates("wilaya", keep="last")
+                        coords = location_df.set_index("wilaya")[["latitude", "longitude"]].to_dict("index")
+
+                        missing_coords = [w for w in WILAYAS_48 if w not in coords]
+                        if missing_coords:
+                            st.warning(
+                                f"Coordinates are missing for {len(missing_coords)} Wilaya(s). "
+                                "The optimizer will only create routes between Wilayas with known coordinates."
+                            )
 
                         optimization_crops = sorted(set(target_df["crop"]) & set(df_live["crop"].dropna()))
 
@@ -2669,7 +2851,24 @@ on public.wilaya_crop_targets (crop, wilaya);
                                 key="admin_optimization_crop",
                             )
 
-                            # Estimated production from the same benchmark system used above.
+                            cost_per_t_km = st.number_input(
+                                "Estimated transport cost (DZD / tonne / km)",
+                                min_value=0.1,
+                                max_value=1000.0,
+                                value=8.0,
+                                step=0.5,
+                                key="admin_transport_cost",
+                            )
+                            road_factor = st.number_input(
+                                "Road-distance factor × straight-line distance",
+                                min_value=1.0,
+                                max_value=2.0,
+                                value=1.25,
+                                step=0.05,
+                                key="admin_road_factor",
+                                help="1.25 means estimated road distance = straight-line distance × 1.25. Replace with real route distances when available.",
+                            )
+
                             opt_declared = (
                                 df_live[df_live["crop"] == selected_opt_crop]
                                 .groupby("wilaya")["area"]
@@ -2679,44 +2878,34 @@ on public.wilaya_crop_targets (crop, wilaya);
 
                             opt_benchmark_map = {}
                             opt_national_yield = None
-                            try:
-                                for row in benchmark_rows:
-                                    if str(row.get("crop", "")).strip() != selected_opt_crop:
-                                        continue
-                                    try:
-                                        yld = float(row.get("yield_t_ha"))
-                                    except (TypeError, ValueError):
-                                        continue
-                                    w = row.get("wilaya")
-                                    if w and str(w).strip() not in {"National", "National / وطني"}:
-                                        opt_benchmark_map[str(w).strip()] = yld
-                                    elif yld > 0:
-                                        opt_national_yield = yld
-                            except Exception:
-                                pass
+                            for row in benchmark_rows:
+                                if str(row.get("crop", "")).strip() != selected_opt_crop:
+                                    continue
+                                try:
+                                    yld = float(row.get("yield_t_ha"))
+                                except (TypeError, ValueError):
+                                    continue
+                                if yld <= 0:
+                                    continue
+                                w = row.get("wilaya")
+                                if w and str(w).strip() not in {"National", "National / وطني"}:
+                                    opt_benchmark_map[str(w).strip()] = yld
+                                else:
+                                    opt_national_yield = yld
 
+                            crop_targets = target_df[target_df["crop"] == selected_opt_crop].copy().set_index("wilaya")
                             opt_rows = []
-                            crop_targets = target_df[target_df["crop"] == selected_opt_crop].copy()
-                            crop_targets = crop_targets.set_index("wilaya")
-
                             for w in WILAYAS_48:
                                 target_prod = crop_targets.at[w, "target_production_t"] if w in crop_targets.index else float("nan")
                                 yld = opt_benchmark_map.get(w, opt_national_yield)
                                 area = float(opt_declared.get(w, 0.0))
-                                estimated_prod = area * yld if pd.notna(yld) else float("nan")
-
+                                estimated_prod = area * yld if yld and pd.notna(yld) else float("nan")
                                 if pd.isna(target_prod) or pd.isna(estimated_prod):
                                     balance = float("nan")
                                     status = "⚪ Missing data"
                                 else:
                                     balance = float(estimated_prod) - float(target_prod)
-                                    if balance > 0:
-                                        status = "🟢 Surplus"
-                                    elif balance < 0:
-                                        status = "🔴 Deficit"
-                                    else:
-                                        status = "🟡 Balanced"
-
+                                    status = "🟢 Surplus" if balance > 0 else ("🔴 Deficit" if balance < 0 else "🟡 Balanced")
                                 opt_rows.append({
                                     "Wilaya": w,
                                     "Target Production (t)": target_prod,
@@ -2726,13 +2915,12 @@ on public.wilaya_crop_targets (crop, wilaya);
                                 })
 
                             opt_df = pd.DataFrame(opt_rows)
-                            valid_opt = opt_df.dropna(subset=["Target Production (t)", "Estimated Production (t)", "Balance (t)"]).copy()
+                            valid_opt = opt_df.dropna(
+                                subset=["Target Production (t)", "Estimated Production (t)", "Balance (t)"]
+                            ).copy()
 
                             if valid_opt.empty:
-                                st.warning(
-                                    "No complete Wilaya target + production data is available for this crop yet. "
-                                    "Add target production values and yield benchmarks first."
-                                )
+                                st.warning("No complete Wilaya target + production data is available for this crop yet.")
                             else:
                                 surplus_df = valid_opt[valid_opt["Balance (t)"] > 0].copy()
                                 deficit_df = valid_opt[valid_opt["Balance (t)"] < 0].copy()
@@ -2745,69 +2933,85 @@ on public.wilaya_crop_targets (crop, wilaya);
                                 with oc2:
                                     st.metric("🔴 Total Deficit", f"{total_deficit:,.1f} t")
                                 with oc3:
-                                    st.metric("⚖️ Balance Gap", f"{total_surplus - total_deficit:,.1f} t")
+                                    st.metric("⚖️ National Gap", f"{total_surplus - total_deficit:,.1f} t")
 
-                                st.markdown("##### All 48 Wilayas — Production Balance")
                                 display_opt = opt_df.copy()
                                 for col in ["Target Production (t)", "Estimated Production (t)", "Balance (t)"]:
-                                    display_opt[col] = display_opt[col].map(
-                                        lambda x: "—" if pd.isna(x) else f"{x:,.1f}"
-                                    )
+                                    display_opt[col] = display_opt[col].map(lambda x: "—" if pd.isna(x) else f"{x:,.1f}")
                                 st.dataframe(display_opt, use_container_width=True, hide_index=True)
 
-                                # Transparent greedy allocation: cover the largest deficits using available surplus.
-                                # This is deliberately not called a transport-cost optimum yet because no distance/cost
-                                # matrix is stored in Supabase at this stage.
                                 if not surplus_df.empty and not deficit_df.empty:
-                                    surplus_work = surplus_df[["Wilaya", "Balance (t)"]].copy()
-                                    surplus_work = surplus_work.sort_values("Balance (t)", ascending=False)
-                                    deficit_work = deficit_df[["Wilaya", "Balance (t)"]].copy()
-                                    deficit_work["Need (t)"] = -deficit_work["Balance (t)"]
-                                    deficit_work = deficit_work.sort_values("Need (t)", ascending=False)
+                                    distance_map = {}
+                                    for srow in surplus_df.itertuples(index=False):
+                                        for drow in deficit_df.itertuples(index=False):
+                                            sc = coords.get(srow[0])
+                                            dc = coords.get(drow[0])
+                                            if sc and dc:
+                                                distance_map[(srow[0], drow[0])] = haversine_km(
+                                                    sc["latitude"], sc["longitude"],
+                                                    dc["latitude"], dc["longitude"],
+                                                )
 
-                                    recommendations = []
-                                    s_idx = 0
-                                    d_idx = 0
-                                    while s_idx < len(surplus_work) and d_idx < len(deficit_work):
-                                        available = float(surplus_work.iloc[s_idx]["Balance (t)"])
-                                        need = float(deficit_work.iloc[d_idx]["Need (t)"])
-                                        transfer = min(available, need)
-                                        if transfer > 0:
-                                            recommendations.append({
-                                                "From Wilaya": surplus_work.iloc[s_idx]["Wilaya"],
-                                                "To Wilaya": deficit_work.iloc[d_idx]["Wilaya"],
-                                                "Suggested Transfer (t)": transfer,
-                                            })
-                                        surplus_work.iloc[s_idx, surplus_work.columns.get_loc("Balance (t)")] -= transfer
-                                        deficit_work.iloc[d_idx, deficit_work.columns.get_loc("Need (t)")] -= transfer
-                                        if surplus_work.iloc[s_idx]["Balance (t)"] <= 0.0001:
-                                            s_idx += 1
-                                        if deficit_work.iloc[d_idx]["Need (t)"] <= 0.0001:
-                                            d_idx += 1
+                                    surplus_rows = [
+                                        {"wilaya": r["Wilaya"], "amount": float(r["Balance (t)"])}
+                                        for _, r in surplus_df.iterrows()
+                                    ]
+                                    deficit_rows = [
+                                        {"wilaya": r["Wilaya"], "amount": float(-r["Balance (t)"])}
+                                        for _, r in deficit_df.iterrows()
+                                    ]
 
-                                    if recommendations:
-                                        st.markdown("##### 🔄 Suggested Production Transfers")
-                                        rec_df = pd.DataFrame(recommendations)
-                                        rec_df["Suggested Transfer (t)"] = rec_df["Suggested Transfer (t)"].map(lambda x: f"{x:,.1f}")
+                                    transfers, total_transport_cost = min_cost_transfer_plan(
+                                        surplus_rows,
+                                        deficit_rows,
+                                        distance_map,
+                                        cost_per_t_km,
+                                        road_factor=road_factor,
+                                    )
+
+                                    if transfers:
+                                        st.markdown("##### 🚚 Minimum-Cost Suggested Transfers")
+                                        rec_df = pd.DataFrame(transfers)
+                                        for col in [
+                                            "Transfer (t)",
+                                            "Straight-line Distance (km)",
+                                            "Estimated Road Distance (km)",
+                                            "Transport Cost (DZD)",
+                                        ]:
+                                            rec_df[col] = rec_df[col].map(lambda x: f"{x:,.1f}")
                                         st.dataframe(rec_df, use_container_width=True, hide_index=True)
-                                        st.info(
-                                            "These are production-balance recommendations only. The current algorithm does not yet "
-                                            "consider distance, road network, transport price, storage capacity, perishability, "
-                                            "harvest timing, contracts, or market demand. Those constraints are required before "
-                                            "treating a transfer as a real logistics optimum."
+                                        st.metric(
+                                            "Estimated Total Transport Cost",
+                                            f"{total_transport_cost:,.0f} DZD",
+                                        )
+                                        st.success(
+                                            "The transfer quantities above minimize the estimated transport cost under the current "
+                                            "surplus/deficit, distance and cost assumptions."
                                         )
                                     else:
-                                        st.info("No transfer is required: there is no usable surplus/deficit pair for this crop.")
+                                        st.warning(
+                                            "No transport plan could be generated. Check that every surplus/deficit Wilaya "
+                                            "has coordinates in `wilaya_locations`."
+                                        )
+
+                                    st.info(
+                                        "⚠️ This is a planning optimizer, not an operational dispatch system. It does not yet include "
+                                        "road closures, truck capacity, storage capacity, perishability, harvest dates, contracts, "
+                                        "market demand or live transport prices. Also, coordinate-based distance is an estimate; "
+                                        "real road distances should replace it before operational use."
+                                    )
                                 elif deficit_df.empty:
                                     st.success("No Wilaya has a production deficit for this crop in the available data.")
                                 elif surplus_df.empty:
                                     st.warning("There are deficits, but no surplus Wilaya is available to cover them.")
                         else:
-                            st.info(
-                                "No crop has both declarations and Wilaya production targets yet. Add target rows in Supabase."
-                            )
-                    elif target_table_ready and target_rows and df_live.empty:
+                            st.info("No crop has both declarations and Wilaya production targets yet. Add target rows in Supabase.")
+                    elif target_table_ready and location_table_ready and target_rows and location_rows and df_live.empty:
                         st.info("No farmer declarations are available yet, so there is nothing to optimize.")
+                    elif target_table_ready and location_table_ready and not target_rows:
+                        st.info("Add Wilaya production targets first; the optimizer cannot infer them automatically.")
+                    elif target_table_ready and location_table_ready and not location_rows:
+                        st.info("Add Wilaya coordinates first; the optimizer needs a location for each participating Wilaya.")
 
                 with db_tab:
                     st.markdown("##### System Database Inspector & Management")
