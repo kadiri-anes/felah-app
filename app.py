@@ -198,6 +198,87 @@ BUILTIN_OFFICIAL_BENCHMARKS = {
     "Potatoes / بطاطا", "Tomatoes / طماطم", "Onions / بصل"
 }
 
+# ------------------------------------------------------------------
+# Built-in Wilaya fallback benchmarks
+# ------------------------------------------------------------------
+# These are intentionally estimates, not claimed Ministry benchmarks.
+# They guarantee that every crop has a usable fallback for every one of
+# the 48 Wilayas until official MADR/technical-institute figures are entered
+# in crop_yield_benchmarks. Supabase Wilaya-specific values always override
+# these estimates.
+#
+# The factors represent broad agro-climatic/productivity zones only. They
+# are NOT field-level yield predictions.
+WILAYA_YIELD_ZONE_FACTORS = {
+    # North / coastal / humid zones
+    "06 - Béjaïa": 1.02, "09 - Blida": 1.10, "13 - Tlemcen": 1.02,
+    "15 - Tizi Ouzou": 0.98, "16 - Alger": 1.02, "18 - Jijel": 1.00,
+    "21 - Skikda": 1.03, "23 - Annaba": 1.05, "24 - Guelma": 1.08,
+    "25 - Constantine": 0.98, "27 - Mostaganem": 1.05, "29 - Mascara": 1.08,
+    "31 - Oran": 1.00, "35 - Boumerdès": 1.08, "36 - El Tarf": 1.08,
+    "42 - Tipaza": 1.07, "43 - Mila": 1.03, "46 - Aïn Témouchent": 1.02,
+    "48 - Relizane": 1.10,
+    # Tell / inland agricultural plains
+    "02 - Chlef": 1.10, "10 - Bouira": 1.00, "14 - Tiaret": 0.90,
+    "19 - Sétif": 0.88, "20 - Saïda": 0.92, "22 - Sidi Bel Abbès": 1.02,
+    "26 - Médéa": 0.95, "28 - M'Sila": 0.82, "32 - El Bayadh": 0.72,
+    "34 - Bordj Bou Arréridj": 0.90, "38 - Tissemsilt": 0.92, "40 - Khenchela": 0.86,
+    "41 - Souk Ahras": 1.00, "44 - Aïn Defla": 1.08,
+    # Eastern / highland interior
+    "04 - Oum El Bouaghi": 0.86, "05 - Batna": 0.86, "12 - Tébessa": 0.82,
+    "30 - Ouargla": 0.82, "07 - Biskra": 0.92,
+    # Steppe / arid transition
+    "03 - Laghouat": 0.72, "17 - Djelfa": 0.68, "08 - Béchar": 0.78,
+    "45 - Naâma": 0.70,
+    # Sahara / irrigated production zones
+    "01 - Adrar": 0.82, "11 - Tamanrasset": 0.62, "33 - Illizi": 0.62,
+    "37 - Tindouf": 0.60, "39 - El Oued": 0.95, "47 - Ghardaïa": 0.78,
+}
+
+CROP_WILAYA_GROUP_FACTORS = {
+    # Crops that generally benefit from cooler/humid northern conditions.
+    "cool_north": {
+        "Potatoes / بطاطا", "Tomatoes / طماطم", "Carrots / جزر",
+        "Green Beans / فاصوليا خضراء", "Artichokes / خرشوف", "Peppers / فلفل",
+        "Zucchini / كوسة", "Cucumbers / خيار", "Lettuce / خس",
+        "Eggplant / باذنجان", "Peas / جلبانة", "Cabbage / ملفوف",
+        "Cauliflower / قرنبيط", "Citrus / الموالح", "Apples / تفاح",
+        "Pears / إجاص", "Cherries / كرز", "Peaches & Nectarines / خوخ ونكتارين",
+        "Plums / برقوق", "Quinces / سفرجل",
+    },
+    # Crops for which arid/irrigated areas can perform comparatively well.
+    "arid_irrigated": {
+        "Dates / تمور", "Melons / شمام", "Watermelons / بطيخ",
+        "Onions / بصل", "Garlic / ثوم",
+    },
+    "tree_mediterranean": {
+        "Olives / زيتون", "Grapes / عنب", "Figs / تين", "Almonds / لوز",
+        "Apricots / مشمش", "Pomegranates / رمان",
+    },
+}
+
+def get_builtin_wilaya_yield(crop_name, wilaya_name):
+    """Return a transparent fallback t/ha estimate for any crop + Wilaya."""
+    base = BUILTIN_YIELD_BENCHMARKS.get(crop_name)
+    if base is None:
+        return None
+    factor = WILAYA_YIELD_ZONE_FACTORS.get(str(wilaya_name).strip(), 0.85)
+
+    # Slightly adjust the broad zone factor for crop groups. This remains a
+    # planning estimate and is deliberately conservative rather than a claim
+    # of measured Wilaya productivity.
+    if crop_name in CROP_WILAYA_GROUP_FACTORS["arid_irrigated"] and str(wilaya_name).strip() in {
+        "01 - Adrar", "07 - Biskra", "08 - Béchar", "11 - Tamanrasset",
+        "30 - Ouargla", "33 - Illizi", "37 - Tindouf", "39 - El Oued", "47 - Ghardaïa"
+    }:
+        factor *= 1.08
+    elif crop_name in CROP_WILAYA_GROUP_FACTORS["cool_north"] and factor < 0.80:
+        factor *= 0.92
+    elif crop_name in CROP_WILAYA_GROUP_FACTORS["tree_mediterranean"] and factor >= 0.95:
+        factor *= 1.03
+
+    return round(float(base) * factor, 2)
+
 
 SUPPORT_SECTORS = {
     "Geomembrane Basin (أحواض الجيوممبران)": [
@@ -2667,6 +2748,13 @@ elif st.session_state.active_tab == "account":
                     # institute figures are being collected. Supabase values always override these defaults.
                     for crop_name, fallback_yield in BUILTIN_YIELD_BENCHMARKS.items():
                         national_benchmarks.setdefault(crop_name, fallback_yield)
+                        # Create a fallback for every crop × Wilaya pair.
+                        # Explicit Supabase Wilaya values remain higher priority.
+                        for w in WILAYAS_48:
+                            benchmark_map.setdefault(
+                                (crop_name, w),
+                                get_builtin_wilaya_yield(crop_name, w)
+                            )
 
                     if not benchmark_table_ready:
                         st.warning(
@@ -2720,15 +2808,21 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             wilaya_prod["Declared Area (Ha)"] * wilaya_prod["Yield (t/Ha)"].fillna(0)
                         )
                         wilaya_prod["Benchmark Source"] = wilaya_prod["wilaya"].apply(
-                            lambda w: "Wilaya benchmark"
-                            if (selected_prod_crop, "" if pd.isna(w) else str(w).strip()) in benchmark_map
-                            else (
-                                "National benchmark (Supabase)"
-                                if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
+                            lambda w: (
+                                "Wilaya benchmark (Supabase)"
+                                if (selected_prod_crop, "" if pd.isna(w) else str(w).strip()) in {
+                                    (selected_prod_crop, str(r.get("wilaya")).strip())
+                                    for r in benchmark_rows
+                                    if r.get("wilaya") and str(r.get("wilaya")).strip() not in {"National", "National / وطني"}
+                                }
                                 else (
-                                    "Official historical ONS benchmark"
-                                    if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
-                                    else "Planning estimate (pending official source)"
+                                    "National benchmark (Supabase)"
+                                    if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
+                                    else (
+                                        "Official historical ONS benchmark (national base)"
+                                        if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
+                                        else "Planning estimate (Wilaya fallback)"
+                                    )
                                 )
                             )
                         )
@@ -2764,15 +2858,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
                         full_wilaya_prod["Estimated Production (t)"] = full_wilaya_prod["Estimated Production (t)"].fillna(0.0)
                         full_wilaya_prod["Benchmark Source"] = full_wilaya_prod["Benchmark Source"].fillna(
-                            (
-                                "National benchmark (Supabase)"
-                                if selected_prod_crop in national_benchmarks and selected_prod_crop not in BUILTIN_YIELD_BENCHMARKS
-                                else (
-                                    "Official historical ONS benchmark"
-                                    if selected_prod_crop in BUILTIN_OFFICIAL_BENCHMARKS
-                                    else "Planning estimate (pending official source)"
-                                )
-                            )
+                            "Planning estimate (Wilaya fallback)"
                         )
 
                         st.markdown("##### All 48 Wilayas — one row per Wilaya")
@@ -2784,13 +2870,8 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         display_prod["Estimated Production (t)"] = display_prod["Estimated Production (t)"].map(lambda x: f"{x:,.1f}")
                         st.dataframe(display_prod, use_container_width=True, hide_index=True)
 
-                        missing_wilaya = full_wilaya_prod[full_wilaya_prod["Benchmark Source"] == "Missing"]["wilaya"].tolist()
-                        if missing_wilaya:
-                            st.warning(
-                                f"Missing yield benchmark for {len(missing_wilaya)} Wilaya(s). "
-                                "Those rows cannot be used for a reliable Wilaya production comparison. "
-                                "Add Wilaya-specific benchmarks in Supabase when available."
-                            )
+                        # Built-in fallback benchmarks ensure that every Wilaya has a value.
+                        # Official/Supabase values override the fallback automatically.
 
                         st.markdown("##### 🤖 Initial Analytical Signal")
                         if national_yield:
@@ -2802,9 +2883,10 @@ on public.crop_yield_benchmarks (crop, wilaya);
                                 st.success("National signal: estimated declared production is close to the planning target.")
 
                         st.info(
-                            "ℹ️ Benchmark policy: Supabase Wilaya-specific values override everything. If none exists, the app uses a national Supabase benchmark; "
-                            "if that is also absent, it uses the built-in fallback. Potato, tomato and onion use historical ONS yield figures; other built-ins are planning estimates "
-                            "pending an official MADR/technical-institute source. Replace them in Supabase when official values are available."
+                            "ℹ️ Benchmark policy: a Wilaya-specific Supabase value has highest priority. If absent, a national Supabase value is used. "
+                            "If neither exists, the app uses its built-in fallback for every crop and every Wilaya. Potato, tomato and onion use historical ONS national yield figures as the base; "
+                            "the Wilaya adjustment and all other crop values are planning estimates pending official MADR/technical-institute benchmarks. "
+                            "Entering an official value in Supabase automatically overrides the estimate."
                         )
                     else:
                         st.info(
@@ -3035,7 +3117,9 @@ on public.wilaya_logistics_constraints (wilaya);
                             opt_rows = []
                             for w in WILAYAS_48:
                                 target_prod = crop_targets.at[w, "target_production_t"] if w in crop_targets.index else float("nan")
-                                yld = opt_benchmark_map.get(w, opt_national_yield)
+                                yld = opt_benchmark_map.get(w)
+                                if yld is None:
+                                    yld = get_builtin_wilaya_yield(selected_opt_crop, w) or opt_national_yield
                                 area = float(opt_declared.get(w, 0.0))
                                 estimated_prod = area * yld if yld and pd.notna(yld) else float("nan")
                                 if pd.isna(target_prod) or pd.isna(estimated_prod):
