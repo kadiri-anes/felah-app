@@ -807,9 +807,9 @@ st.markdown(
         }}
     }}
 
-    [data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"] {
+    [data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"] {{
         cursor: pointer !important;
-    }
+    }}
 
     /* Expanded sidebar close button remains compact and clear. */
     div[data-testid="stSidebar"] button[data-testid="stSidebarCollapseButton"] {{
