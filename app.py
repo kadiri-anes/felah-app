@@ -542,7 +542,7 @@ def ai_fetch_copernicus_satellite(wilaya, latitude, longitude, days_back=90):
         client_id = str(cdse.get("CLIENT_ID", "")).strip()
         client_secret = str(cdse.get("CLIENT_SECRET", "")).strip()
         if not client_id or not client_secret:
-            return [], "Copernicus credentials not configured"
+            return [], "Copernicus credentials not configured", {}
         token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
         token_resp = requests.post(token_url, data={
             "grant_type": "client_credentials",
@@ -552,7 +552,7 @@ def ai_fetch_copernicus_satellite(wilaya, latitude, longitude, days_back=90):
         token_resp.raise_for_status()
         token = token_resp.json().get("access_token")
         if not token:
-            return [], "Copernicus token unavailable"
+            return [], "Copernicus token unavailable", {}
         end_day = date.today()
         start_day = end_day - timedelta(days=int(days_back))
         lat, lon = float(latitude), float(longitude)
@@ -635,9 +635,46 @@ function evaluatePixel(samples) {
         except Exception:
             pass
 
-        return rows, "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing"
+        # Attach a compact validation summary so the UI can prove that the
+        # satellite connection returned actual statistics, not just a connection flag.
+        s2 = [r for r in rows if r.get("ndvi") is not None or r.get("ndwi") is not None]
+        s1 = [r for r in rows if r.get("sentinel1_vv") is not None or r.get("sentinel1_vh") is not None]
+        ndvi_vals = [float(r["ndvi"]) for r in s2 if r.get("ndvi") is not None]
+        ndwi_vals = [float(r["ndwi"]) for r in s2 if r.get("ndwi") is not None]
+        vv_vals = [float(r["sentinel1_vv"]) for r in s1 if r.get("sentinel1_vv") is not None]
+        vh_vals = [float(r["sentinel1_vh"]) for r in s1 if r.get("sentinel1_vh") is not None]
+        satellite_stats = {
+            "s2_observations": len(s2),
+            "s1_observations": len(s1),
+            "ndvi_mean": sum(ndvi_vals) / len(ndvi_vals) if ndvi_vals else None,
+            "ndvi_min": min(ndvi_vals) if ndvi_vals else None,
+            "ndvi_max": max(ndvi_vals) if ndvi_vals else None,
+            "ndwi_mean": sum(ndwi_vals) / len(ndwi_vals) if ndwi_vals else None,
+            "vv_mean": sum(vv_vals) / len(vv_vals) if vv_vals else None,
+            "vh_mean": sum(vh_vals) / len(vh_vals) if vh_vals else None,
+            "period_days": int(days_back),
+        }
+        return rows, "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing", satellite_stats
     except Exception as exc:
-        return [], f"Copernicus unavailable: {exc}"
+        return [], f"Copernicus unavailable: {exc}", {}
+
+def ai_summarize_satellite_rows(rows, days_back=90):
+    """Summarize returned satellite statistics for transparent connection validation."""
+    rows = rows or []
+    s2 = [r for r in rows if r.get("ndvi") is not None or r.get("ndwi") is not None]
+    s1 = [r for r in rows if r.get("sentinel1_vv") is not None or r.get("sentinel1_vh") is not None]
+    def vals(key, subset):
+        return [float(r[key]) for r in subset if r.get(key) is not None]
+    ndvi = vals("ndvi", s2); ndwi = vals("ndwi", s2); vv = vals("sentinel1_vv", s1); vh = vals("sentinel1_vh", s1)
+    return {
+        "s2_observations": len(s2), "s1_observations": len(s1),
+        "ndvi_mean": sum(ndvi)/len(ndvi) if ndvi else None,
+        "ndvi_min": min(ndvi) if ndvi else None, "ndvi_max": max(ndvi) if ndvi else None,
+        "ndwi_mean": sum(ndwi)/len(ndwi) if ndwi else None,
+        "vv_mean": sum(vv)/len(vv) if vv else None, "vh_mean": sum(vh)/len(vh) if vh else None,
+        "period_days": int(days_back),
+    }
+
 
 def ai_load_optional_table(table_name, columns):
     """Load an optional Supabase table without breaking the app if absent."""
@@ -664,10 +701,27 @@ def ai_declaration_area(df_live, crop, wilaya):
     return float(work.loc[mask, "area"].sum())
 
 
-def ai_historical_production_signal(rows, crop, wilaya):
-    """Return historical baseline and trend if the optional history table exists."""
+def ai_historical_production_signal(rows, crop, wilaya, declared_area=0.0, yield_benchmark=None):
+    """Return historical production when available, otherwise a clearly-labelled estimate.
+
+    Official ONS historical yield bases are used where this app has them
+    (potato, tomato and onion). For other crops/Wilayas, the fallback is a
+    planning estimate = declared area × available yield benchmark; it is never
+    presented as measured historical production.
+    """
     if not rows:
-        return {"available": False, "baseline_t": None, "trend_percent": None, "years": 0}
+        estimated = None
+        if float(declared_area or 0) > 0 and yield_benchmark is not None and float(yield_benchmark) > 0:
+            estimated = float(declared_area) * float(yield_benchmark)
+        return {
+            "available": estimated is not None,
+            "baseline_t": estimated,
+            "trend_percent": None,
+            "years": 0,
+            "method": "estimated planning baseline",
+            "source": "Declared area × yield benchmark; official ONS basis where available",
+            "measured": False,
+        }
     aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
     aliases.add(str(crop).strip())
     vals = []
@@ -1061,6 +1115,7 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     """Run the complete 12-step investigation for one crop/Wilaya."""
     crop = str(crop).strip()
     wilaya = str(wilaya).strip()
+    satellite_stats = {}
     declared_area = ai_declaration_area(df_live, crop, wilaya)
     yield_benchmark = benchmark_map.get((crop, wilaya))
     if yield_benchmark is None:
@@ -1070,7 +1125,9 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
 
     weather_signal = ai_parse_weather_evidence(weather_rows or [], crop, wilaya)
     weather_signal["alert_matches"] = ai_parse_weather_alerts(weather_alert_rows or [], crop, wilaya)
-    historical_signal = ai_historical_production_signal(historical_rows or [], crop, wilaya)
+    historical_signal = ai_historical_production_signal(
+        historical_rows or [], crop, wilaya, declared_area=declared_area, yield_benchmark=yield_benchmark
+    )
 
     # Restrict crop-specific evidence to the selected crop/Wilaya. This is
     # critical: a disease in another crop must never become evidence for this
@@ -1185,6 +1242,8 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         "weather": weather_signal,
         "soil_estimate": soil_estimate,
         "irrigation_proxy": irrigation_proxy,
+        "satellite_stats": satellite_stats,
+        "satellite_source_label": "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing" if selected_satellite_rows else None,
         "neighbors": neighboring_signal,
         "causes": ranked,
         "primary_cause": primary[0],
@@ -1195,7 +1254,8 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         "recommendations": recommendations,
         "notify_admin": notify,
         "data_status": {
-            "historical_production": bool(historical_rows),
+            "historical_production": bool(historical_signal.get("available")),
+            "historical_measured": bool(historical_signal.get("measured")),
             "declared_area": declared_area > 0,
             "weather": bool(weather_signal.get("available")),
             "rainfall": bool(weather_signal.get("rainfall_total_mm") is not None),
@@ -1305,7 +1365,15 @@ def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
         "wilaya": "🇩🇿 Whole Country / الجزائر كاملة",
         "declared_area_ha": total_declared,
         "yield_benchmark_t_ha": None,
-        "historical": {"available": False},
+        "historical": {
+            "available": total_baseline > 0,
+            "baseline_t": total_baseline if total_baseline > 0 else None,
+            "trend_percent": None,
+            "years": 0,
+            "method": "sum of 69 Wilaya planning estimates",
+            "source": "Declared area × Wilaya yield benchmarks; official ONS bases where available",
+            "measured": bool(historical_rows),
+        },
         "weather": {"available": bool(weather_rows)},
         "soil_estimate": None,
         "irrigation_proxy": {"available": bool(satellite_rows)},
@@ -1326,7 +1394,8 @@ def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
         "notify_admin": notify,
         "national_wilaya_results": per_wilaya,
         "data_status": {
-            "historical_production": bool(historical_rows),
+            "historical_production": total_baseline > 0,
+            "historical_measured": bool(historical_rows),
             "declared_area": total_declared > 0,
             "weather": bool(weather_rows),
             "rainfall": bool(weather_rows),
@@ -4102,6 +4171,7 @@ elif st.session_state.active_tab == "account":
                         investigation_satellite_rows = list(satellite_rows or [])
                         weather_source_label = "Supabase observations" if investigation_weather_rows else "Not available"
                         satellite_source_label = "Supabase satellite indicators" if investigation_satellite_rows else "Not available"
+                        live_sat_stats = ai_summarize_satellite_rows(investigation_satellite_rows, days_back=90)
 
                         if selected_investigation_wilaya == NATIONAL_WILAYA_OPTION:
                             if not investigation_weather_rows:
@@ -4118,7 +4188,7 @@ elif st.session_state.active_tab == "account":
                                 for w in WILAYAS_69:
                                     slat, slon, _ = ai_resolve_wilaya_coordinates(w, location_rows)
                                     if slat is not None and slon is not None:
-                                        live_sat_rows, _ = ai_fetch_copernicus_satellite(w, slat, slon, days_back=90)
+                                        live_sat_rows, _, _ = ai_fetch_copernicus_satellite(w, slat, slon, days_back=90)
                                         satellite_cache.extend(live_sat_rows or [])
                                 investigation_satellite_rows = satellite_cache
                                 if investigation_satellite_rows:
@@ -4130,6 +4200,7 @@ elif st.session_state.active_tab == "account":
                                 irrigation_rows=irrigation_rows, satellite_rows=investigation_satellite_rows,
                                 disease_rows=disease_rows, location_rows=location_rows,
                             )
+                            result["satellite_stats"] = ai_summarize_satellite_rows(investigation_satellite_rows, days_back=90)
                         else:
                             if not investigation_weather_rows:
                                 wlat, wlon, coord_source = ai_resolve_wilaya_coordinates(
@@ -4145,7 +4216,7 @@ elif st.session_state.active_tab == "account":
                             if not investigation_satellite_rows:
                                 slat, slon, _sat_coord_source = ai_resolve_wilaya_coordinates(selected_investigation_wilaya, location_rows)
                                 if slat is not None and slon is not None:
-                                    live_sat_rows, live_sat_source = ai_fetch_copernicus_satellite(selected_investigation_wilaya, slat, slon, days_back=90)
+                                    live_sat_rows, live_sat_source, live_sat_stats = ai_fetch_copernicus_satellite(selected_investigation_wilaya, slat, slon, days_back=90)
                                     if live_sat_rows:
                                         investigation_satellite_rows.extend(live_sat_rows)
                                     satellite_source_label = live_sat_source
@@ -4165,6 +4236,7 @@ elif st.session_state.active_tab == "account":
                                 disease_rows=disease_rows,
                                 location_rows=location_rows,
                             )
+                            result["satellite_stats"] = live_sat_stats if live_sat_stats else ai_summarize_satellite_rows(investigation_satellite_rows, days_back=90)
                         result["satellite_source_label"] = satellite_source_label
                         result["weather_source_label"] = weather_source_label
                         st.session_state["last_ai_investigation"] = result
@@ -4206,13 +4278,13 @@ elif st.session_state.active_tab == "account":
 
                         st.markdown("##### 🔬 Evidence chain")
                         status_rows = [
-                            ("1. Historical production", result["data_status"]["historical_production"], "Historical production/yield baseline"),
+                            ("1. Historical production", result["data_status"]["historical_production"], "Measured historical production" if result["data_status"].get("historical_measured") else "Estimated baseline from declared area × yield benchmark"),
                             ("2. Declared area", result["data_status"]["declared_area"], f"{result['declared_area_ha']:,.1f} ha declared"),
                             ("3. Weather", result["data_status"]["weather"], "Observed weather table"),
                             ("4. Rainfall", result["data_status"]["rainfall"], "Rainfall observations"),
                             ("5. Soil", result["data_status"]["soil"], "Measured soil observations" if result["data_status"].get("soil_measured") else "Regional soil estimate (not laboratory measured)"),
                             ("6. Irrigation", result["data_status"]["irrigation"], "Measured irrigation observations" if result["data_status"].get("irrigation_measured") else ("Satellite irrigation proxy" if result["data_status"].get("irrigation_satellite_proxy") else "No irrigation observation")),
-                            ("7. Satellite indicators", result["data_status"]["satellite"], "NDVI/NDWI/EVI/FAPAR indicators"),
+                            ("7. Satellite indicators", result["data_status"]["satellite"], "Returned Sentinel-2 NDVI/NDWI and Sentinel-1 VV/VH statistics"),
                             ("8. Disease reports", result["data_status"]["disease"], "Disease reports"),
                             ("9. Neighboring Wilayas", result["data_status"]["neighbors"], "Nearest-Wilaya comparison"),
                         ]
@@ -4221,6 +4293,18 @@ elif st.session_state.active_tab == "account":
                             for name, available, contribution in status_rows
                         ])
                         st.dataframe(evidence_display, use_container_width=True, hide_index=True)
+
+                        sat_stats = result.get("satellite_stats", {})
+                        if sat_stats and (sat_stats.get("s2_observations", 0) or sat_stats.get("s1_observations", 0)):
+                            st.markdown("##### 🛰️ Satellite statistics — connection confirmed")
+                            sat_metric_cols = st.columns(6)
+                            sat_metric_cols[0].metric("S2 observations", f"{int(sat_stats.get('s2_observations', 0))}")
+                            sat_metric_cols[1].metric("S1 observations", f"{int(sat_stats.get('s1_observations', 0))}")
+                            sat_metric_cols[2].metric("Mean NDVI", "—" if sat_stats.get("ndvi_mean") is None else f"{sat_stats['ndvi_mean']:.3f}")
+                            sat_metric_cols[3].metric("Mean NDWI", "—" if sat_stats.get("ndwi_mean") is None else f"{sat_stats['ndwi_mean']:.3f}")
+                            sat_metric_cols[4].metric("Mean VV", "—" if sat_stats.get("vv_mean") is None else f"{sat_stats['vv_mean']:.3f}")
+                            sat_metric_cols[5].metric("Mean VH", "—" if sat_stats.get("vh_mean") is None else f"{sat_stats['vh_mean']:.3f}")
+                            st.caption(f"Statistics returned automatically by Copernicus Sentinel-1/2 over the last {int(sat_stats.get('period_days', 90))} days. These are remote-sensing indicators, not direct proof of irrigation or disease.")
 
                         st.markdown("##### ⚖️ Competing causes")
                         cause_rows = []
@@ -4298,7 +4382,7 @@ elif st.session_state.active_tab == "account":
                                         slat, slon, _ = ai_resolve_wilaya_coordinates(wilaya_name, location_rows)
                                         satellite_cache[wilaya_name] = []
                                         if slat is not None and slon is not None:
-                                            live_sat_rows, _ = ai_fetch_copernicus_satellite(wilaya_name, slat, slon, days_back=90)
+                                            live_sat_rows, _, _ = ai_fetch_copernicus_satellite(wilaya_name, slat, slon, days_back=90)
                                             satellite_cache[wilaya_name] = live_sat_rows
                                 scan_result = ai_investigate_crop_wilaya(
                                     crop_name, wilaya_name, ai_df, ai_benchmark_map, ai_national,
@@ -4410,11 +4494,11 @@ elif st.session_state.active_tab == "account":
                     st.markdown("##### 🧪 Investigation data readiness")
                     readiness = pd.DataFrame([
                         {"Data stream": "Farmer declarations", "Status": "✅ Live", "Agent use": "Area, crop, Wilaya, current planning baseline"},
-                        {"Data stream": "Historical production", "Status": "🟡 Optional table", "Agent use": "True production baseline and trend"},
+                        {"Data stream": "Historical production", "Status": "🟢 Official basis + automatic estimate", "Agent use": "Measured history when available; otherwise declared area × yield benchmark, clearly labelled as an estimate"},
                         {"Data stream": "Weather + rainfall", "Status": "🟡 Optional table", "Agent use": "Frost, heat, rainfall anomalies"},
                         {"Data stream": "Soil", "Status": "🟢 Automatic regional estimate + optional measured data", "Agent use": "pH range, salinity/lime risk and soil limitations; measured lab data override estimates"},
-                        {"Data stream": "Irrigation", "Status": "🟢 Satellite proxy + optional measured data", "Agent use": "Sentinel-1/Sentinel-2 water/vegetation signals; measured irrigation data override the satellite proxy"},
-                        {"Data stream": "Satellite", "Status": "🟢 Automatic when Copernicus credentials are configured", "Agent use": "Sentinel-2 NDVI/NDWI indicators"},
+                        {"Data stream": "Irrigation", "Status": "🟢 Automatic satellite proxy + optional measured data", "Agent use": "Sentinel-1/Sentinel-2 water/vegetation statistics; measured irrigation data override the satellite proxy"},
+                        {"Data stream": "Satellite", "Status": "🟢 Automatic Sentinel-1/Sentinel-2 statistics when connected", "Agent use": "NDVI, NDWI, Sentinel-1 VV/VH and observation counts; connection is considered working only when statistics are returned"},
                         {"Data stream": "Disease reports", "Status": "🟡 Optional table", "Agent use": "Disease evidence and impact"},
                         {"Data stream": "Wilaya coordinates", "Status": "🟡 Existing optional table", "Agent use": "Nearest-Wilaya comparison"},
                         {"Data stream": "Admin AI alerts", "Status": "🟡 Optional table", "Agent use": "Store and review high-priority investigations"},
@@ -4423,7 +4507,7 @@ elif st.session_state.active_tab == "account":
 
                     st.markdown("##### 🧮 Fallback policy")
                     st.info(
-                        "The agent uses Supabase observations first. If a yield benchmark is missing, it uses the built-in planning benchmark; "
+                        "The agent uses Supabase observations first. If historical production is missing, it builds a clearly-labelled planning estimate from declared area × yield benchmark; "
                         "Potato, tomato and onion use historical ONS national yield bases already documented in this app, while the remaining crop/Wilaya yields are planning estimates. "
                         "Phenology/frost windows are planning rules. Soil may use a regional estimate until measured soil data exist; satellite is fetched automatically when connected. The agent never invents measured observations."
                     )
