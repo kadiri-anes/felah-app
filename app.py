@@ -1,11 +1,12 @@
 import math
 import random
 import re
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 
 import folium
 import pandas as pd
+import requests
 import qrcode
 import streamlit as st
 import streamlit.components.v1 as components
@@ -336,6 +337,619 @@ def _ai_float(value, default=0.0):
     except (TypeError, ValueError):
         return float(default)
 
+
+
+# ------------------------------------------------------------------
+# AI AGRICULTURAL INVESTIGATION ENGINE v2
+# ------------------------------------------------------------------
+# The investigation layer is deliberately deterministic. It collects the
+# strongest evidence available, scores competing causes, estimates impact,
+# and only then lets the language/agent layer explain the finding.
+# Missing external datasets are never silently treated as observed facts.
+
+AI_CROP_RISK_PROFILES = {
+    "Almonds / لوز": {
+        "aliases": {"Almonds (لوز)", "Almonds / لوز"},
+        "phenology": "flowering commonly late-winter/early-spring; timing varies by variety and site",
+        "frost_sensitive_months": {1, 2, 3},
+        "frost_threshold_c": -1.0,
+        "severe_frost_threshold_c": -3.0,
+        "group": "tree_mediterranean",
+    },
+    "Apricots / مشمش": {
+        "aliases": {"Apricots (مشمش)", "Apricots / مشمش"},
+        "phenology": "early flowering; highly exposed to late-frost risk",
+        "frost_sensitive_months": {1, 2, 3},
+        "frost_threshold_c": -1.0,
+        "severe_frost_threshold_c": -3.0,
+        "group": "tree_mediterranean",
+    },
+    "Peaches & Nectarines / خوخ ونكتارين": {
+        "aliases": {"Peaches & Nectarines (خوخ ونكتارين)", "Peaches & Nectarines / خوخ ونكتارين"},
+        "phenology": "early spring flowering; late-frost sensitive",
+        "frost_sensitive_months": {2, 3},
+        "frost_threshold_c": -1.5,
+        "severe_frost_threshold_c": -3.5,
+        "group": "tree_mediterranean",
+    },
+    "Cherries / كرز": {
+        "aliases": {"Cherries (كرز)", "Cherries / كرز"},
+        "phenology": "spring flowering; frost sensitivity depends strongly on stage",
+        "frost_sensitive_months": {2, 3, 4},
+        "frost_threshold_c": -1.0,
+        "severe_frost_threshold_c": -3.0,
+        "group": "tree_mediterranean",
+    },
+    "Apples / تفاح": {
+        "aliases": {"Apples (تفاح)", "Apples / تفاح"},
+        "phenology": "spring flowering; frost sensitivity depends on cultivar/stage",
+        "frost_sensitive_months": {2, 3, 4},
+        "frost_threshold_c": -1.5,
+        "severe_frost_threshold_c": -3.5,
+        "group": "cool_north",
+    },
+}
+
+AI_RISK_CAUSE_LABELS = {
+    "frost": "Late frost / الصقيع المتأخر",
+    "drought": "Water stress / الجفاف والإجهاد المائي",
+    "disease": "Disease / المرض",
+    "irrigation": "Irrigation limitation / نقص الري",
+    "soil": "Soil limitation / مشكلة التربة",
+    "area": "Area / declaration effect",
+    "heat": "Heat stress / الإجهاد الحراري",
+    "insufficient_evidence": "Insufficient evidence / بيانات غير كافية",
+}
+
+
+def ai_crop_key(crop_name):
+    name = str(crop_name or "").strip()
+    for canonical, profile in AI_CROP_RISK_PROFILES.items():
+        if name in profile.get("aliases", set()) or name == canonical:
+            return canonical
+    return name
+
+
+def ai_crop_profile(crop_name):
+    canonical = ai_crop_key(crop_name)
+    if canonical in AI_CROP_RISK_PROFILES:
+        return AI_CROP_RISK_PROFILES[canonical]
+    # Generic fallback: tree crops get a conservative frost window; annual
+    # crops remain neutral until crop-stage/weather data are available.
+    if any(x in str(crop_name).lower() for x in ["almond", "apricot", "peach", "cherry", "apple", "plum", "pear"]):
+        return {
+            "phenology": "tree crop; stage-specific risk requires phenology data",
+            "frost_sensitive_months": {2, 3},
+            "frost_threshold_c": -1.0,
+            "severe_frost_threshold_c": -3.0,
+            "group": "tree_mediterranean",
+        }
+    return {
+        "phenology": "crop stage not yet available",
+        "frost_sensitive_months": set(),
+        "frost_threshold_c": -1.0,
+        "severe_frost_threshold_c": -3.0,
+        "group": "",
+    }
+
+
+def ai_safe_num(value):
+    try:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        v = float(value)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    except (TypeError, ValueError):
+        return None
+
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def ai_fetch_external_weather(wilaya, latitude, longitude, days_back=365):
+    """Fetch historical daily weather as an external planning source.
+
+    This uses Open-Meteo's public archive endpoint as a fallback data source.
+    It is not an Algerian official observation network; source provenance is
+    shown explicitly so ONM/MADR data can replace it later.
+    """
+    try:
+        end_day = date.today()
+        start_day = end_day - timedelta(days=int(days_back))
+        url = "https://archive-api.open-meteo.com/v1/archive"
+        params = {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "start_date": start_day.isoformat(),
+            "end_date": end_day.isoformat(),
+            "daily": "temperature_2m_min,temperature_2m_max,precipitation_sum",
+            "timezone": "auto",
+        }
+        response = requests.get(url, params=params, timeout=12)
+        response.raise_for_status()
+        payload = response.json()
+        daily = payload.get("daily", {})
+        dates = daily.get("time", [])
+        mins = daily.get("temperature_2m_min", [])
+        maxs = daily.get("temperature_2m_max", [])
+        rains = daily.get("precipitation_sum", [])
+        rows = []
+        for dt, tmin, tmax, rain in zip(dates, mins, maxs, rains):
+            rows.append({
+                "observed_at": dt,
+                "wilaya": wilaya,
+                "tmin_c": tmin,
+                "tmax_c": tmax,
+                "rainfall_mm": rain,
+                "source": "Open-Meteo archive (external planning source)",
+            })
+        return rows
+    except Exception:
+        return []
+
+def ai_load_optional_table(table_name, columns):
+    """Load an optional Supabase table without breaking the app if absent."""
+    if not supabase_client:
+        return [], False, "Supabase connection unavailable"
+    try:
+        res = supabase_client.table(table_name).select(columns).execute()
+        return (res.data if res.data else []), True, ""
+    except Exception as exc:
+        return [], False, str(exc)
+
+
+def ai_declaration_area(df_live, crop, wilaya):
+    if df_live is None or df_live.empty:
+        return 0.0
+    work = df_live.copy()
+    if "crop" not in work or "wilaya" not in work or "area" not in work:
+        return 0.0
+    work["area"] = pd.to_numeric(work["area"], errors="coerce").fillna(0.0)
+    crop_aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
+    crop_aliases.add(str(crop).strip())
+    mask = work["crop"].astype(str).str.strip().isin(crop_aliases)
+    mask &= work["wilaya"].astype(str).str.strip().eq(str(wilaya).strip())
+    return float(work.loc[mask, "area"].sum())
+
+
+def ai_historical_production_signal(rows, crop, wilaya):
+    """Return historical baseline and trend if the optional history table exists."""
+    if not rows:
+        return {"available": False, "baseline_t": None, "trend_percent": None, "years": 0}
+    aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
+    aliases.add(str(crop).strip())
+    vals = []
+    for r in rows:
+        rc = str(r.get("crop", "")).strip()
+        rw = str(r.get("wilaya", "")).strip()
+        prod = ai_safe_num(r.get("production_t"))
+        if rc in aliases and rw == str(wilaya).strip() and prod is not None:
+            vals.append((str(r.get("year", "")), prod))
+    if not vals:
+        return {"available": False, "baseline_t": None, "trend_percent": None, "years": 0}
+    vals.sort(key=lambda x: x[0])
+    recent = vals[-5:]
+    baseline = sum(v for _, v in recent) / len(recent)
+    trend = None
+    if len(vals) >= 2 and vals[0][1] > 0:
+        trend = (vals[-1][1] - vals[0][1]) / vals[0][1] * 100
+    return {"available": True, "baseline_t": baseline, "trend_percent": trend, "years": len(vals)}
+
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def ai_geocode_wilaya(wilaya):
+    """Find approximate Wilaya coordinates when the optional table is empty."""
+    try:
+        name = re.sub(r"^\d+\s*-\s*", "", str(wilaya).strip())
+        url = "https://geocoding-api.open-meteo.com/v1/search"
+        params = {"name": f"{name}, Algeria", "count": 1, "language": "en", "format": "json"}
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        if results:
+            return float(results[0]["latitude"]), float(results[0]["longitude"]), "Open-Meteo geocoding estimate"
+    except Exception:
+        pass
+    return None, None, None
+
+
+def ai_resolve_wilaya_coordinates(wilaya, location_rows):
+    for row in location_rows or []:
+        if str(row.get("wilaya", "")).strip() == str(wilaya).strip():
+            lat = ai_safe_num(row.get("latitude")); lon = ai_safe_num(row.get("longitude"))
+            if lat is not None and lon is not None:
+                return lat, lon, "Supabase wilaya_locations"
+    for loc in DEFAULT_AGRI_LOCATIONS:
+        if str(loc.get("wilaya", "")).strip() == str(wilaya).strip():
+            lat = ai_safe_num(loc.get("lat")); lon = ai_safe_num(loc.get("lon"))
+            if lat is not None and lon is not None:
+                return lat, lon, "Built-in map coordinate"
+    return ai_geocode_wilaya(wilaya)
+
+def ai_parse_weather_evidence(weather_rows, crop, wilaya):
+    """Extract observed weather/frost evidence from a normalized optional table."""
+    profile = ai_crop_profile(crop)
+    mins = []
+    rainfall = []
+    heat_days = []
+    relevant = []
+    for r in weather_rows or []:
+        rw = str(r.get("wilaya", "")).strip()
+        if rw not in {str(wilaya).strip(), "All Wilayas", "ALL", ""}:
+            continue
+        tmin = ai_safe_num(r.get("tmin_c"))
+        rain = ai_safe_num(r.get("rainfall_mm"))
+        tmax = ai_safe_num(r.get("tmax_c"))
+        dt = pd.to_datetime(r.get("observed_at"), errors="coerce")
+        month = int(dt.month) if not pd.isna(dt) else None
+        if tmin is not None:
+            mins.append(tmin)
+        if rain is not None:
+            rainfall.append(rain)
+        if tmax is not None and tmax >= 38:
+            heat_days.append(tmax)
+        if tmin is not None and month in profile.get("frost_sensitive_months", set()) and tmin <= profile.get("frost_threshold_c", -1):
+            relevant.append({"date": str(r.get("observed_at", "")), "tmin_c": tmin, "type": "frost"})
+    frost_event = min(mins) if mins else None
+    return {
+        "available": bool(weather_rows),
+        "frost_min_c": frost_event,
+        "frost_events": relevant,
+        "rainfall_total_mm": sum(rainfall) if rainfall else None,
+        "heat_days": len(heat_days),
+    }
+
+
+def ai_parse_weather_alerts(alert_rows, crop, wilaya):
+    """Use existing admin weather alerts as secondary evidence, not as measured weather."""
+    matches = []
+    keywords = {
+        "frost": ["frost", "freeze", "cold", "الصقيع", "برد"],
+        "rain": ["rain", "rainfall", "مطر", "أمطار"],
+        "heat": ["heat", "heatwave", "sirocco", "حرارة", "موجة حر", "شهيلي"],
+        "drought": ["drought", "جفاف", "water stress", "نقص المياه"],
+    }
+    for r in alert_rows or []:
+        region = str(r.get("region", "")).strip()
+        if region not in {str(wilaya).strip(), "All Wilayas", "ALL", ""}:
+            continue
+        text = " ".join(str(r.get(k, "")) for k in ["title", "message"]).lower()
+        found = [kind for kind, words in keywords.items() if any(w.lower() in text for w in words)]
+        if found:
+            matches.append({"kind": found[0], "title": str(r.get("title", "")), "date": str(r.get("created_at", ""))})
+    return matches
+
+
+def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_area, benchmark_yield,
+                   neighboring_signal=None, soil_rows=None, irrigation_rows=None,
+                   satellite_rows=None, disease_rows=None):
+    """Rank competing explanations using transparent evidence weights.
+
+    This is an expert-rule baseline, not an ML model. Each score is clipped to
+    0..1 and accompanied by evidence text so the admin can audit why it fired.
+    """
+    causes = {k: {"score": 0.0, "evidence": [], "source_quality": "none"} for k in AI_RISK_CAUSE_LABELS}
+
+    # Area/production baseline: always available if declarations and a yield benchmark exist.
+    if declared_area > 0 and benchmark_yield and benchmark_yield > 0:
+        causes["area"]["evidence"].append(f"Declared area available: {declared_area:,.1f} ha")
+        causes["area"]["score"] += 0.10
+        causes["area"]["source_quality"] = "estimated"
+
+    # Observed frost: strongest single rule when timing overlaps crop sensitivity.
+    if weather_signal.get("frost_events"):
+        min_t = weather_signal.get("frost_min_c")
+        causes["frost"]["score"] += 0.55
+        causes["frost"]["evidence"].append(f"Observed minimum temperature reached {min_t:.1f}°C during a crop-sensitive period")
+        if min_t is not None and min_t <= ai_crop_profile(crop).get("severe_frost_threshold_c", -3.0):
+            causes["frost"]["score"] += 0.20
+            causes["frost"]["evidence"].append("Temperature crossed the severe-frost planning threshold")
+        causes["frost"]["source_quality"] = "observed"
+
+    # Weather alerts are weaker than measurements.
+    alert_matches = weather_signal.get("alert_matches", [])
+    for a in alert_matches:
+        if a["kind"] == "frost":
+            causes["frost"]["score"] += 0.15
+            causes["frost"]["evidence"].append(f"Admin weather alert mentions frost: {a['title']}")
+            causes["frost"]["source_quality"] = "alert"
+        elif a["kind"] == "drought":
+            causes["drought"]["score"] += 0.20
+            causes["drought"]["evidence"].append(f"Admin weather alert mentions drought: {a['title']}")
+            causes["drought"]["source_quality"] = "alert"
+        elif a["kind"] == "heat":
+            causes["heat"]["score"] += 0.20
+            causes["heat"]["evidence"].append(f"Admin weather alert mentions heat: {a['title']}")
+            causes["heat"]["source_quality"] = "alert"
+
+    # Rainfall / irrigation / soil / satellite / disease optional evidence.
+    if irrigation_rows:
+        causes["irrigation"]["score"] += 0.20
+        causes["irrigation"]["evidence"].append("Irrigation observations are available for this investigation")
+        causes["irrigation"]["source_quality"] = "observed"
+    if soil_rows:
+        causes["soil"]["score"] += 0.15
+        causes["soil"]["evidence"].append("Soil observations are available for this investigation")
+        causes["soil"]["source_quality"] = "observed"
+    if disease_rows:
+        causes["disease"]["score"] += 0.25
+        causes["disease"]["evidence"].append("Disease reports exist for this crop/Wilaya")
+        causes["disease"]["source_quality"] = "reported"
+    if satellite_rows:
+        causes["disease"]["score"] += 0.05
+        causes["disease"]["evidence"].append("Satellite indicators are available as an independent vegetation check")
+        causes["disease"]["source_quality"] = "satellite+reported" if disease_rows else "satellite"
+
+    # Neighbor comparison increases confidence when neighboring Wilayas behave differently.
+    if neighboring_signal and neighboring_signal.get("available"):
+        gap = neighboring_signal.get("target_gap_percent")
+        if gap is not None and abs(gap) >= 10:
+            causes["frost"]["score"] += 0.10 if causes["frost"]["score"] else 0.0
+            causes["drought"]["score"] += 0.03 if causes["drought"]["score"] else 0.0
+            for key in ["frost", "drought", "disease", "irrigation", "soil"]:
+                if causes[key]["score"] > 0:
+                    causes[key]["evidence"].append(
+                        f"Neighbor comparison shows a {abs(gap):.1f}% local-vs-neighbor production/coverage difference"
+                    )
+
+    # Historical decline is supporting evidence, not a cause by itself.
+    if historical_signal.get("available") and historical_signal.get("trend_percent") is not None:
+        tr = historical_signal["trend_percent"]
+        if tr < -10:
+            causes["area"]["score"] += 0.05
+            causes["area"]["evidence"].append(f"Historical production trend is {tr:+.1f}%")
+
+    for data in causes.values():
+        data["score"] = min(max(float(data["score"]), 0.0), 0.99)
+    ranked = sorted(causes.items(), key=lambda x: x[1]["score"], reverse=True)
+    # If there is no real causal evidence, explicitly return an evidence-gap
+    # result instead of pretending that declared area is a diagnosis.
+    if not ranked or ranked[0][1]["score"] < 0.20:
+        return [(
+            "insufficient_evidence",
+            {
+                "score": 0.10,
+                "evidence": [
+                    "No external causal observation crossed the minimum evidence threshold."
+                ],
+                "source_quality": "missing data",
+            },
+        )] + ranked
+    return ranked
+
+
+def ai_estimate_investigation_impact(crop, wilaya, declared_area, benchmark_yield, historical_signal, cause_score):
+    """Estimate production and potential loss using transparent planning rules."""
+    baseline = None
+    if historical_signal.get("available") and historical_signal.get("baseline_t"):
+        baseline = float(historical_signal["baseline_t"])
+    elif declared_area > 0 and benchmark_yield:
+        baseline = float(declared_area) * float(benchmark_yield)
+
+    if baseline is None or baseline <= 0:
+        return {"baseline_t": None, "expected_t": None, "loss_t": None, "loss_percent": None, "method": "insufficient data"}
+
+    # Conservative cause-impact priors. They are planning estimates until a
+    # trained Algerian impact model is available. The score scales the prior.
+    cause_name, cause_data = cause_score
+    priors = {
+        "frost": 0.25,
+        "drought": 0.20,
+        "disease": 0.18,
+        "irrigation": 0.15,
+        "soil": 0.12,
+        "heat": 0.15,
+        "area": 0.05,
+    }
+    if cause_name == "insufficient_evidence":
+        return {"baseline_t": baseline, "expected_t": None, "loss_t": None, "loss_percent": None, "method": "insufficient causal evidence"}
+
+    prior = priors.get(cause_name, 0.05)
+    loss_pct = min(0.45, max(0.0, prior * max(0.35, float(cause_data.get("score", 0.0)))))
+    expected = baseline * (1.0 - loss_pct)
+    return {
+        "baseline_t": baseline,
+        "expected_t": expected,
+        "loss_t": baseline - expected,
+        "loss_percent": loss_pct * 100,
+        "method": "historical baseline" if historical_signal.get("available") else "declared area × planning yield",
+    }
+
+
+def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_benchmarks,
+                               weather_rows=None, weather_alert_rows=None,
+                               historical_rows=None, soil_rows=None, irrigation_rows=None,
+                               satellite_rows=None, disease_rows=None, location_rows=None):
+    """Run the complete 12-step investigation for one crop/Wilaya."""
+    crop = str(crop).strip()
+    wilaya = str(wilaya).strip()
+    declared_area = ai_declaration_area(df_live, crop, wilaya)
+    yield_benchmark = benchmark_map.get((crop, wilaya))
+    if yield_benchmark is None:
+        yield_benchmark = national_benchmarks.get(crop)
+    if yield_benchmark is None:
+        yield_benchmark = get_builtin_wilaya_yield(crop, wilaya)
+
+    weather_signal = ai_parse_weather_evidence(weather_rows or [], crop, wilaya)
+    weather_signal["alert_matches"] = ai_parse_weather_alerts(weather_alert_rows or [], crop, wilaya)
+    historical_signal = ai_historical_production_signal(historical_rows or [], crop, wilaya)
+
+    # Restrict crop-specific evidence to the selected crop/Wilaya. This is
+    # critical: a disease in another crop must never become evidence for this
+    # investigation.
+    crop_aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
+    crop_aliases.add(str(crop).strip())
+
+    def _filter_crop_wilaya(rows, crop_field="crop", wilaya_field="wilaya"):
+        out = []
+        for row in rows or []:
+            rw = str(row.get(wilaya_field, "")).strip()
+            rc = str(row.get(crop_field, "")).strip()
+            if rw not in {wilaya, "All Wilayas", "ALL", ""}:
+                continue
+            if crop_field and rc and rc not in crop_aliases:
+                continue
+            out.append(row)
+        return out
+
+    selected_soil_rows = _filter_crop_wilaya(soil_rows)
+    selected_irrigation_rows = _filter_crop_wilaya(irrigation_rows)
+    selected_satellite_rows = _filter_crop_wilaya(satellite_rows)
+    selected_disease_rows = _filter_crop_wilaya(disease_rows, crop_field="crop", wilaya_field="wilaya")
+
+    # Add basic neighbor comparison when Wilaya coordinates are available.
+    neighboring_signal = {"available": False}
+    if location_rows:
+        locs = {}
+        for r in location_rows:
+            lat = ai_safe_num(r.get("latitude")); lon = ai_safe_num(r.get("longitude"))
+            if lat is not None and lon is not None:
+                locs[str(r.get("wilaya", "")).strip()] = (lat, lon)
+        if wilaya in locs:
+            distances = []
+            lat1, lon1 = locs[wilaya]
+            for other, (lat2, lon2) in locs.items():
+                if other == wilaya:
+                    continue
+                distances.append((haversine_km(lat1, lon1, lat2, lon2), other))
+            distances.sort()
+            nearest = [w for _, w in distances[:5]]
+            # Compare declared-area coverage of nearest Wilayas.
+            neighbor_values = []
+            for nw in nearest:
+                a = ai_declaration_area(df_live, crop, nw)
+                if a > 0:
+                    y = benchmark_map.get((crop, nw), national_benchmarks.get(crop))
+                    y = y if y is not None else get_builtin_wilaya_yield(crop, nw)
+                    neighbor_values.append(a * _ai_float(y))
+            current_est = declared_area * _ai_float(yield_benchmark)
+            if neighbor_values:
+                avg_n = sum(neighbor_values) / len(neighbor_values)
+                gap = ((current_est - avg_n) / avg_n * 100) if avg_n else None
+                neighboring_signal = {"available": True, "nearest": nearest, "target_gap_percent": gap, "neighbor_average_t": avg_n}
+
+    ranked = ai_rank_causes(
+        crop, wilaya, weather_signal, historical_signal, declared_area,
+        _ai_float(yield_benchmark), neighboring_signal, selected_soil_rows, selected_irrigation_rows,
+        selected_satellite_rows, selected_disease_rows,
+    )
+    primary = ranked[0]
+    impact = ai_estimate_investigation_impact(crop, wilaya, declared_area, _ai_float(yield_benchmark), historical_signal, primary)
+
+    confidence = min(0.95, max(0.20, primary[1]["score"] + (0.15 if historical_signal.get("available") else 0.0) + (0.10 if weather_signal.get("available") else 0.0)))
+    evidence_count = sum(len(x[1]["evidence"]) for x in ranked if x[1]["score"] > 0)
+
+    recommendations = []
+    if primary[0] == "frost":
+        recommendations = [
+            "Inspect orchards in the affected flowering/fruit-set window.",
+            "Estimate the actually damaged flowering area before revising the production forecast.",
+            "Re-run the forecast after the next satellite/field observation.",
+        ]
+    elif primary[0] in {"drought", "irrigation"}:
+        recommendations = [
+            "Check irrigation records and water availability by farm/Wilaya.",
+            "Prioritize field moisture assessment in the most exposed zones.",
+            "Update the production forecast after verified irrigation and rainfall data arrive.",
+        ]
+    elif primary[0] == "disease":
+        recommendations = [
+            "Prioritize field scouting in affected areas.",
+            "Cross-check disease reports with weather and satellite anomalies.",
+            "Recalculate expected impact after confirmed diagnosis.",
+        ]
+    elif primary[0] == "soil":
+        recommendations = [
+            "Collect/verify soil analyses for the affected crop areas.",
+            "Compare pH, salinity, active lime and nutrient status with crop requirements.",
+        ]
+    else:
+        recommendations = [
+            "Collect the missing weather, production and field observations before taking operational action.",
+            "Keep the current result as a planning signal rather than a confirmed diagnosis.",
+        ]
+
+    # A useful notification should fire only when evidence is meaningful.
+    notify = bool(
+        primary[1]["score"] >= 0.55
+        and impact.get("loss_percent") is not None
+        and impact.get("loss_percent", 0) >= 10
+    )
+
+    return {
+        "crop": crop,
+        "wilaya": wilaya,
+        "declared_area_ha": declared_area,
+        "yield_benchmark_t_ha": _ai_float(yield_benchmark),
+        "historical": historical_signal,
+        "weather": weather_signal,
+        "neighbors": neighboring_signal,
+        "causes": ranked,
+        "primary_cause": primary[0],
+        "primary_label": AI_RISK_CAUSE_LABELS.get(primary[0], primary[0]),
+        "confidence": confidence,
+        "evidence_count": evidence_count,
+        "impact": impact,
+        "recommendations": recommendations,
+        "notify_admin": notify,
+        "data_status": {
+            "historical_production": bool(historical_rows),
+            "declared_area": declared_area > 0,
+            "weather": bool(weather_rows),
+            "rainfall": bool(weather_rows and any(ai_safe_num(r.get("rainfall_mm")) is not None for r in weather_rows)),
+            "soil": bool(selected_soil_rows),
+            "irrigation": bool(selected_irrigation_rows),
+            "satellite": bool(selected_satellite_rows),
+            "disease": bool(selected_disease_rows),
+            "neighbors": bool(neighboring_signal.get("available")),
+        },
+    }
+
+
+def ai_investigation_text(result):
+    """Human-readable evidence-backed explanation for the admin UI."""
+    impact = result.get("impact", {})
+    if impact.get("loss_percent") is None:
+        finding_text = (
+            f"**Finding:** {result['crop']} in {result['wilaya']} cannot yet be assigned a reliable production-loss percentage "
+            "because causal evidence is insufficient."
+        )
+    else:
+        finding_text = (
+            f"**Finding:** {result['crop']} in {result['wilaya']} has an estimated production outlook of "
+            f"{impact.get('loss_percent', 0):.1f}% below its current baseline, if the leading risk signal is real."
+        )
+    lines = [
+        finding_text,
+        f"**Most likely cause:** {result['primary_label']} — confidence {result['confidence']*100:.0f}%.",
+    ]
+    if impact.get("baseline_t") is not None:
+        lines.append(f"**Baseline:** {impact['baseline_t']:,.0f} t → **expected:** {impact['expected_t']:,.0f} t → **potential impact:** {impact['loss_t']:,.0f} t.")
+    lines.append(f"**Evidence items used:** {result.get('evidence_count', 0)}. The result is an analytical signal, not a confirmed diagnosis.")
+    return "\n\n".join(lines)
+
+
+def ai_alert_payload(result):
+    impact = result.get("impact", {})
+    return {
+        "alert_type": "production_risk",
+        "severity": "red" if result.get("confidence", 0) >= 0.80 else "orange",
+        "crop": result.get("crop"),
+        "wilaya": result.get("wilaya"),
+        "title": f"AI production risk: {result.get('crop')} — {result.get('wilaya')}",
+        "summary": ai_investigation_text(result),
+        "expected_impact_t": impact.get("loss_t"),
+        "confidence": result.get("confidence"),
+        "primary_cause": result.get("primary_cause"),
+        "evidence": [
+            {"cause": k, "score": round(v.get("score", 0), 3), "evidence": v.get("evidence", [])}
+            for k, v in result.get("causes", []) if v.get("score", 0) > 0
+        ],
+        "recommendations": result.get("recommendations", []),
+        "status": "new",
+    }
 
 def ai_build_crop_summary(df_live, all_crop_targets, benchmark_map, national_benchmarks):
     """Deterministic agricultural facts used by the local AI agent."""
@@ -2741,15 +3355,17 @@ elif st.session_state.active_tab == "account":
 
 
         with adm_tab5:
-            st.markdown("#### 🤖 AI Agricultural Analyst")
+            st.markdown("#### 🤖 AI Agricultural Analyst v2 — Investigation Engine")
             st.caption(
-                "Local tool-using agricultural AI v1. It analyzes the live Supabase declarations with deterministic statistics, "
-                "then explains the results. It does not invent production numbers. ML forecasting/retraining becomes active "
-                "once historical production, yield, weather and market data accumulate."
+                "The agent now investigates a crop × Wilaya instead of only answering statistics. "
+                "It checks available evidence, ranks competing causes, estimates impact, and can create an admin-only alert. "
+                "Missing external observations are explicitly marked as missing; built-in yield/phenology values are labeled as planning estimates."
             )
 
-            # Reuse the same live declaration source as the Agricultural Intelligence board.
             try:
+                # -------------------------------------------------
+                # LIVE DECLARATION DATA
+                # -------------------------------------------------
                 ai_res = (
                     supabase_client.table("declarations")
                     .select("crop, category, area, wilaya, start_date")
@@ -2764,43 +3380,67 @@ elif st.session_state.active_tab == "account":
                     ai_df["crop"] = ai_df["crop"].astype(str).str.strip()
                     ai_df["wilaya"] = ai_df["wilaya"].astype(str).str.strip()
 
-                # Build targets independently so this tab remains usable even if the
-                # internal intelligence tabs are changed later.
                 ai_targets = {str(k): _ai_float(v) for k, v in VEGETABLE_LIMITS.items()}
                 ai_targets.update({str(k): _ai_float(v) * 1000.0 for k, v in FRUIT_TARGETS_KHA.items()})
 
-                ai_benchmark_rows = []
-                try:
-                    ai_yields = (
-                        supabase_client.table("crop_yield_benchmarks")
-                        .select("crop, wilaya, yield_t_ha")
-                        .execute()
-                    )
-                    ai_benchmark_rows = ai_yields.data if ai_yields.data else []
-                except Exception:
-                    ai_benchmark_rows = []
-
+                # -------------------------------------------------
+                # BENCHMARKS — Supabase overrides built-in values
+                # -------------------------------------------------
+                ai_benchmark_rows, ai_benchmark_ready, _ = ai_load_optional_table(
+                    "crop_yield_benchmarks", "crop, wilaya, yield_t_ha"
+                )
                 ai_benchmark_map = {}
                 ai_national = {}
                 for row in ai_benchmark_rows:
-                    crop = str(row.get("crop", "")).strip()
+                    crop_name = str(row.get("crop", "")).strip()
                     w = row.get("wilaya")
                     y = _ai_float(row.get("yield_t_ha"), 0)
-                    if not crop or y <= 0:
+                    if not crop_name or y <= 0:
                         continue
                     if w and str(w).strip() not in {"National", "National / وطني"}:
-                        ai_benchmark_map[(crop, str(w).strip())] = y
+                        ai_benchmark_map[(crop_name, str(w).strip())] = y
                     else:
-                        ai_national[crop] = y
-                for crop, base_yield in BUILTIN_YIELD_BENCHMARKS.items():
-                    crop_aliases = {crop}
-                    if " / " in crop:
-                        left, arabic = crop.split(" / ", 1)
-                        crop_aliases.add(f"{left.strip()} ({arabic.strip()})")
-                    for crop_alias in crop_aliases:
-                        ai_national.setdefault(crop_alias, base_yield)
+                        ai_national[crop_name] = y
+                for crop_name, base_yield in BUILTIN_YIELD_BENCHMARKS.items():
+                    aliases = {crop_name}
+                    if " / " in crop_name:
+                        left, arabic = crop_name.split(" / ", 1)
+                        aliases.add(f"{left.strip()} ({arabic.strip()})")
+                    for alias in aliases:
+                        ai_national.setdefault(alias, base_yield)
                         for w in WILAYAS_48:
-                            ai_benchmark_map.setdefault((crop_alias, w), get_builtin_wilaya_yield(crop_alias, w))
+                            ai_benchmark_map.setdefault((alias, w), get_builtin_wilaya_yield(alias, w))
+
+                # -------------------------------------------------
+                # OPTIONAL INVESTIGATION DATA SOURCES
+                # -------------------------------------------------
+                history_rows, history_ready, _ = ai_load_optional_table(
+                    "historical_production", "year, crop, wilaya, area_ha, production_t, yield_t_ha, source"
+                )
+                weather_rows, weather_ready, _ = ai_load_optional_table(
+                    "weather_observations", "observed_at, wilaya, tmin_c, tmax_c, rainfall_mm, source"
+                )
+                soil_rows, soil_ready, _ = ai_load_optional_table(
+                    "soil_observations", "observed_at, wilaya, crop, ph, ec_ds_m, caco3_percent, organic_matter_percent, soil_moisture_percent, source"
+                )
+                irrigation_rows, irrigation_ready, _ = ai_load_optional_table(
+                    "irrigation_observations", "observed_at, wilaya, crop, water_mm, irrigation_hours, source"
+                )
+                satellite_rows, satellite_ready, _ = ai_load_optional_table(
+                    "satellite_indicators", "observed_at, wilaya, crop, ndvi, ndwi, evi, fapar, anomaly_percent, source"
+                )
+                disease_rows, disease_ready, _ = ai_load_optional_table(
+                    "disease_reports", "reported_at, wilaya, crop, disease, severity, affected_area_ha, source"
+                )
+                location_rows, location_ready, _ = ai_load_optional_table(
+                    "wilaya_locations", "wilaya, latitude, longitude"
+                )
+                weather_alert_rows, _, _ = ai_load_optional_table(
+                    "weather_alerts", "id, title, region, severity, message, created_at"
+                )
+                ai_alert_rows, ai_alert_table_ready, _ = ai_load_optional_table(
+                    "admin_ai_alerts", "id, created_at, alert_type, severity, crop, wilaya, title, summary, expected_impact_t, confidence, primary_cause, status, reviewed_at"
+                )
 
                 ai_crop_summary = ai_build_crop_summary(ai_df, ai_targets, ai_benchmark_map, ai_national)
                 ai_trends = ai_trend_analysis(ai_df)
@@ -2815,31 +3455,253 @@ elif st.session_state.active_tab == "account":
                 with m3:
                     st.metric("🗺️ Active Wilayas", f"{ai_df['wilaya'].nunique() if not ai_df.empty else 0}")
                 with m4:
-                    st.metric("🔎 Review Flags", f"{len(ai_anomalies):,}")
+                    st.metric("🚨 AI Alerts", f"{len(ai_alert_rows):,}")
 
-                ai_tab1, ai_tab2, ai_tab3 = st.tabs([
-                    "🧠 Ask the Agent",
+                ai_tab1, ai_tab2, ai_tab3, ai_tab4, ai_tab5 = st.tabs([
+                    "🔎 Investigation",
+                    "🚨 AI Alerts",
                     "📈 Automatic Analysis",
-                    "🧪 Learning Readiness",
+                    "🧠 Ask the Agent",
+                    "🧪 Data & Learning",
                 ])
 
+                # -------------------------------------------------
+                # TAB 1 — INVESTIGATION
+                # -------------------------------------------------
                 with ai_tab1:
-                    st.markdown("##### Ask the agricultural agent")
-                    st.write("Examples: *Which crop is most concentrated?* · *What crop has the lowest coverage?* · *What data is missing for real forecasting?*")
-                    ai_question = st.text_input(
-                        "Question / السؤال",
-                        placeholder="Which crop is most concentrated in one Wilaya?",
-                        key="ai_agri_question",
+                    st.markdown("##### 🔎 12-step agricultural investigation")
+                    st.write(
+                        "Select a crop and Wilaya. The engine will inspect historical production, declared area, "
+                        "weather, rainfall, soil, irrigation, satellite indicators, disease reports and nearby Wilayas, "
+                        "then rank causes, estimate impact and recommend interventions."
                     )
-                    if st.button("🤖 Analyze", key="ai_agri_analyze"):
-                        answer = ai_agent_answer(
-                            ai_question, ai_df, ai_crop_summary, ai_trends, ai_concentration, ai_anomalies
-                        )
-                        st.markdown("##### Agent finding")
-                        st.info(answer)
 
+                    investigation_crops = list(ai_targets.keys())
+                    default_crop = "Almonds (لوز)" if "Almonds (لوز)" in investigation_crops else (investigation_crops[0] if investigation_crops else "")
+                    ic1, ic2 = st.columns(2)
+                    with ic1:
+                        selected_investigation_crop = st.selectbox(
+                            "Crop / المحصول",
+                            investigation_crops,
+                            index=investigation_crops.index(default_crop) if default_crop in investigation_crops else 0,
+                            key="ai_investigation_crop",
+                        )
+                    with ic2:
+                        selected_investigation_wilaya = st.selectbox(
+                            "Wilaya / الولاية",
+                            WILAYAS_48,
+                            index=WILAYAS_48.index("17 - Djelfa") if "17 - Djelfa" in WILAYAS_48 else 0,
+                            key="ai_investigation_wilaya",
+                        )
+
+                    run_investigation = st.button("🔍 Run Full Investigation", key="ai_run_investigation", type="primary")
+                    if run_investigation:
+                        # Weather is the first external sensor we can safely add
+                        # without a secret key. Prefer stored observations; if none
+                        # exist, fetch an explicitly-labelled external planning series.
+                        investigation_weather_rows = list(weather_rows or [])
+                        weather_source_label = "Supabase observations" if investigation_weather_rows else "Not available"
+                        if not investigation_weather_rows:
+                            wlat, wlon, coord_source = ai_resolve_wilaya_coordinates(
+                                selected_investigation_wilaya, location_rows
+                            )
+                            if wlat is not None and wlon is not None:
+                                external_rows = ai_fetch_external_weather(
+                                    selected_investigation_wilaya, wlat, wlon, days_back=365
+                                )
+                                if external_rows:
+                                    investigation_weather_rows.extend(external_rows)
+                                    weather_source_label = "Open-Meteo historical weather (external planning source)"
+                        result = ai_investigate_crop_wilaya(
+                            selected_investigation_crop,
+                            selected_investigation_wilaya,
+                            ai_df,
+                            ai_benchmark_map,
+                            ai_national,
+                            weather_rows=investigation_weather_rows,
+                            weather_alert_rows=weather_alert_rows,
+                            historical_rows=history_rows,
+                            soil_rows=soil_rows,
+                            irrigation_rows=irrigation_rows,
+                            satellite_rows=satellite_rows,
+                            disease_rows=disease_rows,
+                            location_rows=location_rows,
+                        )
+                        result["weather_source_label"] = weather_source_label
+                        st.session_state["last_ai_investigation"] = result
+
+                    result = st.session_state.get("last_ai_investigation")
+                    if result:
+                        st.divider()
+                        impact = result.get("impact", {})
+                        confidence = result.get("confidence", 0.0) * 100
+                        primary = result.get("primary_label", "Unknown")
+
+                        if result.get("notify_admin"):
+                            st.error(
+                                f"🚨 HIGH PRIORITY SIGNAL — {result['crop']} / {result['wilaya']} — "
+                                f"{primary} — confidence {confidence:.0f}%"
+                            )
+                        else:
+                            st.info(
+                                f"🧠 Current finding — {result['crop']} / {result['wilaya']} — "
+                                f"{primary} — confidence {confidence:.0f}%"
+                            )
+
+                        r1, r2, r3, r4 = st.columns(4)
+                        with r1:
+                            st.metric("Declared Area", f"{result['declared_area_ha']:,.1f} ha")
+                        with r2:
+                            st.metric("Baseline", "—" if impact.get("baseline_t") is None else f"{impact['baseline_t']:,.0f} t")
+                        with r3:
+                            st.metric("Expected", "—" if impact.get("expected_t") is None else f"{impact['expected_t']:,.0f} t")
+                        with r4:
+                            st.metric("Potential Impact", "—" if impact.get("loss_t") is None else f"-{impact['loss_t']:,.0f} t")
+
+                        st.markdown("##### 🧠 Agent conclusion")
+                        st.markdown(ai_investigation_text(result))
+                        if result.get("weather_source_label"):
+                            st.caption(f"Weather source used: {result['weather_source_label']}. External weather is a planning source until ONM/official observations are connected.")
+
+                        st.markdown("##### 🔬 Evidence chain")
+                        status_rows = [
+                            ("1. Historical production", result["data_status"]["historical_production"], "Historical production/yield baseline"),
+                            ("2. Declared area", result["data_status"]["declared_area"], f"{result['declared_area_ha']:,.1f} ha declared"),
+                            ("3. Weather", result["data_status"]["weather"], "Observed weather table"),
+                            ("4. Rainfall", result["data_status"]["rainfall"], "Rainfall observations"),
+                            ("5. Soil", result["data_status"]["soil"], "Soil observations"),
+                            ("6. Irrigation", result["data_status"]["irrigation"], "Irrigation observations"),
+                            ("7. Satellite indicators", result["data_status"]["satellite"], "NDVI/NDWI/EVI/FAPAR indicators"),
+                            ("8. Disease reports", result["data_status"]["disease"], "Disease reports"),
+                            ("9. Neighboring Wilayas", result["data_status"]["neighbors"], "Nearest-Wilaya comparison"),
+                        ]
+                        evidence_display = pd.DataFrame([
+                            {"Check": name, "Status": "✅ Available" if available else "🟡 Missing", "What it contributes": contribution}
+                            for name, available, contribution in status_rows
+                        ])
+                        st.dataframe(evidence_display, use_container_width=True, hide_index=True)
+
+                        st.markdown("##### ⚖️ Competing causes")
+                        cause_rows = []
+                        for cause, data in result.get("causes", []):
+                            cause_rows.append({
+                                "Cause": AI_RISK_CAUSE_LABELS.get(cause, cause),
+                                "Score": f"{data['score']*100:.0f}%",
+                                "Evidence": "; ".join(data.get("evidence", [])) if data.get("evidence") else "No supporting evidence",
+                                "Source quality": data.get("source_quality", "none"),
+                            })
+                        st.dataframe(pd.DataFrame(cause_rows), use_container_width=True, hide_index=True)
+
+                        st.markdown("##### 🌍 Neighbor comparison")
+                        if result.get("neighbors", {}).get("available"):
+                            ns = result["neighbors"]
+                            st.write(
+                                f"Nearest Wilayas: {', '.join(ns.get('nearest', []))}. "
+                                f"Current estimated production differs from their average by "
+                                f"{ns.get('target_gap_percent', 0):+.1f}%."
+                            )
+                        else:
+                            st.info("Neighbor comparison requires `wilaya_locations` coordinates and at least one neighboring declaration.")
+
+                        st.markdown("##### 🛠️ Recommended interventions")
+                        for recommendation in result.get("recommendations", []):
+                            st.write(f"• {recommendation}")
+
+                        if result.get("notify_admin"):
+                            if ai_alert_table_ready:
+                                if st.button("🚨 Create Admin AI Alert", key="ai_create_alert"):
+                                    try:
+                                        supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(result)).execute()
+                                        st.success("AI alert saved for the administrator.")
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Could not save the AI alert: {exc}")
+                            else:
+                                st.warning("The investigation reached the alert threshold, but `admin_ai_alerts` does not exist yet. Create the SQL shown in the Data & Learning tab.")
+
+                # -------------------------------------------------
+                # TAB 2 — ADMIN AI ALERTS
+                # -------------------------------------------------
                 with ai_tab2:
-                    st.markdown("##### Automatic findings")
+                    st.markdown("##### 🚨 Admin-only AI production alerts")
+                    st.caption("These alerts are intentionally separate from farmer notifications. They require administrator review before any farmer-facing action.")
+                    if ai_alert_table_ready:
+                        st.markdown("###### 🔄 National risk scan")
+                        st.write(
+                            "The scan checks every crop × active Wilaya combination with the same evidence engine. "
+                            "It only creates alerts when the cause score and estimated impact cross the configured threshold."
+                        )
+                        if st.button("🔍 Run National AI Risk Scan", key="ai_national_risk_scan"):
+                            active_pairs = []
+                            if not ai_df.empty:
+                                for (crop_name, wilaya_name), _group in ai_df.groupby(["crop", "wilaya"]):
+                                    if str(crop_name).strip() and str(wilaya_name).strip():
+                                        active_pairs.append((str(crop_name).strip(), str(wilaya_name).strip()))
+                            generated = []
+                            weather_cache = {}
+                            for _crop_name, wilaya_name in active_pairs:
+                                if wilaya_name not in weather_cache:
+                                    if weather_rows:
+                                        weather_cache[wilaya_name] = weather_rows
+                                    else:
+                                        wlat, wlon, _coord_source = ai_resolve_wilaya_coordinates(wilaya_name, location_rows)
+                                        weather_cache[wilaya_name] = (
+                                            ai_fetch_external_weather(wilaya_name, wlat, wlon, days_back=365)
+                                            if wlat is not None and wlon is not None else []
+                                        )
+                                scan_result = ai_investigate_crop_wilaya(
+                                    crop_name, wilaya_name, ai_df, ai_benchmark_map, ai_national,
+                                    weather_rows=weather_cache.get(wilaya_name, []), weather_alert_rows=weather_alert_rows,
+                                    historical_rows=history_rows, soil_rows=soil_rows,
+                                    irrigation_rows=irrigation_rows, satellite_rows=satellite_rows,
+                                    disease_rows=disease_rows, location_rows=location_rows,
+                                )
+                                if scan_result.get("notify_admin"):
+                                    generated.append(scan_result)
+                            inserted = 0
+                            existing_alert_keys = {
+                                (str(r.get("crop", "")).strip(), str(r.get("wilaya", "")).strip(), str(r.get("primary_cause", "")).strip())
+                                for r in ai_alert_rows
+                            }
+                            for scan_result in generated:
+                                alert_key = (
+                                    str(scan_result.get("crop", "")).strip(),
+                                    str(scan_result.get("wilaya", "")).strip(),
+                                    str(scan_result.get("primary_cause", "")).strip(),
+                                )
+                                if alert_key in existing_alert_keys:
+                                    continue
+                                try:
+                                    supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(scan_result)).execute()
+                                    existing_alert_keys.add(alert_key)
+                                    inserted += 1
+                                except Exception:
+                                    pass
+                            if inserted:
+                                st.success(f"National scan complete: {inserted} admin AI alert(s) created.")
+                            else:
+                                st.info("National scan complete: no investigation crossed the alert threshold.")
+                            st.rerun()
+
+                    if not ai_alert_table_ready:
+                        st.warning("`admin_ai_alerts` is not available yet. Create the table from the SQL in the Data & Learning tab.")
+                    elif not ai_alert_rows:
+                        st.success("🟢 No stored AI production alerts yet.")
+                    else:
+                        alerts_df = pd.DataFrame(ai_alert_rows)
+                        if "confidence" in alerts_df:
+                            alerts_df["confidence"] = pd.to_numeric(alerts_df["confidence"], errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x*100:.0f}%")
+                        if "expected_impact_t" in alerts_df:
+                            alerts_df["expected_impact_t"] = pd.to_numeric(alerts_df["expected_impact_t"], errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:,.0f} t")
+                        cols = [c for c in ["created_at", "severity", "crop", "wilaya", "title", "expected_impact_t", "confidence", "primary_cause", "status"] if c in alerts_df.columns]
+                        st.dataframe(alerts_df[cols], use_container_width=True, hide_index=True)
+                        st.info("Review the full investigation before publishing any recommendation to farmers.")
+
+                # -------------------------------------------------
+                # TAB 3 — AUTOMATIC ANALYSIS
+                # -------------------------------------------------
+                with ai_tab3:
+                    st.markdown("##### 📈 Automatic national analysis")
                     if ai_crop_summary.empty:
                         st.info("No declarations are available yet. The agent will start analyzing as farmer data arrives.")
                     else:
@@ -2856,7 +3718,6 @@ elif st.session_state.active_tab == "account":
                         else:
                             st.write("🔎 **Anomaly scan:** no unusually large declaration was flagged by the current IQR rule.")
 
-                        st.markdown("##### Crop analytical table")
                         display_ai = ai_crop_summary.copy()
                         for c in ["Declared Area (Ha)", "Target Area (Ha)", "Estimated Production (t)"]:
                             display_ai[c] = display_ai[c].map(lambda x: f"{float(x):,.1f}")
@@ -2869,25 +3730,164 @@ elif st.session_state.active_tab == "account":
                             trend_display = ai_trends.copy()
                             trend_display["Change (%)"] = trend_display["Change (%)"].map(lambda x: "—" if pd.isna(x) else f"{float(x):+,.1f}%")
                             st.dataframe(trend_display, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("Trend learning is waiting for declarations from at least two different years.")
 
-                with ai_tab3:
-                    st.markdown("##### What the agent can learn from next")
-                    st.write("The current agent learns its analytical baseline from the accumulated declaration database on every run. For genuine predictive learning, it needs historical labeled outcomes.")
+                # -------------------------------------------------
+                # TAB 4 — ASK AGENT
+                # -------------------------------------------------
+                with ai_tab4:
+                    st.markdown("##### 🧠 Ask the agricultural agent")
+                    st.write(
+                        "Examples: *Which crop is most concentrated?* · *What crop has the lowest coverage?* · "
+                        "*What data is missing for real forecasting?* · *What causes should I investigate for almonds?*"
+                    )
+                    ai_question = st.text_input(
+                        "Question / السؤال",
+                        placeholder="What data is missing for a reliable almond production forecast?",
+                        key="ai_agri_question_v2",
+                    )
+                    if st.button("🤖 Analyze", key="ai_agri_analyze_v2"):
+                        answer = ai_agent_answer(
+                            ai_question, ai_df, ai_crop_summary, ai_trends, ai_concentration, ai_anomalies
+                        )
+                        st.markdown("##### Agent finding")
+                        st.info(answer)
+
+                # -------------------------------------------------
+                # TAB 5 — DATA, SQL & LEARNING READINESS
+                # -------------------------------------------------
+                with ai_tab5:
+                    st.markdown("##### 🧪 Investigation data readiness")
                     readiness = pd.DataFrame([
-                        {"Data stream": "Farmer declarations", "Current role": "Live analysis", "Learning status": "✅ Available"},
-                        {"Data stream": "Yield / production history", "Current role": "Train yield models", "Learning status": "🟡 Needed for ML forecasting"},
-                        {"Data stream": "Weather by Wilaya", "Current role": "Explain yield variation", "Learning status": "🟡 Needed"},
-                        {"Data stream": "Market prices / demand", "Current role": "Demand & price forecasting", "Learning status": "🟡 Needed"},
-                        {"Data stream": "Official ONS/MADR data", "Current role": "Ground truth / validation", "Learning status": "🟡 Add historical series"},
-                        {"Data stream": "Logistics / transport", "Current role": "Distribution optimization", "Learning status": "✅ Optimization engine active"},
+                        {"Data stream": "Farmer declarations", "Status": "✅ Live", "Agent use": "Area, crop, Wilaya, current planning baseline"},
+                        {"Data stream": "Historical production", "Status": "🟡 Optional table", "Agent use": "True production baseline and trend"},
+                        {"Data stream": "Weather + rainfall", "Status": "🟡 Optional table", "Agent use": "Frost, heat, rainfall anomalies"},
+                        {"Data stream": "Soil", "Status": "🟡 Optional table", "Agent use": "pH, salinity, lime, moisture and soil limitations"},
+                        {"Data stream": "Irrigation", "Status": "🟡 Optional table", "Agent use": "Water-stress / irrigation diagnosis"},
+                        {"Data stream": "Satellite", "Status": "🟡 Optional table", "Agent use": "NDVI/NDWI/EVI/FAPAR vegetation reality check"},
+                        {"Data stream": "Disease reports", "Status": "🟡 Optional table", "Agent use": "Disease evidence and impact"},
+                        {"Data stream": "Wilaya coordinates", "Status": "🟡 Existing optional table", "Agent use": "Nearest-Wilaya comparison"},
+                        {"Data stream": "Admin AI alerts", "Status": "🟡 Optional table", "Agent use": "Store and review high-priority investigations"},
                     ])
                     st.dataframe(readiness, use_container_width=True, hide_index=True)
+
+                    st.markdown("##### 🧮 Fallback policy")
                     st.info(
-                        "🧠 Architecture: Supabase data → analytical tools → ML models when enough historical labels exist → AI agent explanation → optimization. "
-                        "The LLM layer can be connected later so it can call these tools and explain results in natural language without inventing numeric facts."
+                        "The agent uses Supabase observations first. If a yield benchmark is missing, it uses the built-in planning benchmark; "
+                        "Potato, tomato and onion use historical ONS national yield bases already documented in this app, while the remaining crop/Wilaya yields are planning estimates. "
+                        "Phenology/frost windows are also planning rules. Missing weather, soil, satellite or disease observations are NEVER invented as observed events."
                     )
+
+                    st.markdown("##### 🗄️ SQL — create the investigation data tables")
+                    st.code(r'''-- 1) Historical production / yield
+create table if not exists public.historical_production (
+  id bigint generated by default as identity primary key,
+  year integer not null,
+  crop text not null,
+  wilaya text not null,
+  area_ha numeric check (area_ha is null or area_ha >= 0),
+  production_t numeric check (production_t is null or production_t >= 0),
+  yield_t_ha numeric check (yield_t_ha is null or yield_t_ha >= 0),
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 2) Weather + rainfall observations
+create table if not exists public.weather_observations (
+  id bigint generated by default as identity primary key,
+  observed_at timestamptz not null,
+  wilaya text,
+  tmin_c numeric,
+  tmax_c numeric,
+  rainfall_mm numeric check (rainfall_mm is null or rainfall_mm >= 0),
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 3) Soil observations
+create table if not exists public.soil_observations (
+  id bigint generated by default as identity primary key,
+  observed_at timestamptz default now(),
+  wilaya text,
+  crop text,
+  ph numeric,
+  ec_ds_m numeric,
+  caco3_percent numeric,
+  organic_matter_percent numeric,
+  soil_moisture_percent numeric,
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 4) Irrigation observations
+create table if not exists public.irrigation_observations (
+  id bigint generated by default as identity primary key,
+  observed_at timestamptz default now(),
+  wilaya text,
+  crop text,
+  water_mm numeric check (water_mm is null or water_mm >= 0),
+  irrigation_hours numeric check (irrigation_hours is null or irrigation_hours >= 0),
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 5) Satellite indicators
+create table if not exists public.satellite_indicators (
+  id bigint generated by default as identity primary key,
+  observed_at timestamptz not null,
+  wilaya text,
+  crop text,
+  ndvi numeric,
+  ndwi numeric,
+  evi numeric,
+  fapar numeric,
+  anomaly_percent numeric,
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 6) Disease reports
+create table if not exists public.disease_reports (
+  id bigint generated by default as identity primary key,
+  reported_at timestamptz default now(),
+  wilaya text,
+  crop text,
+  disease text,
+  severity text,
+  affected_area_ha numeric check (affected_area_ha is null or affected_area_ha >= 0),
+  source text,
+  created_at timestamptz default now()
+);
+
+-- 7) Admin-only AI alerts
+create table if not exists public.admin_ai_alerts (
+  id bigint generated by default as identity primary key,
+  created_at timestamptz default now(),
+  alert_type text,
+  severity text,
+  crop text,
+  wilaya text,
+  title text,
+  summary text,
+  expected_impact_t numeric,
+  confidence numeric,
+  primary_cause text,
+  evidence jsonb,
+  recommendations jsonb,
+  status text default 'new',
+  reviewed_at timestamptz
+);
+
+create index if not exists idx_admin_ai_alerts_status
+on public.admin_ai_alerts(status, created_at desc);
+''', language="sql")
+
+                    st.markdown("##### 🌐 External data roadmap")
+                    st.write(
+                        "Next connectors should populate these tables automatically. For satellite monitoring, Copernicus Sentinel-2 provides "
+                        "free multispectral data suitable for vegetation, soil and water monitoring; the agent can later calculate NDVI/EVI/NDWI "
+                        "and compare current values with historical baselines."
+                    )
+                    st.markdown("Sources to connect next: **MADR/ONS → weather → Copernicus Sentinel → soil → disease → market data.**")
 
             except Exception as e:
                 st.error(f"Unable to run the agricultural AI analyst: {e}")
