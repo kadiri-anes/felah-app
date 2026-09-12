@@ -925,8 +925,18 @@ def ai_investigation_text(result):
         finding_text,
         f"**Most likely cause:** {result['primary_label']} — confidence {result['confidence']*100:.0f}%.",
     ]
-    if impact.get("baseline_t") is not None:
-        lines.append(f"**Baseline:** {impact['baseline_t']:,.0f} t → **expected:** {impact['expected_t']:,.0f} t → **potential impact:** {impact['loss_t']:,.0f} t.")
+    baseline_t = impact.get("baseline_t")
+    expected_t = impact.get("expected_t")
+    loss_t = impact.get("loss_t")
+    if baseline_t is not None:
+        if expected_t is not None and loss_t is not None:
+            lines.append(
+                f"**Baseline:** {baseline_t:,.0f} t → **expected:** {expected_t:,.0f} t → **potential impact:** {loss_t:,.0f} t."
+            )
+        else:
+            lines.append(
+                f"**Baseline:** {baseline_t:,.0f} t. Expected production impact is not estimated because causal evidence is insufficient."
+            )
     lines.append(f"**Evidence items used:** {result.get('evidence_count', 0)}. The result is an analytical signal, not a confirmed diagnosis.")
     return "\n\n".join(lines)
 
