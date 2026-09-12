@@ -26,7 +26,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # CONSTANTS & DATA STRUCTURES
 # ---------------------------------------------------------
-WILAYAS_48 = [
+WILAYAS_69 = [
     "01 - Adrar",
     "02 - Chlef",
     "03 - Laghouat",
@@ -75,7 +75,30 @@ WILAYAS_48 = [
     "46 - Aïn Témouchent",
     "47 - Ghardaïa",
     "48 - Relizane",
+    "49 - Timimoun",
+    "50 - Bordj Badji Mokhtar",
+    "51 - Ouled Djellal",
+    "52 - Béni Abbès",
+    "53 - In Salah",
+    "54 - In Guezzam",
+    "55 - Touggourt",
+    "56 - Djanet",
+    "57 - El Meghaier",
+    "58 - El Meniaâ",
+    "59 - Aflou",
+    "60 - Barika",
+    "61 - El Kantara",
+    "62 - Bir El Ater",
+    "63 - El Aricha",
+    "64 - Ksar Chellala",
+    "65 - Aïn Oussara",
+    "66 - Messaad",
+    "67 - Ksar El Boukhari",
+    "68 - Bou Saada",
+    "69 - El Abiodh Sidi Cheikh",
 ]
+
+NATIONAL_WILAYA_OPTION = "🇩🇿 Whole Country / الجزائر كاملة"
 
 DEFAULT_AGRI_LOCATIONS = [
     {
@@ -204,7 +227,7 @@ BUILTIN_OFFICIAL_BENCHMARKS = {
 # ------------------------------------------------------------------
 # These are intentionally estimates, not claimed Ministry benchmarks.
 # They guarantee that every crop has a usable fallback for every one of
-# the 48 Wilayas until official MADR/technical-institute figures are entered
+# the 69 Wilayas until official MADR/technical-institute figures are entered
 # in crop_yield_benchmarks. Supabase Wilaya-specific values always override
 # these estimates.
 #
@@ -234,6 +257,18 @@ WILAYA_YIELD_ZONE_FACTORS = {
     # Sahara / irrigated production zones
     "01 - Adrar": 0.82, "11 - Tamanrasset": 0.62, "33 - Illizi": 0.62,
     "37 - Tindouf": 0.60, "39 - El Oued": 0.95, "47 - Ghardaïa": 0.78,
+    # 2019-created Wilayas
+    "49 - Timimoun": 0.80, "50 - Bordj Badji Mokhtar": 0.58,
+    "51 - Ouled Djellal": 0.88, "52 - Béni Abbès": 0.74,
+    "53 - In Salah": 0.68, "54 - In Guezzam": 0.58,
+    "55 - Touggourt": 0.90, "56 - Djanet": 0.62,
+    "57 - El Meghaier": 0.90, "58 - El Meniaâ": 0.82,
+    # 2026-created Wilayas: conservative regional planning factors.
+    "59 - Aflou": 0.76, "60 - Barika": 0.86, "61 - El Kantara": 0.88,
+    "62 - Bir El Ater": 0.80, "63 - El Aricha": 0.82,
+    "64 - Ksar Chellala": 0.76, "65 - Aïn Oussara": 0.74,
+    "66 - Messaad": 0.70, "67 - Ksar El Boukhari": 0.88,
+    "68 - Bou Saada": 0.76, "69 - El Abiodh Sidi Cheikh": 0.72,
 }
 
 CROP_WILAYA_GROUP_FACTORS = {
@@ -311,7 +346,11 @@ def get_builtin_wilaya_yield(crop_name, wilaya_name):
     # of measured Wilaya productivity.
     if crop_name in CROP_WILAYA_GROUP_FACTORS["arid_irrigated"] and str(wilaya_name).strip() in {
         "01 - Adrar", "07 - Biskra", "08 - Béchar", "11 - Tamanrasset",
-        "30 - Ouargla", "33 - Illizi", "37 - Tindouf", "39 - El Oued", "47 - Ghardaïa"
+        "30 - Ouargla", "33 - Illizi", "37 - Tindouf", "39 - El Oued", "47 - Ghardaïa",
+        "49 - Timimoun", "50 - Bordj Badji Mokhtar", "51 - Ouled Djellal",
+        "52 - Béni Abbès", "53 - In Salah", "54 - In Guezzam", "55 - Touggourt",
+        "56 - Djanet", "57 - El Meghaier", "58 - El Meniaâ", "61 - El Kantara",
+        "68 - Bou Saada", "69 - El Abiodh Sidi Cheikh"
     }:
         factor *= 1.08
     elif crop_name in CROP_WILAYA_GROUP_FACTORS["cool_north"] and factor < 0.80:
@@ -1172,6 +1211,138 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     }
 
 
+def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
+                           weather_rows=None, weather_alert_rows=None,
+                           historical_rows=None, soil_rows=None, irrigation_rows=None,
+                           satellite_rows=None, disease_rows=None, location_rows=None):
+    """Run the same evidence engine across all 69 Wilayas and aggregate the result nationally."""
+    crop = str(crop).strip()
+    per_wilaya = []
+    for wilaya in WILAYAS_69:
+        per_wilaya.append(
+            ai_investigate_crop_wilaya(
+                crop, wilaya, df_live, benchmark_map, national_benchmarks,
+                weather_rows=weather_rows, weather_alert_rows=weather_alert_rows,
+                historical_rows=historical_rows, soil_rows=soil_rows,
+                irrigation_rows=irrigation_rows, satellite_rows=satellite_rows,
+                disease_rows=disease_rows, location_rows=location_rows,
+            )
+        )
+
+    cause_scores = {}
+    cause_evidence = {}
+    for r in per_wilaya:
+        cause = r.get("primary_cause", "insufficient_evidence")
+        score = float(r.get("confidence", 0.0) or 0.0)
+        cause_scores[cause] = cause_scores.get(cause, 0.0) + score
+        cause_evidence.setdefault(cause, []).append(r)
+
+    ranked_causes = []
+    for cause, rows in cause_evidence.items():
+        avg_score = cause_scores.get(cause, 0.0) / max(len(rows), 1)
+        examples = []
+        for rr in sorted(rows, key=lambda x: float(x.get("confidence", 0.0) or 0.0), reverse=True)[:5]:
+            examples.append(
+                f"{rr.get('wilaya')}: {AI_RISK_CAUSE_LABELS.get(cause, cause)}"
+            )
+        ranked_causes.append((cause, {
+            "score": min(0.99, avg_score),
+            "evidence": [
+                f"Primary cause in {len(rows)} of {len(per_wilaya)} Wilayas",
+                *examples,
+            ],
+            "source_quality": "aggregated national evidence",
+        }))
+    ranked_causes.sort(key=lambda x: x[1]["score"], reverse=True)
+    if not ranked_causes:
+        ranked_causes = [("insufficient_evidence", {
+            "score": 0.10,
+            "evidence": ["No Wilaya produced sufficient causal evidence."],
+            "source_quality": "missing data",
+        })]
+
+    total_declared = sum(float(r.get("declared_area_ha", 0.0) or 0.0) for r in per_wilaya)
+    total_baseline = 0.0
+    total_expected = 0.0
+    total_loss = 0.0
+    has_impact = False
+    for r in per_wilaya:
+        impact = r.get("impact", {})
+        b = impact.get("baseline_t")
+        e = impact.get("expected_t")
+        loss = impact.get("loss_t")
+        if b is not None:
+            total_baseline += float(b)
+        if e is not None:
+            total_expected += float(e)
+        if loss is not None:
+            total_loss += float(loss)
+            has_impact = True
+
+    loss_percent = (total_loss / total_baseline * 100.0) if has_impact and total_baseline > 0 else None
+    primary = ranked_causes[0]
+    confidence = min(0.95, max(0.20, float(primary[1]["score"])))
+    notify = bool(
+        primary[1]["score"] >= 0.55
+        and loss_percent is not None
+        and loss_percent >= 10
+    )
+
+    recommendations = [
+        "Prioritize the highest-risk Wilayas shown in the evidence chain before taking national action.",
+        "Compare affected Wilayas with neighboring and lower-risk Wilayas to separate national from local causes.",
+        "Update the national forecast as new satellite, weather, production and disease evidence arrives.",
+    ]
+    if primary[0] == "disease":
+        recommendations.insert(0, "Prioritize field scouting and confirmation of reported disease outbreaks in the highest-risk Wilayas.")
+    elif primary[0] in {"drought", "irrigation"}:
+        recommendations.insert(0, "Prioritize water-stress and irrigation checks in the highest-risk Wilayas.")
+    elif primary[0] == "frost":
+        recommendations.insert(0, "Prioritize frost-damaged crop areas and flowering-stage fields in the highest-risk Wilayas.")
+
+    return {
+        "crop": crop,
+        "wilaya": "🇩🇿 Whole Country / الجزائر كاملة",
+        "declared_area_ha": total_declared,
+        "yield_benchmark_t_ha": None,
+        "historical": {"available": False},
+        "weather": {"available": bool(weather_rows)},
+        "soil_estimate": None,
+        "irrigation_proxy": {"available": bool(satellite_rows)},
+        "neighbors": {"available": False},
+        "causes": ranked_causes,
+        "primary_cause": primary[0],
+        "primary_label": AI_RISK_CAUSE_LABELS.get(primary[0], primary[0]),
+        "confidence": confidence,
+        "evidence_count": sum(len(x[1].get("evidence", [])) for x in ranked_causes),
+        "impact": {
+            "baseline_t": total_baseline if total_baseline > 0 else None,
+            "expected_t": total_expected if has_impact else None,
+            "loss_t": total_loss if has_impact else None,
+            "loss_percent": loss_percent,
+            "method": "sum of 69 Wilaya planning estimates",
+        },
+        "recommendations": recommendations,
+        "notify_admin": notify,
+        "national_wilaya_results": per_wilaya,
+        "data_status": {
+            "historical_production": bool(historical_rows),
+            "declared_area": total_declared > 0,
+            "weather": bool(weather_rows),
+            "rainfall": bool(weather_rows),
+            "soil": bool(soil_rows),
+            "soil_measured": bool(soil_rows),
+            "irrigation": bool(irrigation_rows) or bool(satellite_rows),
+            "irrigation_measured": bool(irrigation_rows),
+            "irrigation_satellite_proxy": bool(satellite_rows),
+            "satellite": bool(satellite_rows),
+            "disease": bool(disease_rows),
+            "neighbors": False,
+        },
+    }
+
+
+
 def ai_investigation_text(result):
     """Human-readable evidence-backed explanation for the admin UI."""
     impact = result.get("impact", {})
@@ -1681,7 +1852,7 @@ def min_cost_transfer_plan(surplus_rows, deficit_rows, distance_map, cost_per_t_
     eps = 1e-8
 
     while True:
-        # Bellman-Ford on the residual graph. The graph is small (48 Wilayas),
+        # Bellman-Ford on the residual graph. The graph is small (69 Wilayas),
         # and this also handles negative reverse-edge costs safely.
         dist = [float("inf")] * n
         prev = [None] * n
@@ -3032,7 +3203,7 @@ if st.session_state.active_tab == "home":
                 )
             else:
                 selected_w_sup = st.selectbox(
-                    "Wilaya / الولاية", WILAYAS_48, key="sup_w"
+                    "Wilaya / الولاية", WILAYAS_69, key="sup_w"
                 )
                 selected_sector = st.selectbox(
                     "Select Subsidized Sector / اختر مجال الدعم",
@@ -3146,7 +3317,7 @@ if st.session_state.active_tab == "home":
         elif st.session_state.selected_service == "crop":
             st.subheader(t["crop"])
             selected_w = st.selectbox(
-                "Wilaya / الولاية (48 Wilayas)", WILAYAS_48
+                "Wilaya / الولاية (69 Wilayas)", WILAYAS_69
             )
             cat_choice = st.radio(
                 "Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"]
@@ -3266,7 +3437,7 @@ if st.session_state.active_tab == "home":
                     )
             else:
                 st.info(
-                    "🟢 No severe weather warnings active across the 48 wilayas."
+                    "🟢 No severe weather warnings active across the 69 Wilayas."
                 )
 
         # SERVICE 5: PAYMENTS
@@ -3544,7 +3715,7 @@ elif st.session_state.active_tab == "account":
                 "Alert Title", placeholder="e.g. Sirocco Heatwave Warning"
             )
             al_region = st.selectbox(
-                "Target Wilaya", ["All Wilayas"] + WILAYAS_48
+                "Target Wilaya", ["All Wilayas"] + WILAYAS_69
             )
             al_severity = st.selectbox(
                 "Severity Level", ["yellow", "orange", "red"]
@@ -3591,7 +3762,7 @@ elif st.session_state.active_tab == "account":
             st.markdown("#### Add Location to Map Directory")
             loc_name = st.text_input("Facility Name")
             loc_wilaya = st.selectbox(
-                "Wilaya Location", WILAYAS_48, key="adm_w_dir"
+                "Wilaya Location", WILAYAS_69, key="adm_w_dir"
             )
             loc_cat = st.selectbox(
                 "Facility Type",
@@ -3653,7 +3824,7 @@ elif st.session_state.active_tab == "account":
 
             disease_wilayas = st.multiselect(
                 "Affected Wilayas / الولايات المتأثرة",
-                WILAYAS_48,
+                WILAYAS_69,
                 key="admin_disease_wilayas",
             )
             disease_options = ai_common_diseases(disease_crop)
@@ -3831,7 +4002,7 @@ elif st.session_state.active_tab == "account":
                         aliases.add(f"{left.strip()} ({arabic.strip()})")
                     for alias in aliases:
                         ai_national.setdefault(alias, base_yield)
-                        for w in WILAYAS_48:
+                        for w in WILAYAS_69:
                             ai_benchmark_map.setdefault((alias, w), get_builtin_wilaya_yield(alias, w))
 
                 # -------------------------------------------------
@@ -3914,56 +4085,86 @@ elif st.session_state.active_tab == "account":
                             key="ai_investigation_crop",
                         )
                     with ic2:
+                        investigation_wilaya_options = [NATIONAL_WILAYA_OPTION] + WILAYAS_69
                         selected_investigation_wilaya = st.selectbox(
                             "Wilaya / الولاية",
-                            WILAYAS_48,
-                            index=WILAYAS_48.index("17 - Djelfa") if "17 - Djelfa" in WILAYAS_48 else 0,
+                            investigation_wilaya_options,
+                            index=investigation_wilaya_options.index("17 - Djelfa") if "17 - Djelfa" in investigation_wilaya_options else 1,
                             key="ai_investigation_wilaya",
                         )
 
                     run_investigation = st.button("🔍 Run Full Investigation", key="ai_run_investigation", type="primary")
                     if run_investigation:
-                        # Weather is the first external sensor we can safely add
-                        # without a secret key. Prefer stored observations; if none
-                        # exist, fetch an explicitly-labelled external planning series.
+                        # Weather and satellite are external sensors. For a single Wilaya
+                        # we fetch the selected location; for Whole Country we aggregate the
+                        # same investigation across all 69 Wilayas.
                         investigation_weather_rows = list(weather_rows or [])
-                        weather_source_label = "Supabase observations" if investigation_weather_rows else "Not available"
-                        if not investigation_weather_rows:
-                            wlat, wlon, coord_source = ai_resolve_wilaya_coordinates(
-                                selected_investigation_wilaya, location_rows
-                            )
-                            if wlat is not None and wlon is not None:
-                                external_rows = ai_fetch_external_weather(
-                                    selected_investigation_wilaya, wlat, wlon, days_back=365
-                                )
-                                if external_rows:
-                                    investigation_weather_rows.extend(external_rows)
-                                    weather_source_label = "Open-Meteo historical weather (external planning source)"
                         investigation_satellite_rows = list(satellite_rows or [])
+                        weather_source_label = "Supabase observations" if investigation_weather_rows else "Not available"
                         satellite_source_label = "Supabase satellite indicators" if investigation_satellite_rows else "Not available"
-                        if not investigation_satellite_rows:
-                            slat, slon, _sat_coord_source = ai_resolve_wilaya_coordinates(selected_investigation_wilaya, location_rows)
-                            if slat is not None and slon is not None:
-                                live_sat_rows, live_sat_source = ai_fetch_copernicus_satellite(selected_investigation_wilaya, slat, slon, days_back=90)
-                                if live_sat_rows:
-                                    investigation_satellite_rows.extend(live_sat_rows)
-                                satellite_source_label = live_sat_source
 
-                        result = ai_investigate_crop_wilaya(
-                            selected_investigation_crop,
-                            selected_investigation_wilaya,
-                            ai_df,
-                            ai_benchmark_map,
-                            ai_national,
-                            weather_rows=investigation_weather_rows,
-                            weather_alert_rows=weather_alert_rows,
-                            historical_rows=history_rows,
-                            soil_rows=soil_rows,
-                            irrigation_rows=irrigation_rows,
-                            satellite_rows=investigation_satellite_rows,
-                            disease_rows=disease_rows,
-                            location_rows=location_rows,
-                        )
+                        if selected_investigation_wilaya == NATIONAL_WILAYA_OPTION:
+                            if not investigation_weather_rows:
+                                weather_cache = []
+                                for w in WILAYAS_69:
+                                    wlat, wlon, _ = ai_resolve_wilaya_coordinates(w, location_rows)
+                                    if wlat is not None and wlon is not None:
+                                        weather_cache.extend(ai_fetch_external_weather(w, wlat, wlon, days_back=365))
+                                investigation_weather_rows = weather_cache
+                                if investigation_weather_rows:
+                                    weather_source_label = "Open-Meteo historical weather — 69-Wilaya planning scan"
+                            if not investigation_satellite_rows:
+                                satellite_cache = []
+                                for w in WILAYAS_69:
+                                    slat, slon, _ = ai_resolve_wilaya_coordinates(w, location_rows)
+                                    if slat is not None and slon is not None:
+                                        live_sat_rows, _ = ai_fetch_copernicus_satellite(w, slat, slon, days_back=90)
+                                        satellite_cache.extend(live_sat_rows or [])
+                                investigation_satellite_rows = satellite_cache
+                                if investigation_satellite_rows:
+                                    satellite_source_label = "Copernicus Sentinel planning scan — 69 Wilayas"
+                            result = ai_investigate_national(
+                                selected_investigation_crop, ai_df, ai_benchmark_map, ai_national,
+                                weather_rows=investigation_weather_rows, weather_alert_rows=weather_alert_rows,
+                                historical_rows=history_rows, soil_rows=soil_rows,
+                                irrigation_rows=irrigation_rows, satellite_rows=investigation_satellite_rows,
+                                disease_rows=disease_rows, location_rows=location_rows,
+                            )
+                        else:
+                            if not investigation_weather_rows:
+                                wlat, wlon, coord_source = ai_resolve_wilaya_coordinates(
+                                    selected_investigation_wilaya, location_rows
+                                )
+                                if wlat is not None and wlon is not None:
+                                    external_rows = ai_fetch_external_weather(
+                                        selected_investigation_wilaya, wlat, wlon, days_back=365
+                                    )
+                                    if external_rows:
+                                        investigation_weather_rows.extend(external_rows)
+                                        weather_source_label = "Open-Meteo historical weather (external planning source)"
+                            if not investigation_satellite_rows:
+                                slat, slon, _sat_coord_source = ai_resolve_wilaya_coordinates(selected_investigation_wilaya, location_rows)
+                                if slat is not None and slon is not None:
+                                    live_sat_rows, live_sat_source = ai_fetch_copernicus_satellite(selected_investigation_wilaya, slat, slon, days_back=90)
+                                    if live_sat_rows:
+                                        investigation_satellite_rows.extend(live_sat_rows)
+                                    satellite_source_label = live_sat_source
+
+                            result = ai_investigate_crop_wilaya(
+                                selected_investigation_crop,
+                                selected_investigation_wilaya,
+                                ai_df,
+                                ai_benchmark_map,
+                                ai_national,
+                                weather_rows=investigation_weather_rows,
+                                weather_alert_rows=weather_alert_rows,
+                                historical_rows=history_rows,
+                                soil_rows=soil_rows,
+                                irrigation_rows=irrigation_rows,
+                                satellite_rows=investigation_satellite_rows,
+                                disease_rows=disease_rows,
+                                location_rows=location_rows,
+                            )
                         result["satellite_source_label"] = satellite_source_label
                         result["weather_source_label"] = weather_source_label
                         st.session_state["last_ai_investigation"] = result
@@ -4511,7 +4712,7 @@ on public.admin_ai_alerts(status, created_at desc);
                                 .reset_index()
                                 .rename(columns={"area": "Declared Area (Ha)"})
                             )
-                            crop_wilaya = pd.DataFrame({"wilaya": WILAYAS_48}).merge(
+                            crop_wilaya = pd.DataFrame({"wilaya": WILAYAS_69}).merge(
                                 crop_wilaya, on="wilaya", how="left"
                             )
                             crop_wilaya["Declared Area (Ha)"] = crop_wilaya["Declared Area (Ha)"].fillna(0.0)
@@ -4561,7 +4762,7 @@ on public.admin_ai_alerts(status, created_at desc);
                             st.bar_chart(chart_df, y="area")
 
                             st.info(
-                                "💡 This analysis now works with all 48 Wilayas. It shows crop concentration, including Wilayas with zero declarations. "
+                                "💡 This analysis now works with all 69 Wilayas. It shows crop concentration, including Wilayas with zero declarations. "
                                 "Production and surplus/deficit calculations are available in the Production & Balance and Wilaya Optimization tabs."
                             )
 
@@ -4619,7 +4820,7 @@ on public.admin_ai_alerts(status, created_at desc);
                             national_benchmarks.setdefault(crop_alias, fallback_yield)
                             # Create a fallback for every crop × Wilaya pair.
                             # Explicit Supabase Wilaya values remain higher priority.
-                            for w in WILAYAS_48:
+                            for w in WILAYAS_69:
                                 benchmark_map.setdefault(
                                     (crop_alias, w),
                                     get_builtin_wilaya_yield(crop_alias, w)
@@ -4647,7 +4848,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             )
                     elif not benchmark_rows:
                         st.info(
-                            "No Supabase benchmark rows yet. Built-in planning benchmarks are active for all crops and all 48 Wilayas; "
+                            "No Supabase benchmark rows yet. Built-in planning benchmarks are active for all crops and all 69 Wilayas; "
                             "you can later add official values in Supabase and they will override these estimates."
                         )
 
@@ -4718,9 +4919,9 @@ on public.crop_yield_benchmarks (crop, wilaya);
                                 "No benchmark is available for this crop yet."
                             )
 
-                        # Show every one of the 48 Wilayas, including zero-declaration Wilayas.
+                        # Show every one of the 69 Wilayas, including zero-declaration Wilayas.
                         # This is intentional: a missing Wilaya must appear as zero, not disappear.
-                        full_wilaya_prod = pd.DataFrame({"wilaya": WILAYAS_48}).merge(
+                        full_wilaya_prod = pd.DataFrame({"wilaya": WILAYAS_69}).merge(
                             wilaya_prod, on="wilaya", how="left"
                         )
                         full_wilaya_prod["Declared Area (Ha)"] = full_wilaya_prod["Declared Area (Ha)"].fillna(0.0)
@@ -4743,7 +4944,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                             "Planning estimate (Wilaya fallback)"
                         )
 
-                        st.markdown("##### All 48 Wilayas — one row per Wilaya")
+                        st.markdown("##### All 69 Wilayas — one row per Wilaya")
                         display_prod = full_wilaya_prod.copy()
                         display_prod["Declared Area (Ha)"] = display_prod["Declared Area (Ha)"].map(lambda x: f"{x:,.1f}")
                         display_prod["Yield (t/Ha)"] = display_prod["Yield (t/Ha)"].map(
@@ -4772,7 +4973,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
                     else:
                         st.info(
-                            "Add crop yield benchmarks in Supabase first. The system already keeps every crop and all 48 Wilayas separate; "
+                            "Add crop yield benchmarks in Supabase first. The system already keeps every crop and all 69 Wilayas separate; "
                             "no Wilaya is merged with another."
                         )
 
@@ -4845,7 +5046,7 @@ on public.wilaya_crop_targets (crop, wilaya);
                     if not location_table_ready:
                         st.warning(
                             "⚙️ Supabase update required for logistics: create `wilaya_locations` and add the coordinates "
-                            "of the 48 Wilaya capitals. Coordinates are used only to estimate distance; they are not road distances."
+                            "of the 69 Wilaya capitals. Coordinates are used only to estimate distance; they are not road distances."
                         )
                         with st.expander("SQL — Wilaya coordinates"):
                             st.code(
@@ -4908,7 +5109,7 @@ on public.wilaya_logistics_constraints (wilaya);
                         location_df = location_df.drop_duplicates("wilaya", keep="last")
                         coords = location_df.set_index("wilaya")[["latitude", "longitude"]].to_dict("index")
 
-                        missing_coords = [w for w in WILAYAS_48 if w not in coords]
+                        missing_coords = [w for w in WILAYAS_69 if w not in coords]
                         if missing_coords:
                             st.warning(
                                 f"Coordinates are missing for {len(missing_coords)} Wilaya(s). "
@@ -4971,7 +5172,7 @@ on public.wilaya_logistics_constraints (wilaya);
                                 df_live[df_live["crop"] == selected_opt_crop]
                                 .groupby("wilaya")["area"]
                                 .sum()
-                                .reindex(WILAYAS_48, fill_value=0.0)
+                                .reindex(WILAYAS_69, fill_value=0.0)
                             )
 
                             opt_benchmark_map = {}
@@ -4997,7 +5198,7 @@ on public.wilaya_logistics_constraints (wilaya);
 
                             crop_targets = target_df[target_df["crop"] == selected_opt_crop].copy().set_index("wilaya")
                             opt_rows = []
-                            for w in WILAYAS_48:
+                            for w in WILAYAS_69:
                                 target_prod = crop_targets.at[w, "target_production_t"] if w in crop_targets.index else float("nan")
                                 yld = opt_benchmark_map.get(w)
                                 if yld is None:
