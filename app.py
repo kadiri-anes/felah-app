@@ -1,6 +1,7 @@
 import math
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import BytesIO
 
@@ -529,6 +530,28 @@ def ai_fetch_external_weather(wilaya, latitude, longitude, days_back=365):
 
 
 
+@st.cache_data(ttl=3000, show_spinner=False)
+def ai_get_copernicus_token(client_id, client_secret):
+    """Reuse one Copernicus OAuth token instead of authenticating per Wilaya."""
+    token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+    token_resp = requests.post(token_url, data={
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "include_client_id": "true",
+    }, timeout=20)
+    if not token_resp.ok:
+        body = token_resp.text[:500].replace("\n", " ")
+        return None, {
+            "status": "auth_error", "http_status": token_resp.status_code,
+            "diagnostic": body,
+        }
+    token = token_resp.json().get("access_token")
+    if not token:
+        return None, {"status": "auth_error", "diagnostic": token_resp.text[:500]}
+    return token, None
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def ai_fetch_copernicus_satellite(wilaya, latitude, longitude, days_back=90):
     """Fetch real Sentinel-2 and Sentinel-1 statistics from Copernicus Data Space.
@@ -550,24 +573,9 @@ def ai_fetch_copernicus_satellite(wilaya, latitude, longitude, days_back=90):
                 "diagnostic": "Add [copernicus] CLIENT_ID and CLIENT_SECRET to Streamlit Secrets."
             }
 
-        token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
-        token_resp = requests.post(token_url, data={
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "include_client_id": "true",
-        }, timeout=20)
-        if not token_resp.ok:
-            body = token_resp.text[:500].replace("\n", " ")
-            return [], f"Copernicus authentication failed (HTTP {token_resp.status_code})", {
-                "status": "auth_error", "http_status": token_resp.status_code,
-                "diagnostic": body,
-            }
-        token = token_resp.json().get("access_token")
-        if not token:
-            return [], "Copernicus authentication returned no access token", {
-                "status": "auth_error", "diagnostic": token_resp.text[:500]
-            }
+        token, token_error = ai_get_copernicus_token(client_id, client_secret)
+        if token_error:
+            return [], "Copernicus authentication failed", token_error
 
         end_day = date.today()
         start_day = end_day - timedelta(days=int(days_back))
@@ -764,8 +772,14 @@ def ai_summarize_satellite_rows(rows, days_back=90):
     }
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def ai_load_optional_table(table_name, columns):
-    """Load an optional Supabase table without breaking the app if absent."""
+    """Cached Supabase read for AI data sources.
+
+    AI evidence tables do not need to be queried again on every Streamlit
+    widget rerun. A short cache keeps the UI responsive while still refreshing
+    operational data every five minutes.
+    """
     if not supabase_client:
         return [], False, "Supabase connection unavailable"
     try:
@@ -773,6 +787,20 @@ def ai_load_optional_table(table_name, columns):
         return (res.data if res.data else []), True, ""
     except Exception as exc:
         return [], False, str(exc)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def ai_load_declarations_for_analysis():
+    """Cached declaration snapshot used by the AI and intelligence dashboard."""
+    if not supabase_client:
+        return []
+    try:
+        res = (supabase_client.table("declarations")
+               .select("crop, category, area, wilaya, start_date")
+               .execute())
+        return res.data if res.data else []
+    except Exception:
+        return []
 
 
 def ai_declaration_area(df_live, crop, wilaya):
@@ -4117,12 +4145,7 @@ elif st.session_state.active_tab == "account":
                 # -------------------------------------------------
                 # LIVE DECLARATION DATA
                 # -------------------------------------------------
-                ai_res = (
-                    supabase_client.table("declarations")
-                    .select("crop, category, area, wilaya, start_date")
-                    .execute()
-                )
-                ai_records = ai_res.data if ai_res.data else []
+                ai_records = ai_load_declarations_for_analysis()
                 ai_df = pd.DataFrame(ai_records)
                 if ai_df.empty:
                     ai_df = pd.DataFrame(columns=["crop", "category", "area", "wilaya", "start_date"])
@@ -4264,20 +4287,40 @@ elif st.session_state.active_tab == "account":
                         if selected_investigation_wilaya == NATIONAL_WILAYA_OPTION:
                             if not investigation_weather_rows:
                                 weather_cache = []
+                                coords = []
                                 for w in WILAYAS_69:
                                     wlat, wlon, _ = ai_resolve_wilaya_coordinates(w, location_rows)
                                     if wlat is not None and wlon is not None:
-                                        weather_cache.extend(ai_fetch_external_weather(w, wlat, wlon, days_back=365))
+                                        coords.append((w, wlat, wlon))
+                                # Run independent external requests concurrently. Each
+                                # function is cached, so this is mainly a cold-cache speedup.
+                                with ThreadPoolExecutor(max_workers=10) as pool:
+                                    futures = [pool.submit(ai_fetch_external_weather, w, lat, lon, 365) for w, lat, lon in coords]
+                                    for fut in as_completed(futures):
+                                        try:
+                                            weather_cache.extend(fut.result())
+                                        except Exception:
+                                            pass
                                 investigation_weather_rows = weather_cache
                                 if investigation_weather_rows:
                                     weather_source_label = "Open-Meteo historical weather — 69-Wilaya planning scan"
                             if not investigation_satellite_rows:
                                 satellite_cache = []
+                                sat_coords = []
                                 for w in WILAYAS_69:
                                     slat, slon, _ = ai_resolve_wilaya_coordinates(w, location_rows)
                                     if slat is not None and slon is not None:
-                                        live_sat_rows, _, _ = ai_fetch_copernicus_satellite(w, slat, slon, days_back=90)
-                                        satellite_cache.extend(live_sat_rows or [])
+                                        sat_coords.append((w, slat, slon))
+                                # Sentinel requests are independent. Parallel execution
+                                # prevents a slow Wilaya from blocking all others.
+                                with ThreadPoolExecutor(max_workers=6) as pool:
+                                    futures = [pool.submit(ai_fetch_copernicus_satellite, w, lat, lon, 90) for w, lat, lon in sat_coords]
+                                    for fut in as_completed(futures):
+                                        try:
+                                            live_sat_rows, _, _ = fut.result()
+                                            satellite_cache.extend(live_sat_rows or [])
+                                        except Exception:
+                                            pass
                                 investigation_satellite_rows = satellite_cache
                                 if investigation_satellite_rows:
                                     satellite_source_label = "Copernicus Sentinel planning scan — 69 Wilayas"
