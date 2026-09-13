@@ -629,8 +629,13 @@ function evaluatePixel(samples) {
                 },
                 "aggregationInterval": {"of": "P10D"},
                 "evalscript": s2_evalscript,
-                "resx": 20,
-                "resy": 20,
+                # CRS84 uses degrees, so a 20-meter value must be converted to
+                # angular resolution. Passing 20 here makes the API fall back to a
+                # single very large pixel (~4.4 km for this AOI), which triggers
+                # the 1500 m/pixel limit. ~0.0002° is about 20 m at Algerian
+                # latitudes.
+                "resx": 0.0002,
+                "resy": 0.0002,
             },
         }
         try:
@@ -693,8 +698,10 @@ function evaluatePixel(samples) {
                 },
                 "aggregationInterval": {"of": "P10D"},
                 "evalscript": s1_evalscript,
-                "resx": 20,
-                "resy": 20,
+                # CRS84 is geographic (degrees); use an angular resolution
+                # corresponding to roughly 20 m instead of 20 meters.
+                "resx": 0.0002,
+                "resy": 0.0002,
             },
         }
         try:
@@ -900,6 +907,11 @@ def ai_parse_weather_evidence(weather_rows, crop, wilaya):
         rw = str(r.get("wilaya", "")).strip()
         if rw not in {str(wilaya).strip(), "All Wilayas", "ALL", ""}:
             continue
+        # Only verified/authoritative weather observations are allowed to enter
+        # causal weather evidence. Open-Meteo and farmer/admin reports remain
+        # visible as planning context but cannot confirm frost/heat/rainfall events.
+        if not ai_is_verified_weather_source(r.get("source")):
+            continue
         tmin = ai_safe_num(r.get("tmin_c"))
         rain = ai_safe_num(r.get("rainfall_mm"))
         tmax = ai_safe_num(r.get("tmax_c"))
@@ -920,6 +932,7 @@ def ai_parse_weather_evidence(weather_rows, crop, wilaya):
         "frost_events": relevant,
         "rainfall_total_mm": sum(rainfall) if rainfall else None,
         "heat_days": len(heat_days),
+        "rows": list(weather_rows or []),
     }
 
 
@@ -1067,6 +1080,125 @@ def ai_satellite_irrigation_proxy(rows, crop, wilaya):
         label = "No strong irrigation signal"
     return {"available": True, "label": label, "score": score, "evidence": evidence, "source_quality": "satellite proxy"}
 
+def ai_is_verified_weather_source(source):
+    """Return True only for explicitly authoritative/verified weather sources.
+
+    Farmer reports, admin alerts, forecasts and generic external planning feeds
+    are deliberately excluded from confidence/confirmed-event logic. Open-Meteo
+    remains useful for planning, but is not treated as an official confirmation.
+    """
+    text = str(source or "").strip().lower()
+    trusted = [
+        "onm", "office national de la météorologie", "office national de la meteorologie",
+        "météo algérie", "meteo algerie", "official weather", "official observation",
+        "meteorological station", "weather station", "verified observation", "verified weather",
+        "station météo", "station meteo",
+    ]
+    return any(term in text for term in trusted)
+
+
+def ai_confirmed_disease_rows(disease_rows):
+    """Only expert/authoritative confirmed disease reports count as confirmation."""
+    trusted_sources = {
+        "field officer / مفتش ميداني",
+        "laboratory / مخبر",
+        "agricultural extension / إرشاد فلاحي",
+    }
+    confirmed = []
+    for row in disease_rows or []:
+        status = str(row.get("status", "")).strip().lower()
+        source = str(row.get("source", "")).strip().lower()
+        is_confirmed = "confirmed" in status or "مؤكد" in status
+        is_trusted = (
+            source in {x.lower() for x in trusted_sources}
+            or any(k in source for k in ["expert", "agronom", "laboratory", "lab", "official", "مفتش", "مخبر", "إرشاد"])
+        )
+        if is_confirmed and is_trusted:
+            confirmed.append(row)
+    return confirmed
+
+
+def ai_calculate_evidence_confidence(crop, primary_cause, weather_rows=None, weather_signal=None,
+                                     disease_rows=None, satellite_rows=None, historical_signal=None,
+                                     soil_rows=None, irrigation_rows=None):
+    """Calculate an evidence-based confidence rate, not a statistical probability.
+
+    Farmer reports and unconfirmed events do not raise confidence. Confirmed
+    expert disease evidence, verified weather observations, and official/admin
+    weather alerts are qualifying evidence. Satellite observations are
+    independent supporting evidence but do not diagnose a disease by themselves.
+    """
+    weather_rows = weather_rows or []
+    weather_signal = weather_signal or {}
+    disease_rows = disease_rows or []
+    satellite_rows = satellite_rows or []
+    historical_signal = historical_signal or {}
+    soil_rows = soil_rows or []
+    irrigation_rows = irrigation_rows or []
+
+    verified_weather = [r for r in weather_rows if ai_is_verified_weather_source(r.get("source"))]
+    confirmed_disease = ai_confirmed_disease_rows(disease_rows)
+
+    # Start from no confidence: a lead is not evidence.
+    support = 0.0
+    qualifying = []
+
+    alert_matches = weather_signal.get("alert_matches") or []
+    if alert_matches:
+        # An admin-issued alert is treated as strong operational evidence.
+        # It is not a farmer report and does not need an additional farmer
+        # confirmation before contributing to the confidence rate.
+        support += 0.60
+        qualifying.append("admin-issued weather alert")
+
+    if verified_weather and weather_signal.get("frost_events"):
+        support += 0.60
+        qualifying.append("confirmed/verified weather observation")
+        min_t = weather_signal.get("frost_min_c")
+        if min_t is not None and min_t <= ai_crop_profile(crop).get("severe_frost_threshold_c", -3.0):
+            support += 0.15
+
+    if confirmed_disease and primary_cause == "disease":
+        support += 0.70
+        qualifying.append("confirmed disease report from trusted agricultural source")
+
+    # Satellite is independent evidence, but it cannot by itself diagnose a disease.
+    # Require more than one observation to avoid treating a single pixel/time point
+    # as a strong confirmation.
+    s2_count = sum(1 for r in satellite_rows if r.get("ndvi") is not None or r.get("ndwi") is not None)
+    s1_count = sum(1 for r in satellite_rows if r.get("sentinel1_vv") is not None or r.get("sentinel1_vh") is not None)
+    if s2_count >= 2:
+        support += 0.30
+        qualifying.append("multi-observation Sentinel-2 evidence")
+    if s1_count >= 2:
+        support += 0.15
+        qualifying.append("multi-observation Sentinel-1 evidence")
+
+    # Historical measured production can improve evidence quality, but cannot by
+    # itself confirm a cause.
+    if historical_signal.get("measured"):
+        support += 0.05
+        qualifying.append("measured historical production")
+
+    # Direct measured irrigation/soil observations are valid evidence, but are
+    # deliberately modest because they do not confirm disease/weather.
+    if irrigation_rows:
+        support += 0.10
+        qualifying.append("measured irrigation observation")
+    if soil_rows:
+        support += 0.05
+        qualifying.append("measured soil observation")
+
+    return {
+        "rate": min(0.95, support),
+        "qualifying_evidence": qualifying,
+        "verified_weather": bool(verified_weather),
+        "confirmed_disease": bool(confirmed_disease),
+        "satellite_multi_observation": bool(s2_count >= 2 or s1_count >= 2),
+        "status": "confirmed" if (confirmed_disease or (verified_weather and weather_signal.get("frost_events"))) else ("supported" if qualifying else "unconfirmed"),
+    }
+
+
 def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_area, benchmark_yield,
                    neighboring_signal=None, soil_rows=None, irrigation_rows=None,
                    satellite_rows=None, disease_rows=None, soil_estimate=None, irrigation_proxy=None):
@@ -1084,7 +1216,7 @@ def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_are
         causes["area"]["source_quality"] = "estimated"
 
     # Observed frost: strongest single rule when timing overlaps crop sensitivity.
-    if weather_signal.get("frost_events"):
+    if weather_signal.get("frost_events") and any(ai_is_verified_weather_source(r.get("source")) for r in (weather_signal.get("rows") or [])):
         min_t = weather_signal.get("frost_min_c")
         causes["frost"]["score"] += 0.55
         causes["frost"]["evidence"].append(f"Observed minimum temperature reached {min_t:.1f}°C during a crop-sensitive period")
@@ -1093,21 +1225,9 @@ def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_are
             causes["frost"]["evidence"].append("Temperature crossed the severe-frost planning threshold")
         causes["frost"]["source_quality"] = "observed"
 
-    # Weather alerts are weaker than measurements.
-    alert_matches = weather_signal.get("alert_matches", [])
-    for a in alert_matches:
-        if a["kind"] == "frost":
-            causes["frost"]["score"] += 0.15
-            causes["frost"]["evidence"].append(f"Admin weather alert mentions frost: {a['title']}")
-            causes["frost"]["source_quality"] = "alert"
-        elif a["kind"] == "drought":
-            causes["drought"]["score"] += 0.20
-            causes["drought"]["evidence"].append(f"Admin weather alert mentions drought: {a['title']}")
-            causes["drought"]["source_quality"] = "alert"
-        elif a["kind"] == "heat":
-            causes["heat"]["score"] += 0.20
-            causes["heat"]["evidence"].append(f"Admin weather alert mentions heat: {a['title']}")
-            causes["heat"]["source_quality"] = "alert"
+    # Admin weather alerts are NOT confirmation. They are retained in the
+    # evidence record for human review but cannot create or strengthen a causal
+    # score. Only explicitly verified/authoritative weather observations can do so.
 
     # Rainfall / irrigation / soil / satellite / disease optional evidence.
     if irrigation_rows:
@@ -1128,25 +1248,21 @@ def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_are
             f"Regional soil estimate: pH {soil_estimate.get('ph_range')}, {soil_estimate.get('lime')}, {soil_estimate.get('ec_risk')} salinity risk"
         )
         causes["soil"]["source_quality"] = "regional estimate"
-    disease_positive_rows = [
-        r for r in (disease_rows or [])
-        if str(r.get("status", "")).strip().lower() not in {
-            "checked — no disease / تمت المعاينة دون مرض",
-            "checked - no disease",
-            "no disease",
-        }
-    ]
-    if disease_positive_rows:
-        causes["disease"]["score"] += 0.25
-        causes["disease"]["evidence"].append("Disease reports exist for this crop/Wilaya")
-        confirmed = any("confirmed" in str(r.get("status", "")).lower() or "مؤكد" in str(r.get("status", "")) for r in disease_positive_rows)
-        causes["disease"]["score"] += 0.15 if confirmed else 0.0
-        causes["disease"]["evidence"].append("At least one report is marked confirmed" if confirmed else "Disease evidence is reported/suspected, not necessarily confirmed")
-        causes["disease"]["source_quality"] = "confirmed report" if confirmed else "reported"
+    # Unconfirmed farmer/suspected disease reports are observations only. They
+    # must never create a disease cause score. A confirmed report must come from
+    # a trusted agricultural source such as a field officer, laboratory or extension service.
+    confirmed_disease_rows = ai_confirmed_disease_rows(disease_rows)
+    if confirmed_disease_rows:
+        causes["disease"]["score"] += 0.70
+        causes["disease"]["evidence"].append("Disease confirmed by a trusted agricultural source")
+        causes["disease"]["source_quality"] = "expert/authoritative confirmed"
+    elif disease_rows:
+        causes["disease"]["evidence"].append("Farmer/suspected disease reports are recorded but excluded from causal scoring until independently confirmed")
+        causes["disease"]["source_quality"] = "unconfirmed — excluded"
     if satellite_rows:
-        causes["disease"]["score"] += 0.05
-        causes["disease"]["evidence"].append("Satellite indicators are available as an independent vegetation check")
-        causes["disease"]["source_quality"] = "satellite+reported" if disease_rows else "satellite"
+        causes["disease"]["evidence"].append("Satellite indicators may support vegetation stress, but cannot by themselves diagnose a disease")
+        if any(r.get("ndvi") is not None or r.get("ndwi") is not None for r in satellite_rows):
+            causes["disease"]["source_quality"] = "satellite indicator only" if not confirmed_disease_rows else "confirmed + satellite"
 
     # Neighbor comparison increases confidence when neighboring Wilayas behave differently.
     if neighboring_signal and neighboring_signal.get("available"):
@@ -1309,7 +1425,12 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     primary = ranked[0]
     impact = ai_estimate_investigation_impact(crop, wilaya, declared_area, _ai_float(yield_benchmark), historical_signal, primary)
 
-    confidence = min(0.95, max(0.20, primary[1]["score"] + (0.15 if historical_signal.get("available") else 0.0) + (0.10 if weather_signal.get("available") else 0.0)))
+    confidence_info = ai_calculate_evidence_confidence(
+        crop, primary[0], weather_rows=weather_rows or [], weather_signal=weather_signal,
+        disease_rows=selected_disease_rows, satellite_rows=selected_satellite_rows,
+        historical_signal=historical_signal, soil_rows=selected_soil_rows, irrigation_rows=selected_irrigation_rows,
+    )
+    confidence = confidence_info["rate"]
     evidence_count = sum(len(x[1]["evidence"]) for x in ranked if x[1]["score"] > 0)
 
     recommendations = []
@@ -1343,8 +1464,16 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         ]
 
     # A useful notification should fire only when evidence is meaningful.
+    confidence_info = {
+        "rate": confidence,
+        "status": "confirmed" if confidence >= 0.60 else ("supported" if confidence > 0 else "unconfirmed"),
+        "qualifying_evidence": sorted({
+            item for r in per_wilaya for item in (r.get("confidence_info", {}).get("qualifying_evidence", []) or [])
+        }),
+    }
     notify = bool(
-        primary[1]["score"] >= 0.55
+        confidence >= 0.60
+        and primary[1]["score"] >= 0.55
         and impact.get("loss_percent") is not None
         and impact.get("loss_percent", 0) >= 10
     )
@@ -1365,6 +1494,7 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         "primary_cause": primary[0],
         "primary_label": AI_RISK_CAUSE_LABELS.get(primary[0], primary[0]),
         "confidence": confidence,
+        "confidence_info": confidence_info,
         "evidence_count": evidence_count,
         "impact": impact,
         "recommendations": recommendations,
@@ -1374,6 +1504,7 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
             "historical_measured": bool(historical_signal.get("measured")),
             "declared_area": declared_area > 0,
             "weather": bool(weather_signal.get("available")),
+            "weather_verified": bool(confidence_info.get("verified_weather")),
             "rainfall": bool(weather_signal.get("rainfall_total_mm") is not None),
             "soil": bool(selected_soil_rows) or bool(soil_estimate),
             "soil_measured": bool(selected_soil_rows),
@@ -1382,6 +1513,7 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
             "irrigation_satellite_proxy": bool(irrigation_proxy.get("available")),
             "satellite": bool(selected_satellite_rows),
             "disease": bool(selected_disease_rows),
+            "disease_confirmed": bool(confidence_info.get("confirmed_disease")),
             "neighbors": bool(neighboring_signal.get("available")),
         },
     }
@@ -1457,7 +1589,7 @@ def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
 
     loss_percent = (total_loss / total_baseline * 100.0) if has_impact and total_baseline > 0 else None
     primary = ranked_causes[0]
-    confidence = min(0.95, max(0.20, float(primary[1]["score"])))
+    confidence = min(0.95, max(0.0, sum(float(r.get("confidence", 0.0) or 0.0) for r in per_wilaya) / max(len(per_wilaya), 1)))
     notify = bool(
         primary[1]["score"] >= 0.55
         and loss_percent is not None
@@ -1498,6 +1630,7 @@ def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
         "primary_cause": primary[0],
         "primary_label": AI_RISK_CAUSE_LABELS.get(primary[0], primary[0]),
         "confidence": confidence,
+        "confidence_info": confidence_info,
         "evidence_count": sum(len(x[1].get("evidence", [])) for x in ranked_causes),
         "impact": {
             "baseline_t": total_baseline if total_baseline > 0 else None,
@@ -1543,7 +1676,7 @@ def ai_investigation_text(result):
         )
     lines = [
         finding_text,
-        f"**Most likely cause:** {result['primary_label']} — confidence {result['confidence']*100:.0f}%.",
+        f"**Most likely cause:** {result['primary_label']} — evidence confidence {result['confidence']*100:.0f}% ({(result.get('confidence_info') or {}).get('status', 'unconfirmed')}).",
     ]
     baseline_t = impact.get("baseline_t")
     expected_t = impact.get("expected_t")
@@ -4128,6 +4261,7 @@ elif st.session_state.active_tab == "account":
                 st.info("No disease reports have been recorded yet.")
 
             st.markdown("##### 🧠 Important evidence rule")
+            st.caption("Farmer reports and suspected disease reports are recorded as leads only. The AI does not treat them as confirmed evidence; confirmation requires a trusted agricultural source. Weather alerts are not treated as confirmed weather events.")
             st.info(
                 "A disease report is evidence of an observation, not automatically a confirmed diagnosis. "
                 "The AI will combine it with crop stage, weather and satellite anomalies. Unknown diseases remain unknown until a qualified diagnosis confirms them."
@@ -4377,17 +4511,18 @@ elif st.session_state.active_tab == "account":
                         st.divider()
                         impact = result.get("impact", {})
                         confidence = result.get("confidence", 0.0) * 100
+                        confidence_status = (result.get("confidence_info") or {}).get("status", "unconfirmed")
                         primary = result.get("primary_label", "Unknown")
 
                         if result.get("notify_admin"):
                             st.error(
                                 f"🚨 HIGH PRIORITY SIGNAL — {result['crop']} / {result['wilaya']} — "
-                                f"{primary} — confidence {confidence:.0f}%"
+                                f"{primary} — evidence confidence {confidence:.0f}% ({confidence_status})"
                             )
                         else:
                             st.info(
                                 f"🧠 Current finding — {result['crop']} / {result['wilaya']} — "
-                                f"{primary} — confidence {confidence:.0f}%"
+                                f"{primary} — evidence confidence {confidence:.0f}% ({confidence_status})"
                             )
 
                         r1, r2, r3, r4 = st.columns(4)
@@ -4402,6 +4537,10 @@ elif st.session_state.active_tab == "account":
 
                         st.markdown("##### 🧠 Agent conclusion")
                         st.markdown(ai_investigation_text(result))
+                        ci = result.get("confidence_info") or {}
+                        st.caption(
+                            "Evidence confidence is not a probability. It can increase from verified weather observations, trusted confirmed disease evidence, admin-issued weather alerts, independent satellite observations, or measured field data. Unconfirmed farmer reports, suspected disease reports and planning estimates do not increase it."
+                        )
                         if result.get("weather_source_label"):
                             st.caption(f"Weather source used: {result['weather_source_label']}. External weather is a planning source until ONM/official observations are connected.")
                         if result.get("satellite_source_label"):
