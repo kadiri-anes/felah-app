@@ -531,39 +531,71 @@ def ai_fetch_external_weather(wilaya, latitude, longitude, days_back=365):
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def ai_fetch_copernicus_satellite(wilaya, latitude, longitude, days_back=90):
-    """Fetch automatic Sentinel-2/Sentinel-1 statistics when CDSE credentials exist.
+    """Fetch real Sentinel-2 and Sentinel-1 statistics from Copernicus Data Space.
 
-    Satellite observations are never typed manually. Credentials are a one-time
-    deployment setting in Streamlit Secrets. If absent, return an explicit
-    unavailable state rather than inventing observations.
+    The function deliberately keeps Sentinel-2 and Sentinel-1 independent: if one
+    collection fails, the other can still prove that the satellite connection works.
+    It also returns the exact HTTP/API diagnostic so the admin can fix credentials or
+    request parameters instead of seeing a generic "Missing" message.
     """
+    diagnostics = []
     try:
         cdse = st.secrets.get("copernicus", {})
-        client_id = str(cdse.get("CLIENT_ID", "")).strip()
-        client_secret = str(cdse.get("CLIENT_SECRET", "")).strip()
+        # Support both the recommended [copernicus] section and top-level secrets.
+        client_id = str(cdse.get("CLIENT_ID", "") or st.secrets.get("COPERNICUS_CLIENT_ID", "")).strip()
+        client_secret = str(cdse.get("CLIENT_SECRET", "") or st.secrets.get("COPERNICUS_CLIENT_SECRET", "")).strip()
         if not client_id or not client_secret:
-            return [], "Copernicus credentials not configured", {}
+            return [], "Copernicus credentials not configured", {
+                "status": "not_configured",
+                "diagnostic": "Add [copernicus] CLIENT_ID and CLIENT_SECRET to Streamlit Secrets."
+            }
+
         token_url = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
         token_resp = requests.post(token_url, data={
             "grant_type": "client_credentials",
             "client_id": client_id,
             "client_secret": client_secret,
-        }, timeout=15)
-        token_resp.raise_for_status()
+            "include_client_id": "true",
+        }, timeout=20)
+        if not token_resp.ok:
+            body = token_resp.text[:500].replace("\n", " ")
+            return [], f"Copernicus authentication failed (HTTP {token_resp.status_code})", {
+                "status": "auth_error", "http_status": token_resp.status_code,
+                "diagnostic": body,
+            }
         token = token_resp.json().get("access_token")
         if not token:
-            return [], "Copernicus token unavailable", {}
+            return [], "Copernicus authentication returned no access token", {
+                "status": "auth_error", "diagnostic": token_resp.text[:500]
+            }
+
         end_day = date.today()
         start_day = end_day - timedelta(days=int(days_back))
         lat, lon = float(latitude), float(longitude)
-        delta = 0.05
+        # A compact AOI is safer and faster for a Wilaya-level indicator request.
+        delta = 0.02
         bbox = [lon - delta, lat - delta, lon + delta, lat + delta]
-        headers = {"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {token}"}
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
         stats_url = "https://sh.dataspace.copernicus.eu/statistics/v1"
+        rows = []
+
+        # -----------------------------
+        # Sentinel-2: NDVI + NDWI
+        # -----------------------------
         s2_evalscript = """
 //VERSION=3
 function setup() {
-  return { input: [{ bands: ["B03", "B04", "B08", "SCL", "dataMask"] }], output: [{ id: "indices", bands: 2, sampleType: "FLOAT32" }, { id: "dataMask", bands: 1 }] };
+  return {
+    input: [{ bands: ["B03", "B04", "B08", "SCL", "dataMask"] }],
+    output: [
+      { id: "indices", bands: ["ndvi", "ndwi"], sampleType: "FLOAT32" },
+      { id: "dataMask", bands: ["indices"] }
+    ]
+  };
 }
 function evaluatePixel(samples) {
   var valid = samples.dataMask;
@@ -575,29 +607,64 @@ function evaluatePixel(samples) {
 }
 """
         s2_payload = {
-            "input": {"bounds": {"bbox": bbox, "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"}}, "data": [{"type": "sentinel-2-l2a", "dataFilter": {"maxCloudCoverage": 30, "mosaickingOrder": "leastCC"}}]},
-            "aggregation": {"timeRange": {"from": f"{start_day.isoformat()}T00:00:00Z", "to": f"{end_day.isoformat()}T23:59:59Z"}, "aggregationInterval": {"of": "P10D"}, "evalscript": s2_evalscript, "resx": 20, "resy": 20},
+            "input": {
+                "bounds": {
+                    "bbox": bbox,
+                    "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"},
+                },
+                "data": [{"type": "sentinel-2-l2a", "dataFilter": {"mosaickingOrder": "leastCC"}}],
+            },
+            "aggregation": {
+                "timeRange": {
+                    "from": f"{start_day.isoformat()}T00:00:00Z",
+                    "to": f"{end_day.isoformat()}T23:59:59Z",
+                },
+                "aggregationInterval": {"of": "P10D"},
+                "evalscript": s2_evalscript,
+                "resx": 20,
+                "resy": 20,
+            },
         }
-        s2_resp = requests.post(stats_url, headers=headers, json=s2_payload, timeout=40)
-        s2_resp.raise_for_status()
-        rows = []
-        for item in s2_resp.json().get("data", []):
-            interval = item.get("interval", {})
-            bands = item.get("outputs", {}).get("indices", {}).get("bands", {})
-            ndvi = ai_safe_num(bands.get("B0", {}).get("stats", {}).get("mean"))
-            ndwi = ai_safe_num(bands.get("B1", {}).get("stats", {}).get("mean"))
-            if ndvi is None and ndwi is None:
-                continue
-            rows.append({
-                "observed_at": interval.get("from", "")[:10], "wilaya": wilaya, "crop": None,
-                "ndvi": ndvi, "ndwi": ndwi, "evi": None, "fapar": None, "anomaly_percent": None,
-                "source": "Copernicus Sentinel-2 L2A statistical API",
-            })
-        # Sentinel-1 radar adds a cloud-independent surface/moisture signal.
+        try:
+            s2_resp = requests.post(stats_url, headers=headers, json=s2_payload, timeout=60)
+            if not s2_resp.ok:
+                diagnostics.append(f"Sentinel-2 HTTP {s2_resp.status_code}: {s2_resp.text[:350].replace(chr(10), ' ')}")
+            else:
+                payload = s2_resp.json()
+                if payload.get("status") not in (None, "OK"):
+                    diagnostics.append(f"Sentinel-2 API status: {payload.get('status')}")
+                for item in payload.get("data", []):
+                    interval = item.get("interval", {})
+                    bands = item.get("outputs", {}).get("indices", {}).get("bands", {})
+                    ndvi_band = bands.get("ndvi", bands.get("B0", {}))
+                    ndwi_band = bands.get("ndwi", bands.get("B1", {}))
+                    ndvi = ai_safe_num(ndvi_band.get("stats", {}).get("mean"))
+                    ndwi = ai_safe_num(ndwi_band.get("stats", {}).get("mean"))
+                    if ndvi is None and ndwi is None:
+                        continue
+                    rows.append({
+                        "observed_at": interval.get("from", "")[:10],
+                        "wilaya": wilaya, "crop": None,
+                        "ndvi": ndvi, "ndwi": ndwi, "evi": None, "fapar": None,
+                        "anomaly_percent": None,
+                        "source": "Copernicus Sentinel-2 L2A statistical API",
+                    })
+        except Exception as exc:
+            diagnostics.append(f"Sentinel-2 request error: {exc}")
+
+        # -----------------------------
+        # Sentinel-1: VV + VH
+        # -----------------------------
         s1_evalscript = """
 //VERSION=3
 function setup() {
-  return { input: [{ bands: ["VV", "VH", "dataMask"] }], output: [{ id: "radar", bands: 2, sampleType: "FLOAT32" }, { id: "dataMask", bands: 1 }] };
+  return {
+    input: [{ bands: ["VV", "VH", "dataMask"] }],
+    output: [
+      { id: "radar", bands: ["vv", "vh"], sampleType: "FLOAT32" },
+      { id: "dataMask", bands: ["radar"] }
+    ]
+  };
 }
 function evaluatePixel(samples) {
   return { radar: [samples.VV, samples.VH], dataMask: [samples.dataMask] };
@@ -605,11 +672,17 @@ function evaluatePixel(samples) {
 """
         s1_payload = {
             "input": {
-                "bounds": {"bbox": bbox, "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"}},
-                "data": [{"type": "sentinel-1-grd", "dataFilter": {"polarization": "DV", "acquisitionMode": "IW"}}],
+                "bounds": {
+                    "bbox": bbox,
+                    "properties": {"crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"},
+                },
+                "data": [{"type": "sentinel-1-grd", "dataFilter": {}}],
             },
             "aggregation": {
-                "timeRange": {"from": f"{start_day.isoformat()}T00:00:00Z", "to": f"{end_day.isoformat()}T23:59:59Z"},
+                "timeRange": {
+                    "from": f"{start_day.isoformat()}T00:00:00Z",
+                    "to": f"{end_day.isoformat()}T23:59:59Z",
+                },
                 "aggregationInterval": {"of": "P10D"},
                 "evalscript": s1_evalscript,
                 "resx": 20,
@@ -617,26 +690,33 @@ function evaluatePixel(samples) {
             },
         }
         try:
-            s1_resp = requests.post(stats_url, headers=headers, json=s1_payload, timeout=40)
-            s1_resp.raise_for_status()
-            for item in s1_resp.json().get("data", []):
-                interval = item.get("interval", {})
-                bands = item.get("outputs", {}).get("radar", {}).get("bands", {})
-                vv = ai_safe_num(bands.get("B0", {}).get("stats", {}).get("mean"))
-                vh = ai_safe_num(bands.get("B1", {}).get("stats", {}).get("mean"))
-                if vv is None and vh is None:
-                    continue
-                rows.append({
-                    "observed_at": interval.get("from", "")[:10], "wilaya": wilaya, "crop": None,
-                    "ndvi": None, "ndwi": None, "evi": None, "fapar": None, "anomaly_percent": None,
-                    "sentinel1_vv": vv, "sentinel1_vh": vh,
-                    "source": "Copernicus Sentinel-1 GRD statistical API",
-                })
-        except Exception:
-            pass
+            s1_resp = requests.post(stats_url, headers=headers, json=s1_payload, timeout=60)
+            if not s1_resp.ok:
+                diagnostics.append(f"Sentinel-1 HTTP {s1_resp.status_code}: {s1_resp.text[:350].replace(chr(10), ' ')}")
+            else:
+                payload = s1_resp.json()
+                if payload.get("status") not in (None, "OK"):
+                    diagnostics.append(f"Sentinel-1 API status: {payload.get('status')}")
+                for item in payload.get("data", []):
+                    interval = item.get("interval", {})
+                    bands = item.get("outputs", {}).get("radar", {}).get("bands", {})
+                    vv_band = bands.get("vv", bands.get("B0", {}))
+                    vh_band = bands.get("vh", bands.get("B1", {}))
+                    vv = ai_safe_num(vv_band.get("stats", {}).get("mean"))
+                    vh = ai_safe_num(vh_band.get("stats", {}).get("mean"))
+                    if vv is None and vh is None:
+                        continue
+                    rows.append({
+                        "observed_at": interval.get("from", "")[:10],
+                        "wilaya": wilaya, "crop": None,
+                        "ndvi": None, "ndwi": None, "evi": None, "fapar": None,
+                        "anomaly_percent": None,
+                        "sentinel1_vv": vv, "sentinel1_vh": vh,
+                        "source": "Copernicus Sentinel-1 GRD statistical API",
+                    })
+        except Exception as exc:
+            diagnostics.append(f"Sentinel-1 request error: {exc}")
 
-        # Attach a compact validation summary so the UI can prove that the
-        # satellite connection returned actual statistics, not just a connection flag.
         s2 = [r for r in rows if r.get("ndvi") is not None or r.get("ndwi") is not None]
         s1 = [r for r in rows if r.get("sentinel1_vv") is not None or r.get("sentinel1_vh") is not None]
         ndvi_vals = [float(r["ndvi"]) for r in s2 if r.get("ndvi") is not None]
@@ -644,8 +724,7 @@ function evaluatePixel(samples) {
         vv_vals = [float(r["sentinel1_vv"]) for r in s1 if r.get("sentinel1_vv") is not None]
         vh_vals = [float(r["sentinel1_vh"]) for r in s1 if r.get("sentinel1_vh") is not None]
         satellite_stats = {
-            "s2_observations": len(s2),
-            "s1_observations": len(s1),
+            "s2_observations": len(s2), "s1_observations": len(s1),
             "ndvi_mean": sum(ndvi_vals) / len(ndvi_vals) if ndvi_vals else None,
             "ndvi_min": min(ndvi_vals) if ndvi_vals else None,
             "ndvi_max": max(ndvi_vals) if ndvi_vals else None,
@@ -653,10 +732,19 @@ function evaluatePixel(samples) {
             "vv_mean": sum(vv_vals) / len(vv_vals) if vv_vals else None,
             "vh_mean": sum(vh_vals) / len(vh_vals) if vh_vals else None,
             "period_days": int(days_back),
+            "diagnostics": diagnostics,
         }
-        return rows, "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing", satellite_stats
+        if rows:
+            source = "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing"
+            if diagnostics:
+                source += " (partial; see diagnostics)"
+            return rows, source, satellite_stats
+        diagnostic_text = " | ".join(diagnostics) if diagnostics else "No usable satellite statistics returned for this AOI/time period."
+        return [], "Copernicus connected but no usable satellite statistics returned", {
+            "status": "no_data", "diagnostic": diagnostic_text, **satellite_stats
+        }
     except Exception as exc:
-        return [], f"Copernicus unavailable: {exc}", {}
+        return [], f"Copernicus unavailable: {exc}", {"status": "error", "diagnostic": str(exc)}
 
 def ai_summarize_satellite_rows(rows, days_back=90):
     """Summarize returned satellite statistics for transparent connection validation."""
@@ -4275,6 +4363,12 @@ elif st.session_state.active_tab == "account":
                             st.caption(f"Weather source used: {result['weather_source_label']}. External weather is a planning source until ONM/official observations are connected.")
                         if result.get("satellite_source_label"):
                             st.caption(f"Satellite source used: {result['satellite_source_label']}. Satellite-derived irrigation is a proxy, not proof of a specific irrigation system.")
+                        sat_diag = (result.get("satellite_stats") or {}).get("diagnostic")
+                        if sat_diag:
+                            st.warning(f"🛰️ Satellite diagnostic: {sat_diag}")
+                        sat_diags = (result.get("satellite_stats") or {}).get("diagnostics") or []
+                        for _diag in sat_diags:
+                            st.warning(f"🛰️ Satellite diagnostic: {_diag}")
 
                         st.markdown("##### 🔬 Evidence chain")
                         status_rows = [
