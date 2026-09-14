@@ -937,7 +937,7 @@ def ai_parse_weather_evidence(weather_rows, crop, wilaya):
 
 
 def ai_parse_weather_alerts(alert_rows, crop, wilaya):
-    """Use existing admin weather alerts as secondary evidence, not as measured weather."""
+    """Use existing admin weather alerts as authoritative operational evidence in this application."""
     matches = []
     keywords = {
         "frost": ["frost", "freeze", "cold", "الصقيع", "برد"],
@@ -1095,6 +1095,116 @@ def ai_is_verified_weather_source(source):
         "station météo", "station meteo",
     ]
     return any(term in text for term in trusted)
+
+
+def ai_parse_report_datetime(value):
+    dt = pd.to_datetime(value, errors="coerce", utc=True)
+    if pd.isna(dt):
+        return None
+    # Normalize timestamps to timezone-naive UTC so observations from APIs and
+    # date-only admin reports can safely be compared in the same window.
+    return dt.tz_convert(None).to_pydatetime()
+
+
+def ai_disease_analysis_windows(disease_rows, crop, wilaya, pre_days=30, post_days=14):
+    """Build crop/Wilaya-specific epidemiological windows around disease observations.
+
+    The report date is the anchor (T0). A conservative 30-day pre-event window and
+    14-day follow-up are used as a planning default. Disease-specific windows can be
+    refined later from phytopathology literature/expert rules. Farmer/unconfirmed
+    reports can define an investigation window, but never become confirmed evidence.
+    """
+    aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
+    aliases.add(str(crop).strip())
+    windows = []
+    for row in disease_rows or []:
+        rw = str(row.get("wilaya", "")).strip()
+        rc = str(row.get("crop", "")).strip()
+        if rw not in {str(wilaya).strip(), "All Wilayas", "ALL", ""}:
+            continue
+        if rc and rc not in aliases:
+            continue
+        dt = ai_parse_report_datetime(row.get("reported_at") or row.get("observation_date"))
+        if dt is None:
+            continue
+        windows.append({
+            "start": dt - timedelta(days=pre_days),
+            "end": dt + timedelta(days=post_days),
+            "anchor": dt,
+            "disease": str(row.get("disease", "")),
+            "status": str(row.get("status", "")),
+            "source": str(row.get("source", "")),
+        })
+    return windows
+
+
+def ai_filter_rows_to_windows(rows, windows, date_fields=("observed_at", "reported_at", "created_at")):
+    """Keep only observations falling inside one of the disease evidence windows."""
+    if not windows:
+        return list(rows or [])
+    out = []
+    for row in rows or []:
+        dt = None
+        for field in date_fields:
+            dt = ai_parse_report_datetime(row.get(field))
+            if dt is not None:
+                break
+        if dt is None:
+            continue
+        if any(w["start"] <= dt <= w["end"] for w in windows):
+            out.append(row)
+    return out
+
+
+def ai_satellite_temporal_analysis(rows):
+    """Convert satellite observations into transparent temporal indicators.
+
+    This does not diagnose disease. It reports direction/change across observations
+    so the AI can distinguish a single value from an actual time-series signal.
+    """
+    rows = sorted(rows or [], key=lambda r: str(r.get("observed_at", "")))
+    def series(key):
+        vals = []
+        for r in rows:
+            dt = ai_parse_report_datetime(r.get("observed_at"))
+            v = ai_safe_num(r.get(key))
+            if dt is not None and v is not None:
+                vals.append((dt, v))
+        return vals
+
+    def summarize(key):
+        vals = series(key)
+        if len(vals) < 2:
+            return {"observations": len(vals), "first": vals[0][1] if vals else None,
+                    "last": vals[-1][1] if vals else None, "change_percent": None,
+                    "trend_per_day": None, "trend": "insufficient time series"}
+        x0 = vals[0][0]
+        xs = [(d - x0).total_seconds() / 86400.0 for d, _ in vals]
+        ys = [v for _, v in vals]
+        xm = sum(xs) / len(xs); ym = sum(ys) / len(ys)
+        denom = sum((x - xm) ** 2 for x in xs)
+        slope = sum((x - xm) * (y - ym) for x, y in zip(xs, ys)) / denom if denom else 0.0
+        first, last = ys[0], ys[-1]
+        change = ((last - first) / abs(first) * 100.0) if first != 0 else None
+        if change is None or abs(change) < 5:
+            trend = "stable / weak change"
+        elif change > 0:
+            trend = "increasing"
+        else:
+            trend = "declining"
+        return {"observations": len(vals), "first": first, "last": last,
+                "change_percent": change, "trend_per_day": slope, "trend": trend,
+                "first_date": vals[0][0].date().isoformat(), "last_date": vals[-1][0].date().isoformat()}
+
+    return {
+        "ndvi": summarize("ndvi"),
+        "ndwi": summarize("ndwi"),
+        "sentinel1_vv": summarize("sentinel1_vv"),
+        "sentinel1_vh": summarize("sentinel1_vh"),
+        "observation_count": len(rows),
+        "date_start": rows[0].get("observed_at") if rows else None,
+        "date_end": rows[-1].get("observed_at") if rows else None,
+    }
 
 
 def ai_confirmed_disease_rows(disease_rows):
@@ -1370,12 +1480,6 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     if yield_benchmark is None:
         yield_benchmark = get_builtin_wilaya_yield(crop, wilaya)
 
-    weather_signal = ai_parse_weather_evidence(weather_rows or [], crop, wilaya)
-    weather_signal["alert_matches"] = ai_parse_weather_alerts(weather_alert_rows or [], crop, wilaya)
-    historical_signal = ai_historical_production_signal(
-        historical_rows or [], crop, wilaya, declared_area=declared_area, yield_benchmark=yield_benchmark
-    )
-
     # Restrict crop-specific evidence to the selected crop/Wilaya. This is
     # critical: a disease in another crop must never become evidence for this
     # investigation.
@@ -1396,10 +1500,24 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
 
     selected_soil_rows = _filter_crop_wilaya(soil_rows)
     selected_irrigation_rows = _filter_crop_wilaya(irrigation_rows)
-    selected_satellite_rows = _filter_crop_wilaya(satellite_rows)
     selected_disease_rows = _filter_crop_wilaya(disease_rows, crop_field="crop", wilaya_field="wilaya")
+
+    # Disease epidemiology is spatial + temporal. If a disease observation exists,
+    # weather and satellite evidence are restricted to the relevant crop/Wilaya
+    # windows around the observation date. This prevents unrelated months or crops
+    # from contaminating the investigation.
+    disease_windows = ai_disease_analysis_windows(selected_disease_rows, crop, wilaya)
+    analysis_weather_rows = ai_filter_rows_to_windows(weather_rows or [], disease_windows) if disease_windows else list(weather_rows or [])
+    analysis_satellite_rows = ai_filter_rows_to_windows(satellite_rows or [], disease_windows) if disease_windows else list(satellite_rows or [])
+    weather_signal = ai_parse_weather_evidence(analysis_weather_rows, crop, wilaya)
+    weather_signal["alert_matches"] = ai_parse_weather_alerts(weather_alert_rows or [], crop, wilaya)
+    historical_signal = ai_historical_production_signal(
+        historical_rows or [], crop, wilaya, declared_area=declared_area, yield_benchmark=yield_benchmark
+    )
+    selected_satellite_rows = _filter_crop_wilaya(analysis_satellite_rows)
     soil_estimate = ai_regional_soil_estimate(wilaya, crop) if not selected_soil_rows else None
     irrigation_proxy = ai_satellite_irrigation_proxy(selected_satellite_rows, crop, wilaya)
+    satellite_temporal = ai_satellite_temporal_analysis(selected_satellite_rows)
 
     # Add basic neighbor comparison when Wilaya coordinates are available.
     neighboring_signal = {"available": False}
@@ -1441,7 +1559,7 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     impact = ai_estimate_investigation_impact(crop, wilaya, declared_area, _ai_float(yield_benchmark), historical_signal, primary)
 
     confidence_info = ai_calculate_evidence_confidence(
-        crop, primary[0], weather_rows=weather_rows or [], weather_signal=weather_signal,
+        crop, primary[0], weather_rows=analysis_weather_rows, weather_signal=weather_signal,
         disease_rows=selected_disease_rows, satellite_rows=selected_satellite_rows,
         historical_signal=historical_signal, soil_rows=selected_soil_rows, irrigation_rows=selected_irrigation_rows,
     )
@@ -1503,7 +1621,14 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         "soil_estimate": soil_estimate,
         "irrigation_proxy": irrigation_proxy,
         "satellite_stats": satellite_stats,
+        "satellite_temporal": satellite_temporal,
         "satellite_source_label": "Copernicus Sentinel-1 + Sentinel-2 automatic remote sensing" if selected_satellite_rows else None,
+        "disease_analysis_windows": [
+            {"start": w["start"].date().isoformat(), "anchor": w["anchor"].date().isoformat(), "end": w["end"].date().isoformat(), "disease": w["disease"], "status": w["status"], "source": w["source"]}
+            for w in disease_windows
+        ],
+        "analysis_weather_observations": len(analysis_weather_rows),
+        "analysis_satellite_observations": len(selected_satellite_rows),
         "neighbors": neighboring_signal,
         "causes": ranked,
         "primary_cause": primary[0],
@@ -4294,7 +4419,7 @@ elif st.session_state.active_tab == "account":
                 st.info("No disease reports have been recorded yet.")
 
             st.markdown("##### 🧠 Important evidence rule")
-            st.caption("Farmer reports and suspected disease reports are recorded as leads only. The AI does not treat them as confirmed evidence; confirmation requires a trusted agricultural source. Weather alerts are not treated as confirmed weather events.")
+            st.caption("Farmer reports and suspected disease reports are recorded as leads only. The AI does not treat them as confirmed evidence; confirmation requires a trusted agricultural source. Admin-issued weather alerts are treated as authoritative operational evidence; ordinary farmer reports and unconfirmed events remain leads only.")
             st.info(
                 "A disease report is evidence of an observation, not automatically a confirmed diagnosis. "
                 "The AI will combine it with crop stage, weather and satellite anomalies. Unknown diseases remain unknown until a qualified diagnosis confirms them."
@@ -4568,6 +4693,25 @@ elif st.session_state.active_tab == "account":
                         with r4:
                             st.metric("Potential Impact", "—" if impact.get("loss_t") is None else f"-{impact['loss_t']:,.0f} t")
 
+                        sat_temporal = result.get("satellite_temporal") or {}
+                        if sat_temporal.get("observation_count", 0) >= 2:
+                            st.markdown("##### 🛰️ Satellite temporal evidence")
+                            st.caption(
+                                f"The satellite signal is evaluated as a time series from {sat_temporal.get('date_start', '—')} to {sat_temporal.get('date_end', '—')}. "
+                                "A satellite anomaly indicates vegetation/surface change; it does not by itself diagnose a disease."
+                            )
+                            sat_rows = []
+                            for key, label in [("ndvi", "NDVI"), ("ndwi", "NDWI"), ("sentinel1_vv", "Sentinel-1 VV"), ("sentinel1_vh", "Sentinel-1 VH")]:
+                                d = sat_temporal.get(key) or {}
+                                sat_rows.append({"Indicator": label, "Observations": d.get("observations", 0), "First": d.get("first"), "Last": d.get("last"), "Change %": d.get("change_percent"), "Trend": d.get("trend", "—")})
+                            st.dataframe(pd.DataFrame(sat_rows), use_container_width=True, hide_index=True)
+
+                        disease_windows_ui = result.get("disease_analysis_windows") or []
+                        if disease_windows_ui:
+                            st.markdown("##### 🦠 Disease evidence window")
+                            st.caption("Disease observations are analyzed in a crop/Wilaya-specific temporal window: default T−30 days to T+14 days around the reported observation date. The window is a planning rule and can later be replaced by disease-specific expert/epidemiological rules.")
+                            st.dataframe(pd.DataFrame(disease_windows_ui), use_container_width=True, hide_index=True)
+
                         st.markdown("##### 🧠 Agent conclusion")
                         st.markdown(ai_investigation_text(result))
                         ci = result.get("confidence_info") or {}
@@ -4807,8 +4951,8 @@ elif st.session_state.active_tab == "account":
                         {"Data stream": "Weather + rainfall", "Status": "🟡 Optional table", "Agent use": "Frost, heat, rainfall anomalies"},
                         {"Data stream": "Soil", "Status": "🟢 Automatic regional estimate + optional measured data", "Agent use": "pH range, salinity/lime risk and soil limitations; measured lab data override estimates"},
                         {"Data stream": "Irrigation", "Status": "🟢 Automatic satellite proxy + optional measured data", "Agent use": "Sentinel-1/Sentinel-2 water/vegetation statistics; measured irrigation data override the satellite proxy"},
-                        {"Data stream": "Satellite", "Status": "🟢 Automatic Sentinel-1/Sentinel-2 statistics when connected", "Agent use": "NDVI, NDWI, Sentinel-1 VV/VH and observation counts; connection is considered working only when statistics are returned"},
-                        {"Data stream": "Disease reports", "Status": "🟡 Optional table", "Agent use": "Disease evidence and impact"},
+                        {"Data stream": "Satellite", "Status": "🟢 Automatic Sentinel-1/Sentinel-2 time series when connected", "Agent use": "NDVI, NDWI, Sentinel-1 VV/VH, trends and observation counts; satellite supports vegetation/surface anomalies but does not diagnose disease"},
+                        {"Data stream": "Disease reports", "Status": "🟡 Optional table", "Agent use": "Crop/Wilaya/time-window disease evidence; unconfirmed reports are leads only, trusted confirmed reports can enter causal confidence"},
                         {"Data stream": "Wilaya coordinates", "Status": "🟡 Existing optional table", "Agent use": "Nearest-Wilaya comparison"},
                         {"Data stream": "Admin AI alerts", "Status": "🟡 Optional table", "Agent use": "Store and review high-priority investigations"},
                     ])
