@@ -783,9 +783,10 @@ def ai_summarize_satellite_rows(rows, days_back=90):
 def ai_load_optional_table(table_name, columns):
     """Cached Supabase read for AI data sources.
 
-    AI evidence tables do not need to be queried again on every Streamlit
-    widget rerun. A short cache keeps the UI responsive while still refreshing
-    operational data every five minutes.
+    The cache is intentionally kept for performance, but operational writes
+    (disease reports and admin weather alerts) explicitly clear this cache
+    immediately after a successful write. This gives us both fast reruns and
+    near-immediate evidence availability.
     """
     if not supabase_client:
         return [], False, "Supabase connection unavailable"
@@ -794,6 +795,18 @@ def ai_load_optional_table(table_name, columns):
         return (res.data if res.data else []), True, ""
     except Exception as exc:
         return [], False, str(exc)
+
+
+def ai_refresh_operational_evidence_cache():
+    """Invalidate cached operational evidence after an admin write.
+
+    This avoids waiting for the normal TTL after disease/weather evidence is
+    entered, while retaining caching for expensive read-heavy investigations.
+    """
+    try:
+        ai_load_optional_table.clear()
+    except Exception:
+        pass
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1106,13 +1119,42 @@ def ai_parse_report_datetime(value):
     return dt.tz_convert(None).to_pydatetime()
 
 
-def ai_disease_analysis_windows(disease_rows, crop, wilaya, pre_days=30, post_days=14):
-    """Build crop/Wilaya-specific epidemiological windows around disease observations.
+def ai_disease_window_profile(crop, disease):
+    """Return an adaptive screening window for plant-disease investigations.
 
-    The report date is the anchor (T0). A conservative 30-day pre-event window and
-    14-day follow-up are used as a planning default. Disease-specific windows can be
-    refined later from phytopathology literature/expert rules. Farmer/unconfirmed
-    reports can define an investigation window, but never become confirmed evidence.
+    These are *screening windows*, not claimed incubation periods. They are
+    deliberately conservative and are organized by disease mechanism. Exact
+    epidemiological windows should later be replaced/overridden by expert or
+    literature-backed disease rules when a disease-specific source is added.
+    """
+    d = str(disease or "").lower()
+    if "virus" in d or "virus-like" in d:
+        return 60, 30, "systemic/slow disease screening window"
+    if any(k in d for k in ["fusarium", "verticillium", "root", "crown", "collar"]):
+        return 45, 21, "soil-borne disease screening window"
+    if any(k in d for k in ["bacterial wilt", "bacterial", "canker"]):
+        return 30, 21, "bacterial disease screening window"
+    if any(k in d for k in ["late blight", "phytophthora"]):
+        return 21, 14, "oomycete/late-blight screening window"
+    if any(k in d for k in ["downy mildew", "powdery mildew", "mildew"]):
+        return 21, 14, "mildew screening window"
+    if any(k in d for k in ["alternaria", "early blight", "leaf spot", "shot hole", "rust"]):
+        return 30, 14, "foliar disease screening window"
+    if any(k in d for k in ["brown rot", "monilinia", "leaf curl", "taphrina"]):
+        return 30, 14, "fruit/tree disease screening window"
+    # Crop group fallback keeps the system usable for all supported crops.
+    if ai_crop_is_tree(crop):
+        return 30, 14, "tree-crop disease screening window"
+    return 21, 14, "general crop disease screening window"
+
+
+def ai_disease_analysis_windows(disease_rows, crop, wilaya, pre_days=None, post_days=None):
+    """Build crop/Wilaya/disease-specific evidence windows around observations.
+
+    T0 is the reported/observed date. The window is selected from the disease
+    mechanism when recognizable, otherwise from the crop group. Confirmed and
+    unconfirmed reports can define the investigation window; only trusted
+    confirmed reports can become confirmed disease evidence.
     """
     aliases = set(AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {}).get("aliases", set()))
     aliases.add(str(crop).strip())
@@ -1127,16 +1169,23 @@ def ai_disease_analysis_windows(disease_rows, crop, wilaya, pre_days=30, post_da
         dt = ai_parse_report_datetime(row.get("reported_at") or row.get("observation_date"))
         if dt is None:
             continue
+        disease = str(row.get("disease", ""))
+        if pre_days is None or post_days is None:
+            p_days, q_days, method = ai_disease_window_profile(crop, disease)
+        else:
+            p_days, q_days, method = int(pre_days), int(post_days), "configured screening window"
         windows.append({
-            "start": dt - timedelta(days=pre_days),
-            "end": dt + timedelta(days=post_days),
+            "start": dt - timedelta(days=p_days),
+            "end": dt + timedelta(days=q_days),
             "anchor": dt,
-            "disease": str(row.get("disease", "")),
+            "disease": disease,
             "status": str(row.get("status", "")),
             "source": str(row.get("source", "")),
+            "pre_days": p_days,
+            "post_days": q_days,
+            "window_method": method,
         })
     return windows
-
 
 def ai_filter_rows_to_windows(rows, windows, date_fields=("observed_at", "reported_at", "created_at")):
     """Keep only observations falling inside one of the disease evidence windows."""
@@ -1157,12 +1206,14 @@ def ai_filter_rows_to_windows(rows, windows, date_fields=("observed_at", "report
 
 
 def ai_satellite_temporal_analysis(rows):
-    """Convert satellite observations into transparent temporal indicators.
+    """Build a time-series signal and an internal baseline/anomaly estimate.
 
-    This does not diagnose disease. It reports direction/change across observations
-    so the AI can distinguish a single value from an actual time-series signal.
+    The first observations form a local baseline and the later observations are
+    compared with it. This is not a disease classifier and is not a calibrated
+    yield-loss model; it is a transparent remote-sensing anomaly layer.
     """
     rows = sorted(rows or [], key=lambda r: str(r.get("observed_at", "")))
+
     def series(key):
         vals = []
         for r in rows:
@@ -1177,7 +1228,8 @@ def ai_satellite_temporal_analysis(rows):
         if len(vals) < 2:
             return {"observations": len(vals), "first": vals[0][1] if vals else None,
                     "last": vals[-1][1] if vals else None, "change_percent": None,
-                    "trend_per_day": None, "trend": "insufficient time series"}
+                    "trend_per_day": None, "trend": "insufficient time series",
+                    "baseline": vals[0][1] if vals else None, "latest_anomaly_percent": None}
         x0 = vals[0][0]
         xs = [(d - x0).total_seconds() / 86400.0 for d, _ in vals]
         ys = [v for _, v in vals]
@@ -1186,6 +1238,13 @@ def ai_satellite_temporal_analysis(rows):
         slope = sum((x - xm) * (y - ym) for x, y in zip(xs, ys)) / denom if denom else 0.0
         first, last = ys[0], ys[-1]
         change = ((last - first) / abs(first) * 100.0) if first != 0 else None
+        # Robust local baseline: earlier half of the available series, with at
+        # least two observations where possible. This reduces dependence on one
+        # unusually cloudy/noisy observation.
+        split = max(2, len(ys) // 2)
+        baseline_values = ys[:split]
+        baseline = sum(baseline_values) / len(baseline_values)
+        latest_anomaly = ((last - baseline) / abs(baseline) * 100.0) if baseline != 0 else None
         if change is None or abs(change) < 5:
             trend = "stable / weak change"
         elif change > 0:
@@ -1194,6 +1253,7 @@ def ai_satellite_temporal_analysis(rows):
             trend = "declining"
         return {"observations": len(vals), "first": first, "last": last,
                 "change_percent": change, "trend_per_day": slope, "trend": trend,
+                "baseline": baseline, "latest_anomaly_percent": latest_anomaly,
                 "first_date": vals[0][0].date().isoformat(), "last_date": vals[-1][0].date().isoformat()}
 
     return {
@@ -1205,7 +1265,6 @@ def ai_satellite_temporal_analysis(rows):
         "date_start": rows[0].get("observed_at") if rows else None,
         "date_end": rows[-1].get("observed_at") if rows else None,
     }
-
 
 def ai_confirmed_disease_rows(disease_rows):
     """Only expert/authoritative confirmed disease reports count as confirmation."""
@@ -1221,7 +1280,11 @@ def ai_confirmed_disease_rows(disease_rows):
         is_confirmed = "confirmed" in status or "مؤكد" in status
         is_trusted = (
             source in {x.lower() for x in trusted_sources}
-            or any(k in source for k in ["expert", "agronom", "laboratory", "lab", "official", "مفتش", "مخبر", "إرشاد"])
+            or any(k in source for k in [
+                "expert", "agronom", "laboratory", "lab", "official",
+                "field officer", "agricultural extension", "agricultural service",
+                "مفتش", "مخبر", "إرشاد", "مصلحة فلاحية"
+            ])
         )
         if is_confirmed and is_trusted:
             confirmed.append(row)
@@ -1427,8 +1490,19 @@ def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_are
     return ranked
 
 
-def ai_estimate_investigation_impact(crop, wilaya, declared_area, benchmark_yield, historical_signal, cause_score):
-    """Estimate production and potential loss using transparent planning rules."""
+def ai_estimate_investigation_impact(crop, wilaya, declared_area, benchmark_yield, historical_signal, cause_score,
+                                     disease_rows=None, satellite_temporal=None, weather_signal=None,
+                                     satellite_rows=None):
+    """Estimate production impact using affected area + observed signals.
+
+    Priority order:
+      1) measured current-season production, when available;
+      2) affected-area × benchmark yield for confirmed disease/weather events;
+      3) satellite-derived stress anomaly as a bounded damage proxy;
+      4) otherwise no causal loss percentage is reported.
+
+    The result is a planning estimate, not a calibrated Algerian yield-loss model.
+    """
     baseline = None
     if historical_signal.get("available") and historical_signal.get("baseline_t"):
         baseline = float(historical_signal["baseline_t"])
@@ -1438,32 +1512,91 @@ def ai_estimate_investigation_impact(crop, wilaya, declared_area, benchmark_yiel
     if baseline is None or baseline <= 0:
         return {"baseline_t": None, "expected_t": None, "loss_t": None, "loss_percent": None, "method": "insufficient data"}
 
-    # Conservative cause-impact priors. They are planning estimates until a
-    # trained Algerian impact model is available. The score scales the prior.
+    disease_rows = disease_rows or []
+    satellite_temporal = satellite_temporal or {}
+    weather_signal = weather_signal or {}
+    satellite_rows = satellite_rows or []
     cause_name, cause_data = cause_score
-    priors = {
-        "frost": 0.25,
-        "drought": 0.20,
-        "disease": 0.18,
-        "irrigation": 0.15,
-        "soil": 0.12,
-        "heat": 0.15,
-        "area": 0.05,
-    }
-    if cause_name == "insufficient_evidence":
-        return {"baseline_t": baseline, "expected_t": None, "loss_t": None, "loss_percent": None, "method": "insufficient causal evidence"}
+    cause_strength = float(cause_data.get("score", 0.0) or 0.0)
+    if cause_name == "insufficient_evidence" or cause_strength < 0.20:
+        return {"baseline_t": baseline, "expected_t": None, "loss_t": None, "loss_percent": None,
+                "method": "insufficient causal evidence", "affected_area_ha": None}
 
-    prior = priors.get(cause_name, 0.05)
-    loss_pct = min(0.45, max(0.0, prior * max(0.35, float(cause_data.get("score", 0.0)))))
-    expected = baseline * (1.0 - loss_pct)
+    # Determine whether the event is independently confirmed enough to estimate
+    # a physical loss. A report alone never triggers this branch.
+    confirmed_disease = bool(ai_confirmed_disease_rows(disease_rows))
+    alert_confirmed = bool(weather_signal.get("alert_matches"))
+    verified_frost = bool(weather_signal.get("frost_events")) and bool(weather_signal.get("available"))
+    independently_confirmed = confirmed_disease or alert_confirmed or verified_frost
+
+    # Affected area is the most defensible spatial multiplier when supplied.
+    affected_area = None
+    for row in disease_rows:
+        a = ai_safe_num(row.get("affected_area_ha"))
+        if a is not None and a > 0:
+            affected_area = max(affected_area or 0.0, a)
+    if affected_area is not None:
+        affected_area = min(float(affected_area), float(declared_area)) if declared_area > 0 else affected_area
+
+    # Remote-sensing stress proxy. NDVI is deliberately capped and only used as
+    # a stress magnitude, never as proof of disease.
+    ndvi_info = satellite_temporal.get("ndvi", {}) or {}
+    ndvi_anom = ai_safe_num(ndvi_info.get("latest_anomaly_percent"))
+    stress_pct = min(0.45, max(0.0, abs(ndvi_anom) / 100.0)) if ndvi_anom is not None and ndvi_anom < 0 else 0.0
+
+    # Severity provides a bounded prior only after the event itself is independently
+    # confirmed. It does not make an unconfirmed report credible.
+    severity_map = {"low / خفيفة": 0.10, "moderate / متوسطة": 0.20, "high / شديدة": 0.30, "critical / حرجة": 0.40}
+    severity_prior = 0.0
+    for row in disease_rows:
+        if str(row.get("status", "")).lower().find("confirmed") >= 0 or "مؤكد" in str(row.get("status", "")):
+            severity_prior = max(severity_prior, severity_map.get(str(row.get("severity", "")).strip().lower(), 0.0))
+
+    if not independently_confirmed:
+        return {"baseline_t": baseline, "expected_t": None, "loss_t": None, "loss_percent": None,
+                "method": "causal event not independently confirmed", "affected_area_ha": affected_area,
+                "satellite_stress_proxy_percent": stress_pct * 100}
+
+    # If a confirmed affected area exists, estimate loss on that area and leave
+    # unaffected production intact. This is substantially better than applying a
+    # whole-Wilaya percentage to the entire crop.
+    if affected_area is not None and benchmark_yield and benchmark_yield > 0:
+        area_fraction = min(1.0, max(0.0, affected_area / float(declared_area))) if declared_area > 0 else 1.0
+        damage_fraction = max(severity_prior, min(0.45, stress_pct))
+        # If no satellite stress is visible, do not invent a large disease loss.
+        if damage_fraction <= 0:
+            damage_fraction = min(0.25, 0.10 + 0.20 * cause_strength)
+        loss_pct_total = min(0.45, area_fraction * damage_fraction)
+        loss_t = float(declared_area) * float(benchmark_yield) * loss_pct_total
+        return {
+            "baseline_t": baseline,
+            "expected_t": baseline - loss_t,
+            "loss_t": loss_t,
+            "loss_percent": loss_pct_total * 100.0,
+            "method": "confirmed affected area × benchmark yield × bounded damage estimate",
+            "affected_area_ha": affected_area,
+            "affected_area_fraction": area_fraction,
+            "damage_fraction": damage_fraction,
+            "satellite_stress_proxy_percent": stress_pct * 100,
+        }
+
+    # Confirmed event without an affected-area measurement: use a conservative
+    # whole-Wilaya planning estimate, clearly labelled as less precise.
+    damage_fraction = max(severity_prior, min(0.30, stress_pct))
+    if damage_fraction <= 0:
+        damage_fraction = min(0.20, 0.08 + 0.12 * cause_strength)
+    loss_pct_total = min(0.30, damage_fraction)
+    loss_t = baseline * loss_pct_total
     return {
         "baseline_t": baseline,
-        "expected_t": expected,
-        "loss_t": baseline - expected,
-        "loss_percent": loss_pct * 100,
-        "method": "historical baseline" if historical_signal.get("available") else "declared area × planning yield",
+        "expected_t": baseline - loss_t,
+        "loss_t": loss_t,
+        "loss_percent": loss_pct_total * 100.0,
+        "method": "confirmed event × bounded impact estimate (affected area unavailable)",
+        "affected_area_ha": None,
+        "damage_fraction": damage_fraction,
+        "satellite_stress_proxy_percent": stress_pct * 100,
     }
-
 
 def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_benchmarks,
                                weather_rows=None, weather_alert_rows=None,
@@ -1556,7 +1689,11 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         selected_satellite_rows, selected_disease_rows, soil_estimate, irrigation_proxy,
     )
     primary = ranked[0]
-    impact = ai_estimate_investigation_impact(crop, wilaya, declared_area, _ai_float(yield_benchmark), historical_signal, primary)
+    impact = ai_estimate_investigation_impact(
+        crop, wilaya, declared_area, _ai_float(yield_benchmark), historical_signal, primary,
+        disease_rows=selected_disease_rows, satellite_temporal=satellite_temporal,
+        weather_signal=weather_signal, satellite_rows=selected_satellite_rows,
+    )
 
     confidence_info = ai_calculate_evidence_confidence(
         crop, primary[0], weather_rows=analysis_weather_rows, weather_signal=weather_signal,
@@ -4206,6 +4343,7 @@ elif st.session_state.active_tab == "account":
                         "severity": al_severity,
                         "message": sanitize(al_msg),
                     }).execute()
+                    ai_refresh_operational_evidence_cache()
                     st.success("Weather Alert Published!")
                 except Exception as e:
                     st.error(f"Failed to post alert: {e}")
@@ -4346,6 +4484,7 @@ elif st.session_state.active_tab == "account":
                         "Farmer report / بلاغ فلاح",
                         "Laboratory / مخبر",
                         "Agricultural extension / إرشاد فلاحي",
+                        "Official agricultural service / مصلحة فلاحية رسمية",
                         "Other / مصدر آخر",
                     ],
                     key="admin_disease_source",
@@ -4398,6 +4537,7 @@ elif st.session_state.active_tab == "account":
                             except Exception as exc:
                                 st.error(f"Could not save report for {target_wilaya}: {exc}")
                     if inserted:
+                        ai_refresh_operational_evidence_cache()
                         st.success(f"Saved {inserted} disease report(s).")
                         st.rerun()
 
@@ -4709,7 +4849,7 @@ elif st.session_state.active_tab == "account":
                         disease_windows_ui = result.get("disease_analysis_windows") or []
                         if disease_windows_ui:
                             st.markdown("##### 🦠 Disease evidence window")
-                            st.caption("Disease observations are analyzed in a crop/Wilaya-specific temporal window: default T−30 days to T+14 days around the reported observation date. The window is a planning rule and can later be replaced by disease-specific expert/epidemiological rules.")
+                            st.caption("Disease observations use an adaptive epidemiological screening window based on the reported disease mechanism and crop group. These windows are screening rules, not exact incubation periods; expert/literature overrides can replace them.")
                             st.dataframe(pd.DataFrame(disease_windows_ui), use_container_width=True, hide_index=True)
 
                         st.markdown("##### 🧠 Agent conclusion")
