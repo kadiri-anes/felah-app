@@ -1225,9 +1225,24 @@ def ai_rank_causes(crop, wilaya, weather_signal, historical_signal, declared_are
             causes["frost"]["evidence"].append("Temperature crossed the severe-frost planning threshold")
         causes["frost"]["source_quality"] = "observed"
 
-    # Admin weather alerts are NOT confirmation. They are retained in the
-    # evidence record for human review but cannot create or strengthen a causal
-    # score. Only explicitly verified/authoritative weather observations can do so.
+    # Admin-issued weather alerts are authoritative operational evidence in this
+    # application. They can create/strengthen a weather-related cause, while
+    # ordinary farmer reports and unconfirmed events remain excluded.
+    alert_matches = weather_signal.get("alert_matches") or []
+    if alert_matches:
+        alert_causes = []
+        for alert in alert_matches:
+            text = " ".join(str(alert.get(k, "") or "") for k in ("title", "message", "severity")).lower()
+            if any(k in text for k in ("frost", "gel", "freeze", "cold", "صقيع", "برد", "جليد")):
+                alert_causes.append("frost")
+            if any(k in text for k in ("drought", "dry", "sécheresse", "جفاف")):
+                alert_causes.append("drought")
+            if any(k in text for k in ("heat", "hot", "canicule", "حرارة", "موجة حر")):
+                alert_causes.append("heat")
+        for cause in set(alert_causes):
+            causes[cause]["score"] += 0.60
+            causes[cause]["evidence"].append("Admin-issued weather alert")
+            causes[cause]["source_quality"] = "admin authoritative alert"
 
     # Rainfall / irrigation / soil / satellite / disease optional evidence.
     if irrigation_rows:
@@ -1464,13 +1479,13 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         ]
 
     # A useful notification should fire only when evidence is meaningful.
-    confidence_info = {
-        "rate": confidence,
-        "status": "confirmed" if confidence >= 0.60 else ("supported" if confidence > 0 else "unconfirmed"),
-        "qualifying_evidence": sorted({
-            item for r in per_wilaya for item in (r.get("confidence_info", {}).get("qualifying_evidence", []) or [])
-        }),
-    }
+    # Preserve the evidence details calculated for this single Wilaya.
+    confidence_info = dict(confidence_info or {})
+    confidence_info["rate"] = confidence
+    confidence_info["status"] = (
+        "confirmed" if confidence >= 0.60
+        else ("supported" if confidence > 0 else "unconfirmed")
+    )
     notify = bool(
         confidence >= 0.60
         and primary[1]["score"] >= 0.55
@@ -1590,6 +1605,24 @@ def ai_investigate_national(crop, df_live, benchmark_map, national_benchmarks,
     loss_percent = (total_loss / total_baseline * 100.0) if has_impact and total_baseline > 0 else None
     primary = ranked_causes[0]
     confidence = min(0.95, max(0.0, sum(float(r.get("confidence", 0.0) or 0.0) for r in per_wilaya) / max(len(per_wilaya), 1)))
+    national_qualifying_evidence = sorted({
+        item
+        for r in per_wilaya
+        for item in (r.get("confidence_info", {}).get("qualifying_evidence", []) or [])
+    })
+    national_verified_weather = any(
+        bool(r.get("confidence_info", {}).get("verified_weather")) for r in per_wilaya
+    )
+    national_confirmed_disease = any(
+        bool(r.get("confidence_info", {}).get("confirmed_disease")) for r in per_wilaya
+    )
+    confidence_info = {
+        "rate": confidence,
+        "status": "confirmed" if confidence >= 0.60 else ("supported" if confidence > 0 else "unconfirmed"),
+        "qualifying_evidence": national_qualifying_evidence,
+        "verified_weather": national_verified_weather,
+        "confirmed_disease": national_confirmed_disease,
+    }
     notify = bool(
         primary[1]["score"] >= 0.55
         and loss_percent is not None
