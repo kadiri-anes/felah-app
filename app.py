@@ -4140,7 +4140,9 @@ if st.session_state.active_tab == "home":
                     icon=folium.Icon(color=color_map.get(cat, "green")),
                 ).add_to(m)
 
-            st_folium(m, width=700, height=450)
+            # Responsive map: use the available Streamlit container width so the
+            # Folium iframe does not keep a fixed 700px width on phones.
+            st_folium(m, width=700, height=450, use_container_width=True)
 
 # ---------------------------------------------------------
 # TAB 2: DIGITAL CARTE FELLAH
