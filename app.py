@@ -2376,6 +2376,8 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "farmer_email" not in st.session_state:
     st.session_state.farmer_email = ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = ""
 if "farmer_name" not in st.session_state:
     st.session_state.farmer_name = "فلاح مسجل"
 if "carte_num" not in st.session_state:
@@ -2558,7 +2560,7 @@ def get_unread_notif_count() -> int:
         res = (
             supabase_client.table("farmer_notifications")
             .select("id", count="exact")
-            .eq("farmer_email", st.session_state.farmer_email)
+            .eq("user_id", st.session_state.user_id)
             .eq("is_read", False)
             .execute()
         )
@@ -2574,7 +2576,7 @@ def get_user_notifications():
         res = (
             supabase_client.table("farmer_notifications")
             .select("*")
-            .eq("farmer_email", st.session_state.farmer_email)
+            .eq("user_id", st.session_state.user_id)
             .order("id", desc=True)
             .execute()
         )
@@ -3561,6 +3563,7 @@ with st.sidebar:
                                 {"email": email_input, "password": pass_input}
                             )
                             st.session_state.logged_in = True
+                            st.session_state.user_id = str(res.user.id) if res.user else ""
                             st.session_state.farmer_email = email_input
                             user_metadata = (
                                 res.user.user_metadata if res.user else {}
@@ -3571,6 +3574,19 @@ with st.sidebar:
                             st.session_state.carte_num = user_metadata.get(
                                 "carte_num", "DZ-2026-1088"
                             )
+                            # Keep the application profile linked to the authenticated
+                            # Supabase user. This UUID becomes the database ownership key.
+                            if st.session_state.user_id:
+                                try:
+                                    supabase_client.table("farmer_profiles").upsert({
+                                        "user_id": st.session_state.user_id,
+                                        "email": email_input,
+                                        "full_name": st.session_state.farmer_name,
+                                        "carte_num": st.session_state.carte_num,
+                                    }, on_conflict="user_id").execute()
+                                except Exception:
+                                    # Profile synchronization must not prevent a valid login.
+                                    pass
                             st.success("Logged in successfully!")
                             st.rerun()
                         except Exception as e:
@@ -3595,7 +3611,13 @@ with st.sidebar:
                 st.warning(f"🔔 You have {unread_count} unread notifications!")
 
             if st.button("Log Out / خروج", use_container_width=True):
+                try:
+                    if supabase_client:
+                        supabase_client.auth.sign_out()
+                except Exception:
+                    pass
                 st.session_state.logged_in = False
+                st.session_state.user_id = ""
                 st.session_state.farmer_email = ""
                 st.session_state.admin_authenticated = False
                 st.rerun()
@@ -3881,6 +3903,7 @@ if st.session_state.active_tab == "home":
                                 supabase_client.table(
                                     "support_requests"
                                 ).insert({
+                                    "user_id": st.session_state.user_id,
                                     "farmer_name": st.session_state.farmer_name,
                                     "carte_num": st.session_state.carte_num,
                                     "wilaya": selected_w_sup,
@@ -3980,6 +4003,7 @@ if st.session_state.active_tab == "home":
                 if st.session_state.logged_in:
                     try:
                         supabase_client.table("declarations").insert({
+                            "user_id": st.session_state.user_id,
                             "farmer_name": st.session_state.farmer_name,
                             "carte_num": st.session_state.carte_num,
                             "wilaya": selected_w,
@@ -4207,7 +4231,7 @@ elif st.session_state.active_tab == "account":
                     supabase_client.table("farmer_notifications").update(
                         {"is_read": True}
                     ).eq(
-                        "farmer_email", st.session_state.farmer_email
+                        "user_id", st.session_state.user_id
                     ).execute()
                     st.success("Notifications updated.")
                     st.rerun()
@@ -4220,7 +4244,7 @@ elif st.session_state.active_tab == "account":
                 res_dec = (
                     supabase_client.table("declarations")
                     .select("*")
-                    .eq("carte_num", st.session_state.carte_num)
+                    .eq("user_id", st.session_state.user_id)
                     .execute()
                 )
                 if res_dec.data:
@@ -4246,7 +4270,7 @@ elif st.session_state.active_tab == "account":
                 res_sup = (
                     supabase_client.table("support_requests")
                     .select("*")
-                    .eq("carte_num", st.session_state.carte_num)
+                    .eq("user_id", st.session_state.user_id)
                     .execute()
                 )
                 if res_sup.data:
