@@ -12,6 +12,7 @@ import qrcode
 import streamlit as st
 import streamlit.components.v1 as components
 from st_supabase_connection import SupabaseConnection
+from supabase import create_client
 from streamlit_folium import st_folium
 
 # ---------------------------------------------------------
@@ -2419,23 +2420,26 @@ def _get_supabase_connection_url() -> str:
         return ""
 
 
-# Separate server-side connection for privileged admin operations.
-# The service-role key is read only from Streamlit Secrets and is never placed
-# in the source code or exposed to the browser.
-try:
-    _admin_service_key = str(st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")).strip()
-    _admin_supabase_url = _get_supabase_connection_url()
-    if _admin_service_key and _admin_supabase_url:
-        admin_supabase_client = st.connection(
-            "supabase_admin",
-            type=SupabaseConnection,
-            url=_admin_supabase_url,
-            key=_admin_service_key,
-        )
-    else:
-        admin_supabase_client = None
-except Exception:
-    admin_supabase_client = None
+# Separate server-side client for privileged admin operations.
+# The service-role/secret key is read only from Streamlit Secrets and is never
+# placed in source code or exposed to the browser. Do NOT use the normal
+# authenticated Supabase session for this client, because that could cause the
+# Authorization header to become the farmer JWT and re-apply RLS.
+@st.cache_resource
+def _get_admin_supabase_client():
+    try:
+        admin_service_key = str(
+            st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        ).strip()
+        admin_supabase_url = _get_supabase_connection_url()
+        if not admin_service_key or not admin_supabase_url:
+            return None
+        return create_client(admin_supabase_url, admin_service_key)
+    except Exception:
+        return None
+
+
+admin_supabase_client = _get_admin_supabase_client()
 
 
 # ---------------------------------------------------------
