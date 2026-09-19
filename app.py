@@ -2405,19 +2405,31 @@ except Exception:
 
 
 def _get_supabase_connection_url() -> str:
-    """Resolve the existing Supabase URL without exposing any secret key."""
+    """Resolve the existing Supabase project URL from supported Streamlit secret layouts."""
+    # Layout 1: top-level secret used by the direct Supabase Python client.
     try:
         url = str(st.secrets.get("SUPABASE_URL", "")).strip()
         if url:
             return url
     except Exception:
         pass
+
+    # Layout 2: the Streamlit SupabaseConnection configuration.
+    # The official Streamlit example uses:
+    # [connections.supabase]
+    # SUPABASE_URL = "https://....supabase.co"
     try:
         connections = st.secrets.get("connections", {})
         cfg = connections.get("supabase", {}) if hasattr(connections, "get") else {}
-        return str(cfg.get("url", "")).strip()
+        if hasattr(cfg, "get"):
+            for key_name in ("SUPABASE_URL", "url", "URL"):
+                url = str(cfg.get(key_name, "")).strip()
+                if url:
+                    return url
     except Exception:
-        return ""
+        pass
+
+    return ""
 
 
 # Separate server-side client for privileged admin operations.
