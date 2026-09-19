@@ -788,10 +788,11 @@ def ai_load_optional_table(table_name, columns):
     immediately after a successful write. This gives us both fast reruns and
     near-immediate evidence availability.
     """
-    if not supabase_client:
+    db_client = admin_supabase_client if st.session_state.get("admin_authenticated", False) and admin_supabase_client else supabase_client
+    if not db_client:
         return [], False, "Supabase connection unavailable"
     try:
-        res = supabase_client.table(table_name).select(columns).execute()
+        res = db_client.table(table_name).select(columns).execute()
         return (res.data if res.data else []), True, ""
     except Exception as exc:
         return [], False, str(exc)
@@ -812,10 +813,11 @@ def ai_refresh_operational_evidence_cache():
 @st.cache_data(ttl=60, show_spinner=False)
 def ai_load_declarations_for_analysis():
     """Cached declaration snapshot used by the AI and intelligence dashboard."""
-    if not supabase_client:
+    db_client = admin_supabase_client if st.session_state.get("admin_authenticated", False) and admin_supabase_client else supabase_client
+    if not db_client:
         return []
     try:
-        res = (supabase_client.table("declarations")
+        res = (db_client.table("declarations")
                .select("crop, category, area, wilaya, start_date")
                .execute())
         return res.data if res.data else []
@@ -2399,6 +2401,41 @@ try:
     supabase_client = st.connection("supabase", type=SupabaseConnection)
 except Exception:
     supabase_client = None
+
+
+def _get_supabase_connection_url() -> str:
+    """Resolve the existing Supabase URL without exposing any secret key."""
+    try:
+        url = str(st.secrets.get("SUPABASE_URL", "")).strip()
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        connections = st.secrets.get("connections", {})
+        cfg = connections.get("supabase", {}) if hasattr(connections, "get") else {}
+        return str(cfg.get("url", "")).strip()
+    except Exception:
+        return ""
+
+
+# Separate server-side connection for privileged admin operations.
+# The service-role key is read only from Streamlit Secrets and is never placed
+# in the source code or exposed to the browser.
+try:
+    _admin_service_key = str(st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")).strip()
+    _admin_supabase_url = _get_supabase_connection_url()
+    if _admin_service_key and _admin_supabase_url:
+        admin_supabase_client = st.connection(
+            "supabase_admin",
+            type=SupabaseConnection,
+            url=_admin_supabase_url,
+            key=_admin_service_key,
+        )
+    else:
+        admin_supabase_client = None
+except Exception:
+    admin_supabase_client = None
 
 
 # ---------------------------------------------------------
@@ -4309,7 +4346,9 @@ elif st.session_state.active_tab == "account":
             key="admin_pwd",
         )
         if st.button("Unlock Admin Panel"):
-            if admin_input_pass == get_admin_password():
+            if not admin_supabase_client:
+                st.error("Admin database connection is not configured. Check SUPABASE_SERVICE_ROLE_KEY and the existing Supabase URL secret.")
+            elif admin_input_pass == get_admin_password() and get_admin_password():
                 st.session_state.admin_authenticated = True
                 st.success("Access Granted to Portal Admin Console.")
                 st.rerun()
@@ -4339,7 +4378,7 @@ elif st.session_state.active_tab == "account":
 
             if st.button("Publish News Release"):
                 try:
-                    supabase_client.table("portal_news").insert({
+                    admin_supabase_client.table("portal_news").insert({
                         "title": sanitize(news_title),
                         "category": news_cat,
                         "content": sanitize(news_body),
@@ -4363,7 +4402,7 @@ elif st.session_state.active_tab == "account":
 
             if st.button("Broadcast Weather Alert"):
                 try:
-                    supabase_client.table("weather_alerts").insert({
+                    admin_supabase_client.table("weather_alerts").insert({
                         "title": sanitize(al_title),
                         "region": al_region,
                         "severity": al_severity,
@@ -4384,17 +4423,30 @@ elif st.session_state.active_tab == "account":
 
             if st.button("Dispatch Direct Notification"):
                 try:
-                    supabase_client.table(
-                        "farmer_notifications"
-                    ).insert({
-                        "farmer_email": sanitize(target_email),
-                        "title": sanitize(notif_title),
-                        "message": sanitize(notif_body),
-                        "is_read": False,
-                    }).execute()
-                    st.success(
-                        f"Notification dispatched to {target_email}!"
+                    clean_target_email = sanitize(target_email).lower()
+                    profile_res = (
+                        admin_supabase_client.table("farmer_profiles")
+                        .select("user_id,email")
+                        .eq("email", clean_target_email)
+                        .limit(1)
+                        .execute()
                     )
+                    profile_rows = profile_res.data if profile_res.data else []
+                    if not profile_rows or not profile_rows[0].get("user_id"):
+                        st.error("No registered farmer account was found for that email.")
+                    else:
+                        admin_supabase_client.table(
+                            "farmer_notifications"
+                        ).insert({
+                            "user_id": profile_rows[0]["user_id"],
+                            "farmer_email": clean_target_email,
+                            "title": sanitize(notif_title),
+                            "message": sanitize(notif_body),
+                            "is_read": False,
+                        }).execute()
+                        st.success(
+                            f"Notification dispatched to {clean_target_email}!"
+                        )
                 except Exception as e:
                     st.error(f"Dispatch failed: {e}")
 
@@ -4423,7 +4475,7 @@ elif st.session_state.active_tab == "account":
 
             if st.button("Save New Location"):
                 try:
-                    supabase_client.table(
+                    admin_supabase_client.table(
                         "suppliers_directory"
                     ).insert({
                         "name": sanitize(loc_name),
@@ -4549,7 +4601,7 @@ elif st.session_state.active_tab == "account":
                             "notes": sanitize(disease_notes),
                         }
                         try:
-                            supabase_client.table("disease_reports").insert(payload).execute()
+                            admin_supabase_client.table("disease_reports").insert(payload).execute()
                             inserted += 1
                         except Exception:
                             # Backward compatibility with the original 8-column table.
@@ -4558,7 +4610,7 @@ elif st.session_state.active_tab == "account":
                                 "affected_area_ha", "source"
                             ]}
                             try:
-                                supabase_client.table("disease_reports").insert(legacy_payload).execute()
+                                admin_supabase_client.table("disease_reports").insert(legacy_payload).execute()
                                 inserted += 1
                             except Exception as exc:
                                 st.error(f"Could not save report for {target_wilaya}: {exc}")
@@ -4955,7 +5007,7 @@ elif st.session_state.active_tab == "account":
                             if ai_alert_table_ready:
                                 if st.button("🚨 Create Admin AI Alert", key="ai_create_alert"):
                                     try:
-                                        supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(result)).execute()
+                                        admin_supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(result)).execute()
                                         st.success("AI alert saved for the administrator.")
                                         st.rerun()
                                     except Exception as exc:
@@ -5026,7 +5078,7 @@ elif st.session_state.active_tab == "account":
                                 if alert_key in existing_alert_keys:
                                     continue
                                 try:
-                                    supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(scan_result)).execute()
+                                    admin_supabase_client.table("admin_ai_alerts").insert(ai_alert_payload(scan_result)).execute()
                                     existing_alert_keys.add(alert_key)
                                     inserted += 1
                                 except Exception:
@@ -5274,7 +5326,7 @@ on public.admin_ai_alerts(status, created_at desc);
             # -------------------------------------------------
             try:
                 res_live = (
-                    supabase_client.table("declarations")
+                    admin_supabase_client.table("declarations")
                     .select("crop, category, area, wilaya, start_date")
                     .execute()
                 )
@@ -5483,7 +5535,7 @@ on public.admin_ai_alerts(status, created_at desc);
                     benchmark_table_ready = True
                     try:
                         res_yields = (
-                            supabase_client.table("crop_yield_benchmarks")
+                            admin_supabase_client.table("crop_yield_benchmarks")
                             .select("crop, wilaya, yield_t_ha")
                             .execute()
                         )
@@ -5692,7 +5744,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                     target_rows = []
                     try:
                         res_targets = (
-                            supabase_client.table("wilaya_crop_targets")
+                            admin_supabase_client.table("wilaya_crop_targets")
                             .select("crop, wilaya, target_area_ha, target_production_t")
                             .execute()
                         )
@@ -5704,7 +5756,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                     location_rows = []
                     try:
                         res_locations = (
-                            supabase_client.table("wilaya_locations")
+                            admin_supabase_client.table("wilaya_locations")
                             .select("wilaya, latitude, longitude")
                             .execute()
                         )
@@ -5716,7 +5768,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                     logistics_rows = []
                     try:
                         res_logistics = (
-                            supabase_client.table("wilaya_logistics_constraints")
+                            admin_supabase_client.table("wilaya_logistics_constraints")
                             .select("wilaya, max_outbound_t, max_inbound_t, storage_capacity_t")
                             .execute()
                         )
@@ -6077,7 +6129,7 @@ on public.wilaya_logistics_constraints (wilaya);
 
                     try:
                         res_all = (
-                            supabase_client.table(table_choice)
+                            admin_supabase_client.table(table_choice)
                             .select("*")
                             .execute()
                         )
@@ -6139,7 +6191,7 @@ on public.wilaya_logistics_constraints (wilaya);
                                             use_container_width=True,
                                         ):
                                             try:
-                                                supabase_client.table("declarations").update(
+                                                admin_supabase_client.table("declarations").update(
                                                     {"area": 0}
                                                 ).eq("id", record_id).execute()
                                                 st.success(
@@ -6163,7 +6215,7 @@ on public.wilaya_logistics_constraints (wilaya);
                                             disabled=not delete_declaration,
                                         ):
                                             try:
-                                                supabase_client.table("declarations").delete().eq(
+                                                admin_supabase_client.table("declarations").delete().eq(
                                                     "id", record_id
                                                 ).execute()
                                                 st.success(
@@ -6186,7 +6238,7 @@ on public.wilaya_logistics_constraints (wilaya);
                                         disabled=not confirm_delete,
                                     ):
                                         try:
-                                            supabase_client.table(table_choice).delete().eq(
+                                            admin_supabase_client.table(table_choice).delete().eq(
                                                 "id", record_id
                                             ).execute()
                                             st.success(
