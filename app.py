@@ -2405,44 +2405,78 @@ except Exception:
 
 
 def _get_supabase_connection_url() -> str:
-    """Resolve the existing Supabase project URL from supported Streamlit secret layouts."""
-    # Layout 1: top-level secret used by the direct Supabase Python client.
+    """Resolve Supabase project URL from top-level or [connections.supabase]."""
     try:
-        url = str(st.secrets.get("SUPABASE_URL", "")).strip()
+        url = str(st.secrets.get("SUPABASE_URL", "") or "").strip()
         if url:
             return url
     except Exception:
         pass
-
-    # Layout 2: the Streamlit SupabaseConnection configuration.
-    # The official Streamlit example uses:
-    # [connections.supabase]
-    # SUPABASE_URL = "https://....supabase.co"
     try:
         connections = st.secrets.get("connections", {})
         cfg = connections.get("supabase", {}) if hasattr(connections, "get") else {}
         if hasattr(cfg, "get"):
             for key_name in ("SUPABASE_URL", "url", "URL"):
-                url = str(cfg.get(key_name, "")).strip()
+                url = str(cfg.get(key_name, "") or "").strip()
                 if url:
                     return url
     except Exception:
         pass
-
     return ""
 
 
-# Separate server-side client for privileged admin operations.
-# The service-role/secret key is read only from Streamlit Secrets and is never
-# placed in source code or exposed to the browser. Do NOT use the normal
-# authenticated Supabase session for this client, because that could cause the
-# Authorization header to become the farmer JWT and re-apply RLS.
-@st.cache_resource
+def _get_supabase_service_role_key() -> str:
+    """Resolve service-role key from top-level or [connections.supabase]."""
+    names = (
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SERVICE_ROLE_KEY",
+        "supabase_service_role_key",
+    )
+    try:
+        for name in names:
+            value = str(st.secrets.get(name, "") or "").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+    try:
+        connections = st.secrets.get("connections", {})
+        cfg = connections.get("supabase", {}) if hasattr(connections, "get") else {}
+        if hasattr(cfg, "get"):
+            for name in names:
+                value = str(cfg.get(name, "") or "").strip()
+                if value:
+                    return value
+    except Exception:
+        pass
+    return ""
+
+
+def _secrets_status():
+    """Safe diagnostic (does not print full secrets)."""
+    url = _get_supabase_connection_url()
+    key = _get_supabase_service_role_key()
+    admin_pw = ""
+    try:
+        admin_pw = str(st.secrets.get("ADMIN_SECRET_KEY", "") or "").strip()
+    except Exception:
+        pass
+    host = ""
+    if url:
+        host = url.replace("https://", "").replace("http://", "").split("/")[0]
+    return {
+        "admin_password_set": bool(admin_pw),
+        "url_set": bool(url),
+        "url_host": host,
+        "service_role_set": bool(key),
+        "service_role_length": len(key) if key else 0,
+        "service_role_looks_like_jwt": bool(key.startswith("eyJ") and key.count(".") >= 2) if key else False,
+    }
+
+
 def _get_admin_supabase_client():
     try:
-        admin_service_key = str(
-            st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "")
-        ).strip()
+        admin_service_key = _get_supabase_service_role_key()
         admin_supabase_url = _get_supabase_connection_url()
         if not admin_service_key or not admin_supabase_url:
             return None
@@ -2451,7 +2485,11 @@ def _get_admin_supabase_client():
         return None
 
 
-admin_supabase_client = _get_admin_supabase_client()
+def _resolve_admin_supabase_client():
+    return _get_admin_supabase_client()
+
+
+admin_supabase_client = _resolve_admin_supabase_client()
 
 
 # ---------------------------------------------------------
@@ -4361,17 +4399,58 @@ elif st.session_state.active_tab == "account":
             type="password",
             key="admin_pwd",
         )
+        status = _secrets_status()
+        with st.expander("🔎 Secrets diagnostic (safe)", expanded=True):
+            st.write(
+                {
+                    "ADMIN_SECRET_KEY set": "✅" if status["admin_password_set"] else "❌ missing — add ADMIN_SECRET_KEY in Secrets",
+                    "SUPABASE_URL set": ("✅ " + status["url_host"]) if status["url_set"] else "❌ missing",
+                    "SUPABASE_SERVICE_ROLE_KEY set": "✅" if status["service_role_set"] else "❌ missing",
+                    "service_role length": status["service_role_length"],
+                    "service_role looks like JWT (eyJ...)": "✅" if status["service_role_looks_like_jwt"] else "❌",
+                }
+            )
+            st.caption(
+                "To unlock: type the value of ADMIN_SECRET_KEY only (not the Supabase service_role key). "
+                "After changing Secrets, always Reboot the app."
+            )
         if st.button("Unlock Admin Panel"):
-            if not admin_supabase_client:
-                st.error("Admin database connection is not configured. Check SUPABASE_SERVICE_ROLE_KEY and the existing Supabase URL secret.")
-            elif admin_input_pass == get_admin_password() and get_admin_password():
+            expected = get_admin_password()
+            live_client = _resolve_admin_supabase_client()
+            if not expected:
+                st.error(
+                    "ADMIN_SECRET_KEY is missing in Streamlit Secrets. "
+                    "Add at top level: ADMIN_SECRET_KEY = \"your-password\" then Reboot the app. "
+                    "That password is what you type here."
+                )
+            elif admin_input_pass != expected:
+                st.error(
+                    "Invalid password. Type exactly the value of ADMIN_SECRET_KEY from Secrets "
+                    "(this is NOT the Supabase service_role / anon key)."
+                )
+            else:
                 st.session_state.admin_authenticated = True
+                if live_client is not None:
+                    globals()["admin_supabase_client"] = live_client
                 st.success("Access Granted to Portal Admin Console.")
                 st.rerun()
-            else:
-                st.error("Invalid Secret Key.")
     else:
         st.success("🔓 Authenticated as System Administrator")
+        live_client = _resolve_admin_supabase_client()
+        if live_client is not None:
+            globals()["admin_supabase_client"] = live_client
+        if live_client is None:
+            status = _secrets_status()
+            missing = []
+            if not status["service_role_set"]:
+                missing.append("SUPABASE_SERVICE_ROLE_KEY")
+            if not status["url_set"]:
+                missing.append("SUPABASE_URL")
+            st.warning(
+                "You are in the admin UI, but DB actions need: "
+                + (", ".join(missing) if missing else "a working service-role client")
+                + ". Reboot after fixing Secrets."
+            )
 
         adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5, adm_tab6, adm_tab7 = st.tabs([
             "📰 Post News",
