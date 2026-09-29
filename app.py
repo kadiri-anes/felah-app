@@ -1,3 +1,4 @@
+
 import math
 import random
 import re
@@ -2452,6 +2453,42 @@ def _get_supabase_service_role_key() -> str:
     return ""
 
 
+
+
+def _get_supabase_anon_key() -> str:
+    """Resolve anon/public key from [connections.supabase] or top-level secrets."""
+    names = ("SUPABASE_KEY", "anon_key", "ANON_KEY", "SUPABASE_ANON_KEY")
+    try:
+        connections = st.secrets.get("connections", {})
+        cfg = connections.get("supabase", {}) if hasattr(connections, "get") else {}
+        if hasattr(cfg, "get"):
+            for name in names:
+                value = str(cfg.get(name, "") or "").strip()
+                if value:
+                    return value
+    except Exception:
+        pass
+    try:
+        for name in names:
+            value = str(st.secrets.get(name, "") or "").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+    return ""
+
+
+def _get_raw_supabase_client():
+    """Raw supabase-py client (needed for Storage). st.connection has no .storage."""
+    url = _get_supabase_connection_url()
+    key = _get_supabase_anon_key()
+    if not url or not key:
+        return None
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
 def _secrets_status():
     """Safe diagnostic (does not print full secrets)."""
     url = _get_supabase_connection_url()
@@ -3983,33 +4020,63 @@ if st.session_state.active_tab == "home":
                                 ) in uploaded_files.items():
                                     clean_filename = f"{st.session_state.carte_num}_{random.randint(1000,9999)}_{file_obj.name}"
                                     file_path = f"support_docs/{clean_filename}"
-                                    file_bytes = file_obj.read()
+                                    file_bytes = file_obj.getvalue() if hasattr(file_obj, "getvalue") else file_obj.read()
 
-                                    supabase_client.storage.from_(
+                                    # st.connection("supabase") has no .storage — use raw client
+                                    storage_client = _get_raw_supabase_client()
+                                    if storage_client is None:
+                                        raise RuntimeError(
+                                            "Cannot upload files: Supabase URL/KEY missing in secrets."
+                                        )
+                                    storage_client.storage.from_(
                                         "agricultural-docs"
-                                    ).upload(file_path, file_bytes)
-                                    public_url = f"{st.secrets['connections']['supabase']['SUPABASE_URL']}/storage/v1/object/public/agricultural-docs/{file_path}"
+                                    ).upload(
+                                        file_path,
+                                        file_bytes,
+                                        file_options={
+                                            "content-type": getattr(
+                                                file_obj, "type", None
+                                            )
+                                            or "application/octet-stream",
+                                            "upsert": "true",
+                                        },
+                                    )
+                                    base_url = _get_supabase_connection_url().rstrip("/")
+                                    public_url = (
+                                        f"{base_url}/storage/v1/object/public/"
+                                        f"agricultural-docs/{file_path}"
+                                    )
                                     uploaded_links[doc_name] = public_url
 
-                                supabase_client.table(
-                                    "support_requests"
-                                ).insert({
-                                    "user_id": st.session_state.user_id,
-                                    "farmer_name": st.session_state.farmer_name,
-                                    "carte_num": st.session_state.carte_num,
-                                    "wilaya": selected_w_sup,
-                                    "sector": selected_sector,
-                                    "description": sanitize(
-                                        additional_notes
-                                    ),
-                                    "files_json": uploaded_links,
-                                }).execute()
+                                # Table insert can use connection or raw client
+                                db = supabase_client or _get_raw_supabase_client()
+                                if db is None:
+                                    raise RuntimeError("Supabase client not available.")
+                                db.table("support_requests").insert(
+                                    {
+                                        "user_id": st.session_state.user_id,
+                                        "farmer_name": st.session_state.farmer_name,
+                                        "carte_num": st.session_state.carte_num,
+                                        "wilaya": selected_w_sup,
+                                        "sector": selected_sector,
+                                        "description": sanitize(additional_notes),
+                                        "files_json": uploaded_links,
+                                    }
+                                ).execute()
 
                                 st.success(
                                     "🎉 Your Agricultural Support demand has been submitted successfully!"
                                 )
                         except Exception as e:
-                            st.error(f"Error submitting request: {e}")
+                            err = str(e)
+                            if "storage" in err.lower() or "bucket" in err.lower():
+                                st.error(
+                                    f"Error submitting request: {e}. "
+                                    "Check that the Supabase Storage bucket "
+                                    "`agricultural-docs` exists and allows uploads."
+                                )
+                            else:
+                                st.error(f"Error submitting request: {e}")
 
         # SERVICE 2: NEWS
         elif st.session_state.selected_service == "news":
