@@ -3,6 +3,7 @@ import math
 import json
 import random
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import BytesIO
@@ -2753,6 +2754,53 @@ def get_wilaya_center(wilaya: str):
     return centers.get(str(wilaya).strip(), (36.7538, 3.0588))
 
 
+def _map_name_key(value):
+    """Normalize Wilaya labels for matching different GeoJSON naming conventions."""
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def get_wilaya_map_center(wilaya: str, boundary_data=None):
+    """Use the selected Wilaya's GeoJSON centre when possible, then the known pilot centre."""
+    target = str(wilaya or "").split("-", 1)[-1].strip()
+    target_key = _map_name_key(target)
+    if boundary_data and target_key:
+        for feature in boundary_data.get("features", []):
+            label = wilaya_feature_name(feature)
+            label_key = _map_name_key(label)
+            if label_key and (label_key == target_key or label_key in target_key or target_key in label_key):
+                center = geojson_feature_center(feature)
+                if center:
+                    return center
+    return get_wilaya_center(wilaya)
+
+
+def add_navigation_map_layers(map_object, *, default_roads=True):
+    """Add familiar road labels and a satellite option with place/transport labels on top."""
+    # OSM is the default so roads, street names and nearby place labels are immediately visible.
+    folium.TileLayer(
+        tiles="OpenStreetMap", name="Roads, street names & places", overlay=False,
+        control=True, show=default_roads,
+    ).add_to(map_object)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri World Imagery", name="Satellite imagery", overlay=False,
+        control=True, show=not default_roads,
+    ).add_to(map_object)
+    # These transparent reference layers keep road/place labels visible over satellite imagery.
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri Reference", name="Road names on satellite", overlay=True,
+        control=True, show=not default_roads, opacity=0.95,
+    ).add_to(map_object)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri Reference", name="Place names on satellite", overlay=True,
+        control=True, show=not default_roads, opacity=0.95,
+    ).add_to(map_object)
+
+
 def get_unread_notif_count() -> int:
     if not st.session_state.logged_in or not supabase_client:
         return 0
@@ -4195,19 +4243,16 @@ if st.session_state.active_tab == "home":
                 "Farm/parcel name / اسم القطعة",
                 placeholder="e.g. Potato field North / حقل البطاطا الشمالي",
             )
-            st.markdown("#### 📍 Drop a farm pin on the satellite map / حدّد موقع القطعة")
-            st.caption("Tap the approximate centre of your field. A Wilaya officer can draw and verify the exact boundary later.")
-            pin_center = get_wilaya_center(selected_w)
-            pin_map = folium.Map(location=pin_center, zoom_start=12, control_scale=True, tiles=None)
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery", name="Satellite imagery", overlay=False, control=True
-            ).add_to(pin_map)
-            folium.TileLayer(
-                "OpenStreetMap", name="Roads & street map", overlay=False, control=True
-            ).add_to(pin_map)
-            # Match the regional map: show all Wilaya borders and names without hover/fill highlighting.
+            st.markdown("#### 📍 Locate your farm / حدّد موقع المزرعة")
+            st.caption("Use the road map to find your village, road and locality, or switch to satellite imagery to identify your field. Click the field centre to place or move the pin; an officer can later trace the exact field boundary.")
             boundary_data, boundary_error = load_algeria_wilaya_boundaries()
+            pin_center = get_wilaya_map_center(selected_w, boundary_data)
+            pin_map = folium.Map(location=pin_center, zoom_start=12, control_scale=True, tiles=None)
+            add_navigation_map_layers(pin_map, default_roads=True)
+            pin_state_key = f"farmer_parcel_pin_{selected_w}"
+            if pin_state_key not in st.session_state:
+                st.session_state[pin_state_key] = None
+            # Match the regional map: show Wilaya borders without hover/fill highlighting.
             if boundary_data:
                 try:
                     features = boundary_data.get("features", [])
@@ -4238,18 +4283,34 @@ if st.session_state.active_tab == "home":
                     st.warning(f"Wilaya borders and names could not be shown: {e}")
             else:
                 st.warning("Wilaya borders/names are temporarily unavailable; the map layers and farm pin still work. " + str(boundary_error))
-            folium.LayerControl(collapsed=True).add_to(pin_map)
+            saved_pin = st.session_state.get(pin_state_key)
+            if isinstance(saved_pin, dict) and saved_pin.get("lat") is not None and saved_pin.get("lng") is not None:
+                folium.Marker(
+                    [float(saved_pin["lat"]), float(saved_pin["lng"])],
+                    tooltip=f"Selected farm pin — {parcel_name or 'Farm'}",
+                    popup="Selected farm location",
+                    icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
+                ).add_to(pin_map)
+            folium.LayerControl(collapsed=False).add_to(pin_map)
             pin_map_data = st_folium(
-                pin_map, height=360, width=None, returned_objects=["last_clicked"],
+                pin_map, height=440, width=None, returned_objects=["last_clicked"],
                 key=f"farmer_parcel_pin_map_{selected_w}",
             )
             pin_clicked = (pin_map_data or {}).get("last_clicked") or {}
-            pin_lat = pin_clicked.get("lat")
-            pin_lon = pin_clicked.get("lng")
+            if pin_clicked.get("lat") is not None and pin_clicked.get("lng") is not None:
+                new_pin = {"lat": float(pin_clicked["lat"]), "lng": float(pin_clicked["lng"])}
+                old_pin = st.session_state.get(pin_state_key)
+                if not isinstance(old_pin, dict) or old_pin.get("lat") != new_pin["lat"] or old_pin.get("lng") != new_pin["lng"]:
+                    st.session_state[pin_state_key] = new_pin
+                    st.rerun()
+            saved_pin = st.session_state.get(pin_state_key)
+            pin_lat = saved_pin.get("lat") if isinstance(saved_pin, dict) else None
+            pin_lon = saved_pin.get("lng") if isinstance(saved_pin, dict) else None
             if pin_lat is not None and pin_lon is not None:
-                st.success(f"Pin selected: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
+                st.success(f"Farm pin saved for this declaration: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
+                st.caption("To move the pin, click the new location on the map.")
             else:
-                st.info("No pin selected yet. You can still submit the existing declaration; add a pin when ready.")
+                st.info("Click the map to place your farm pin. You can still continue without a pin, but adding one helps the Wilaya office find your field.")
             cat_choice = st.radio(
                 "Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"]
             )
@@ -6668,14 +6729,10 @@ on public.wilaya_logistics_constraints (wilaya);
         with regional_tab_map:
             st.markdown(f"#### Regional overview — {regional_wilaya}")
             st.caption("Switch between satellite imagery and the street/road map. Wilaya outlines are from a public GeoJSON dataset; farm outlines are the officer-verified records.")
-            map_center = get_wilaya_center(regional_wilaya)
-            region_map = folium.Map(location=map_center, zoom_start=8, control_scale=True, tiles=None)
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery", name="Satellite imagery", overlay=False, control=True,
-            ).add_to(region_map)
-            folium.TileLayer("OpenStreetMap", name="Roads & street map", overlay=False, control=True).add_to(region_map)
             boundary_data, boundary_error = load_algeria_wilaya_boundaries()
+            map_center = get_wilaya_map_center(regional_wilaya, boundary_data)
+            region_map = folium.Map(location=map_center, zoom_start=10, control_scale=True, tiles=None)
+            add_navigation_map_layers(region_map, default_roads=True)
             if boundary_data:
                 try:
                     features = boundary_data.get("features", [])
@@ -6744,17 +6801,23 @@ on public.wilaya_logistics_constraints (wilaya);
                     center = (float(parcel_pin_lat), float(parcel_pin_lon)) if parcel_pin_lat is not None and parcel_pin_lon is not None else get_wilaya_center(regional_wilaya)
                 except Exception:
                     center = get_wilaya_center(regional_wilaya)
-                boundary_map = folium.Map(location=center, zoom_start=15, control_scale=True, tiles=None)
-                folium.TileLayer(tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr="Esri World Imagery", name="Satellite", overlay=False, control=True).add_to(boundary_map)
-                folium.TileLayer("OpenStreetMap", name="Roads & street map", overlay=False, control=True).add_to(boundary_map)
+                boundary_map = folium.Map(location=center, zoom_start=17 if parcel_pin_lat is not None and parcel_pin_lon is not None else 14, control_scale=True, tiles=None)
+                add_navigation_map_layers(boundary_map, default_roads=False)
                 if parcel_pin_lat is not None and parcel_pin_lon is not None:
-                    folium.Marker([float(parcel_pin_lat), float(parcel_pin_lon)], tooltip="Farmer's pin", icon=folium.Icon(color="orange", icon="map-pin", prefix="fa")).add_to(boundary_map)
+                    folium.Marker(
+                        [float(parcel_pin_lat), float(parcel_pin_lon)],
+                        tooltip="Farmer's selected pin — use it as a reference, not the legal field edge",
+                        popup=f"Farm pin<br>Lat: {float(parcel_pin_lat):.6f}<br>Lon: {float(parcel_pin_lon):.6f}",
+                        icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
+                    ).add_to(boundary_map)
                 existing_boundary = selected_parcel.get("boundary_geojson")
                 if existing_boundary:
                     try: folium.GeoJson(existing_boundary, name="Saved boundary").add_to(boundary_map)
                     except Exception: pass
-                Draw(export=True, draw_options={"polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}}, edit_options={"edit": True, "remove": True}).add_to(boundary_map)
-                boundary_map_data = st_folium(boundary_map, height=520, width=None, returned_objects=["all_drawings", "last_active_drawing"], key=f"wilaya_boundary_map_v2_{selected_parcel.get('id')}")
+                Draw(export=True, draw_options={"polyline": False, "rectangle": {"showArea": True}, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}}, edit_options={"edit": True, "remove": True}).add_to(boundary_map)
+                folium.LayerControl(collapsed=False).add_to(boundary_map)
+                st.caption("Boundary workflow: zoom in, choose Satellite, click around the field edge to draw a polygon (or rectangle for a regular field), double-click to finish, adjust vertices if needed, then save and verify.")
+                boundary_map_data = st_folium(boundary_map, height=600, width=None, returned_objects=["all_drawings", "last_active_drawing"], key=f"wilaya_boundary_map_v2_{selected_parcel.get('id')}")
                 drawing = (boundary_map_data or {}).get("last_active_drawing")
                 if not drawing:
                     drawings = (boundary_map_data or {}).get("all_drawings") or []
