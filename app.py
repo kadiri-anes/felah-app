@@ -4201,8 +4201,43 @@ if st.session_state.active_tab == "home":
             pin_map = folium.Map(location=pin_center, zoom_start=12, control_scale=True, tiles=None)
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery", name="Satellite", overlay=False, control=True
+                attr="Esri World Imagery", name="Satellite imagery", overlay=False, control=True
             ).add_to(pin_map)
+            folium.TileLayer(
+                "OpenStreetMap", name="Roads & street map", overlay=False, control=True
+            ).add_to(pin_map)
+            # Match the regional map: show all Wilaya borders and names without hover/fill highlighting.
+            boundary_data, boundary_error = load_algeria_wilaya_boundaries()
+            if boundary_data:
+                try:
+                    features = boundary_data.get("features", [])
+                    props = (features[0].get("properties") or {}) if features else {}
+                    label_keys = [k for k in ("name", "name_en", "wilaya_name", "wilaya", "NAME_1", "shapeName", "nom_fr", "name:en", "name_ar") if k in props]
+                    tooltip = folium.GeoJsonTooltip(
+                        fields=label_keys[:2],
+                        aliases=["Wilaya / Province"] * min(2, len(label_keys)),
+                    ) if label_keys else None
+                    folium.GeoJson(
+                        boundary_data,
+                        name="Wilaya borders",
+                        tooltip=tooltip,
+                        style_function=lambda feature: {"color": "#f6a623", "weight": 2, "fillOpacity": 0},
+                    ).add_to(pin_map)
+                    for feature in features:
+                        label = wilaya_feature_name(feature)
+                        center = geojson_feature_center(feature)
+                        if center:
+                            folium.Marker(
+                                center,
+                                tooltip=label,
+                                icon=folium.DivIcon(
+                                    html=f'<div style="font-size:10px;font-weight:700;color:white;text-shadow:-1px -1px 2px #000,1px 1px 2px #000;white-space:nowrap">{sanitize(label)}</div>'
+                                ),
+                            ).add_to(pin_map)
+                except Exception as e:
+                    st.warning(f"Wilaya borders and names could not be shown: {e}")
+            else:
+                st.warning("Wilaya borders/names are temporarily unavailable; the map layers and farm pin still work. " + str(boundary_error))
             folium.LayerControl(collapsed=True).add_to(pin_map)
             pin_map_data = st_folium(
                 pin_map, height=360, width=None, returned_objects=["last_clicked"],
@@ -6649,8 +6684,7 @@ on public.wilaya_logistics_constraints (wilaya);
                     tooltip = folium.GeoJsonTooltip(fields=label_keys[:2], aliases=["Wilaya / Province"] * min(2, len(label_keys))) if label_keys else None
                     folium.GeoJson(
                         boundary_data, name="Wilaya boundaries", tooltip=tooltip,
-                        style_function=lambda feature: {"color": "#f6a623", "weight": 2, "fillOpacity": 0.04},
-                        highlight_function=lambda feature: {"weight": 4, "color": "#ff5722", "fillOpacity": 0.12},
+                        style_function=lambda feature: {"color": "#f6a623", "weight": 2, "fillOpacity": 0},
                     ).add_to(region_map)
                     for feature in features:
                         label = wilaya_feature_name(feature)
