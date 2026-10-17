@@ -1,9 +1,6 @@
-
 import math
-import json
 import random
 import re
-import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from io import BytesIO
@@ -2701,104 +2698,81 @@ def get_wilaya_admin_passwords() -> dict:
     return {}
 
 
-
-
-@st.cache_data(ttl=86400, show_spinner=False)
-def load_algeria_wilaya_boundaries():
-    """Load display-grade 69-Wilaya GeoJSON; cached for one day."""
-    url = "https://raw.githubusercontent.com/yasserstudio/geoalgeria/main/packages/dataset/data/geojson/wilaya-boundaries.geojson"
-    try:
-        response = requests.get(url, timeout=12)
-        response.raise_for_status()
-        payload = response.json()
-        if isinstance(payload, dict) and payload.get("type") == "FeatureCollection":
-            return payload, None
-        return None, "Boundary source did not return a GeoJSON FeatureCollection."
-    except Exception as exc:
-        return None, f"Wilaya boundary data could not be loaded: {exc}"
-
-def wilaya_feature_name(feature):
-    props = feature.get("properties") or {}
-    keys = ("name", "name_en", "wilaya_name", "wilaya", "NAME_1", "shapeName", "nom_fr", "name:en", "name_ar")
-    for key in keys:
-        value = props.get(key)
-        if value not in (None, ""):
-            return str(value)
-    return "Wilaya"
-
-def geojson_feature_center(feature):
-    """Approximate a label position from polygon vertices (for display only)."""
-    points = []
-    def walk(obj):
-        if isinstance(obj, (list, tuple)):
-            if len(obj) >= 2 and isinstance(obj[0], (int, float)) and isinstance(obj[1], (int, float)):
-                points.append((float(obj[1]), float(obj[0])))
-            else:
-                for child in obj:
-                    walk(child)
-    walk((feature.get("geometry") or {}).get("coordinates", []))
-    if not points:
-        return None
-    return (sum(x for x, _ in points) / len(points), sum(y for _, y in points) / len(points))
-
-
 def get_wilaya_center(wilaya: str):
-    """Approximate map centers for the initial Wilaya pilot; pin/polygon coordinates remain user-drawn."""
+    """Approximate map centers for pin maps; pin/polygon coordinates remain user-drawn."""
     centers = {
+        "01 - Adrar": (27.8742, -0.2939),
+        "02 - Chlef": (36.1654, 1.3347),
+        "03 - Laghouat": (33.8000, 2.8650),
+        "05 - Batna": (35.5550, 6.1740),
+        "06 - Béjaïa": (36.7511, 5.0557),
+        "07 - Biskra": (34.8480, 5.7280),
         "09 - Blida": (36.4700, 2.8300),
+        "13 - Tlemcen": (34.8783, -1.3150),
+        "15 - Tizi Ouzou": (36.7117, 4.0458),
         "16 - Alger": (36.7538, 3.0588),
+        "19 - Sétif": (36.1911, 5.4137),
+        "23 - Annaba": (36.9000, 7.7670),
+        "25 - Constantine": (36.3650, 6.6147),
+        "27 - Mostaganem": (35.9311, 0.0892),
+        "30 - Ouargla": (31.9525, 5.3333),
+        "31 - Oran": (35.6971, -0.6308),
         "35 - Boumerdès": (36.7667, 3.4772),
+        "39 - El Oued": (33.3683, 6.8674),
+        "42 - Tipaza": (36.5897, 2.4475),
+        "43 - Mila": (36.4500, 6.2667),
         "44 - Aïn Defla": (36.2641, 1.9679),
+        "47 - Ghardaïa": (32.4900, 3.6700),
+        "48 - Relizane": (35.7370, 0.5560),
+        "55 - Touggourt": (33.1000, 6.0667),
         "68 - Bou Saada": (35.2080, 4.1740),
     }
     return centers.get(str(wilaya).strip(), (36.7538, 3.0588))
 
 
-def _map_name_key(value):
-    """Normalize Wilaya labels for matching different GeoJSON naming conventions."""
-    value = unicodedata.normalize("NFKD", str(value or ""))
-    value = "".join(ch for ch in value if not unicodedata.combining(ch))
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
-def get_wilaya_map_center(wilaya: str, boundary_data=None):
-    """Use the selected Wilaya's GeoJSON centre when possible, then the known pilot centre."""
-    target = str(wilaya or "").split("-", 1)[-1].strip()
-    target_key = _map_name_key(target)
-    if boundary_data and target_key:
-        for feature in boundary_data.get("features", []):
-            label = wilaya_feature_name(feature)
-            label_key = _map_name_key(label)
-            if label_key and (label_key == target_key or label_key in target_key or target_key in label_key):
-                center = geojson_feature_center(feature)
-                if center:
-                    return center
-    return get_wilaya_center(wilaya)
-
-
-def add_navigation_map_layers(map_object, *, default_roads=True):
-    """Add familiar road labels and a satellite option with place/transport labels on top."""
-    # OSM is the default so roads, street names and nearby place labels are immediately visible.
-    folium.TileLayer(
-        tiles="OpenStreetMap", name="Roads, street names & places", overlay=False,
-        control=True, show=default_roads,
-    ).add_to(map_object)
+def add_satellite_basemap(m):
+    """Satellite imagery first + readable place labels overlay."""
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri World Imagery", name="Satellite imagery", overlay=False,
-        control=True, show=not default_roads,
-    ).add_to(map_object)
-    # These transparent reference layers keep road/place labels visible over satellite imagery.
+        attr="Esri World Imagery",
+        name="Satellite",
+        overlay=False,
+        control=True,
+        show=True,
+    ).add_to(m)
+    # Place names / roads over satellite (labels only style via light overlay)
     folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri Reference", name="Road names on satellite", overlay=True,
-        control=True, show=not default_roads, opacity=0.95,
-    ).add_to(map_object)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri Reference", name="Place names on satellite", overlay=True,
-        control=True, show=not default_roads, opacity=0.95,
-    ).add_to(map_object)
+        tiles="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri Boundaries & Places",
+        name="Place names",
+        overlay=True,
+        control=True,
+        show=True,
+        opacity=0.9,
+    ).add_to(m)
+    return m
+
+
+def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
+    """Visual Wilaya focus ring around the approximate centre (not an official border)."""
+    lat, lon = get_wilaya_center(wilaya)
+    folium.Circle(
+        location=(lat, lon),
+        radius=radius_m,
+        color="#c89d2a",
+        weight=2,
+        fill=False,
+        dash_array="6 6",
+        tooltip=f"Focus area — {wilaya}",
+    ).add_to(m)
+    folium.Marker(
+        location=(lat, lon),
+        tooltip=wilaya,
+        icon=folium.DivIcon(
+            html=f'<div style="font-size:11px;font-weight:700;color:#fff;text-shadow:0 0 4px #000;white-space:nowrap;">{wilaya}</div>'
+        ),
+    ).add_to(m)
+    return m
 
 
 def get_unread_notif_count() -> int:
@@ -4243,74 +4217,61 @@ if st.session_state.active_tab == "home":
                 "Farm/parcel name / اسم القطعة",
                 placeholder="e.g. Potato field North / حقل البطاطا الشمالي",
             )
-            st.markdown("#### 📍 Locate your farm / حدّد موقع المزرعة")
-            st.caption("Use the road map to find your village, road and locality, or switch to satellite imagery to identify your field. Click the field centre to place or move the pin; an officer can later trace the exact field boundary.")
-            boundary_data, boundary_error = load_algeria_wilaya_boundaries()
-            pin_center = get_wilaya_map_center(selected_w, boundary_data)
-            pin_map = folium.Map(location=pin_center, zoom_start=12, control_scale=True, tiles=None)
-            add_navigation_map_layers(pin_map, default_roads=True)
-            pin_state_key = f"farmer_parcel_pin_{selected_w}"
+            st.markdown("#### 📍 Drop a farm pin on the satellite map / حدّد موقع القطعة")
+            st.caption(
+                "Tap the approximate centre of your field on the satellite image. "
+                "Place names appear as an overlay. The gold ring is only a Wilaya focus guide (not an official border). "
+                "A Wilaya officer can draw and verify the exact boundary later."
+            )
+            pin_state_key = f"farmer_pin_{selected_w}"
             if pin_state_key not in st.session_state:
                 st.session_state[pin_state_key] = None
-            # Match the regional map: show Wilaya borders without hover/fill highlighting.
-            if boundary_data:
-                try:
-                    features = boundary_data.get("features", [])
-                    props = (features[0].get("properties") or {}) if features else {}
-                    label_keys = [k for k in ("name", "name_en", "wilaya_name", "wilaya", "NAME_1", "shapeName", "nom_fr", "name:en", "name_ar") if k in props]
-                    tooltip = folium.GeoJsonTooltip(
-                        fields=label_keys[:2],
-                        aliases=["Wilaya / Province"] * min(2, len(label_keys)),
-                    ) if label_keys else None
-                    folium.GeoJson(
-                        boundary_data,
-                        name="Wilaya borders",
-                        tooltip=tooltip,
-                        style_function=lambda feature: {"color": "#f6a623", "weight": 2, "fillOpacity": 0},
-                    ).add_to(pin_map)
-                    for feature in features:
-                        label = wilaya_feature_name(feature)
-                        center = geojson_feature_center(feature)
-                        if center:
-                            folium.Marker(
-                                center,
-                                tooltip=label,
-                                icon=folium.DivIcon(
-                                    html=f'<div style="font-size:10px;font-weight:700;color:white;text-shadow:-1px -1px 2px #000,1px 1px 2px #000;white-space:nowrap">{sanitize(label)}</div>'
-                                ),
-                            ).add_to(pin_map)
-                except Exception as e:
-                    st.warning(f"Wilaya borders and names could not be shown: {e}")
-            else:
-                st.warning("Wilaya borders/names are temporarily unavailable; the map layers and farm pin still work. " + str(boundary_error))
+
+            pin_center = get_wilaya_center(selected_w)
+            pin_map = folium.Map(
+                location=pin_center,
+                zoom_start=13,
+                control_scale=True,
+                tiles=None,
+            )
+            add_satellite_basemap(pin_map)
+            add_wilaya_focus_ring(pin_map, selected_w)
+
+            # Show previously selected pin so the farmer sees it on the map
             saved_pin = st.session_state.get(pin_state_key)
-            if isinstance(saved_pin, dict) and saved_pin.get("lat") is not None and saved_pin.get("lng") is not None:
+            if saved_pin and saved_pin.get("lat") is not None and saved_pin.get("lng") is not None:
                 folium.Marker(
                     [float(saved_pin["lat"]), float(saved_pin["lng"])],
-                    tooltip=f"Selected farm pin — {parcel_name or 'Farm'}",
-                    popup="Selected farm location",
+                    tooltip="Your farm pin",
+                    popup=f"Pin: {float(saved_pin['lat']):.5f}, {float(saved_pin['lng']):.5f}",
                     icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
                 ).add_to(pin_map)
-            folium.LayerControl(collapsed=False).add_to(pin_map)
+
+            folium.LayerControl(collapsed=True).add_to(pin_map)
             pin_map_data = st_folium(
-                pin_map, height=440, width=None, returned_objects=["last_clicked"],
+                pin_map,
+                height=420,
+                width=None,
+                returned_objects=["last_clicked"],
                 key=f"farmer_parcel_pin_map_{selected_w}",
             )
             pin_clicked = (pin_map_data or {}).get("last_clicked") or {}
             if pin_clicked.get("lat") is not None and pin_clicked.get("lng") is not None:
-                new_pin = {"lat": float(pin_clicked["lat"]), "lng": float(pin_clicked["lng"])}
-                old_pin = st.session_state.get(pin_state_key)
-                if not isinstance(old_pin, dict) or old_pin.get("lat") != new_pin["lat"] or old_pin.get("lng") != new_pin["lng"]:
-                    st.session_state[pin_state_key] = new_pin
-                    st.rerun()
-            saved_pin = st.session_state.get(pin_state_key)
-            pin_lat = saved_pin.get("lat") if isinstance(saved_pin, dict) else None
-            pin_lon = saved_pin.get("lng") if isinstance(saved_pin, dict) else None
+                st.session_state[pin_state_key] = {
+                    "lat": float(pin_clicked["lat"]),
+                    "lng": float(pin_clicked["lng"]),
+                }
+
+            saved_pin = st.session_state.get(pin_state_key) or {}
+            pin_lat = saved_pin.get("lat")
+            pin_lon = saved_pin.get("lng")
             if pin_lat is not None and pin_lon is not None:
-                st.success(f"Farm pin saved for this declaration: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
-                st.caption("To move the pin, click the new location on the map.")
+                st.success(f"Pin selected: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
+                if st.button("Clear pin / مسح النقطة", key=f"clear_pin_{selected_w}"):
+                    st.session_state[pin_state_key] = None
+                    st.rerun()
             else:
-                st.info("Click the map to place your farm pin. You can still continue without a pin, but adding one helps the Wilaya office find your field.")
+                st.info("No pin selected yet. Click on the satellite map to place your farm pin.")
             cat_choice = st.radio(
                 "Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"]
             )
@@ -6659,18 +6620,23 @@ on public.wilaya_logistics_constraints (wilaya);
     # ---------------------------------------------------------
     st.divider()
     st.subheader("🗺️ Wilaya Officer Console / منصة مسؤول الولاية")
-    pilot_wilayas = [
-        "16 - Alger", "44 - Aïn Defla", "68 - Bou Saada",
-        "35 - Boumerdès", "09 - Blida",
-    ]
     if not st.session_state.wilaya_admin_authenticated:
         wilaya_passwords = get_wilaya_admin_passwords()
         if not wilaya_passwords:
-            st.info("Configure [wilaya_admin_passwords] in Streamlit Secrets before regional officers can sign in.")
+            st.info(
+                "No Wilaya passwords are configured yet. Add a [wilaya_admin_passwords] section in Streamlit Secrets; "
+                "the example is provided with this update."
+            )
         with st.form("wilaya_admin_login_form", clear_on_submit=False):
+            pilot_wilayas = [
+                "16 - Alger", "44 - Aïn Defla", "68 - Bou Saada",
+                "35 - Boumerdès", "09 - Blida",
+            ]
             configured_wilayas = [w for w in pilot_wilayas if w in wilaya_passwords]
+            # Still display the five pilot Wilayas even before Secrets are filled in.
             chosen_wilaya = st.selectbox(
-                "Select your Wilaya / اختر الولاية", configured_wilayas or pilot_wilayas,
+                "Select your Wilaya / اختر الولاية",
+                configured_wilayas or pilot_wilayas,
                 key="wilaya_admin_login_select",
             )
             officer_name = st.text_input("Officer name / اسم المسؤول", key="wilaya_admin_login_name")
@@ -6688,16 +6654,9 @@ on public.wilaya_logistics_constraints (wilaya);
                 st.session_state.wilaya_admin_authenticated = True
                 st.session_state.wilaya_admin_wilaya = chosen_wilaya
                 st.session_state.wilaya_admin_name = sanitize(officer_name) or f"{chosen_wilaya} Officer"
-                # Regional officers need the server-side DB client even if the national owner has not logged in.
-                live_client = _resolve_admin_supabase_client()
-                if live_client is not None:
-                    globals()["admin_supabase_client"] = live_client
                 st.rerun()
     else:
         regional_wilaya = st.session_state.wilaya_admin_wilaya
-        live_client = _resolve_admin_supabase_client()
-        if live_client is not None:
-            globals()["admin_supabase_client"] = live_client
         st.success(f"Signed in: {st.session_state.wilaya_admin_name} — {regional_wilaya}")
         if st.button("🔒 Lock Wilaya Console", key="lock_wilaya_console"):
             st.session_state.wilaya_admin_authenticated = False
@@ -6705,277 +6664,99 @@ on public.wilaya_logistics_constraints (wilaya);
             st.session_state.wilaya_admin_name = ""
             st.rerun()
 
-        regional_tab_map, regional_tab_records, regional_tab_boundaries, regional_tab_sat, regional_tab_investigate, regional_tab_messages = st.tabs([
-            "🗺️ Regional map", "📋 Farmers & declarations", "📐 Verify boundaries",
-            "🛰️ Satellite monitoring", "🔎 Investigate & alerts", "📨 Notifications & warnings",
-        ])
-        db = admin_supabase_client
-
-        # Load regional records once for the console tabs.
-        regional_parcels, regional_decs = [], []
-        if db is None:
-            st.warning("Regional database actions need SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Streamlit Secrets.")
-        else:
-            try:
-                regional_parcels = db.table("farm_parcels").select("*").eq("wilaya", regional_wilaya).order("id", desc=True).limit(2000).execute().data or []
-            except Exception as e:
-                st.warning(f"Could not load farm parcels. Run the parcel migration first. Details: {e}")
-            try:
-                regional_decs = db.table("declarations").select("id,created_at,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id").eq("wilaya", regional_wilaya).order("id", desc=True).limit(2000).execute().data or []
-            except Exception as e:
-                st.warning(f"Could not load declarations: {e}")
-
-        # Regional map: satellite imagery, road-map alternative, Wilaya borders/names, pins and parcels.
-        with regional_tab_map:
-            st.markdown(f"#### Regional overview — {regional_wilaya}")
-            st.caption("Switch between satellite imagery and the street/road map. Wilaya outlines are from a public GeoJSON dataset; farm outlines are the officer-verified records.")
-            boundary_data, boundary_error = load_algeria_wilaya_boundaries()
-            map_center = get_wilaya_map_center(regional_wilaya, boundary_data)
-            region_map = folium.Map(location=map_center, zoom_start=10, control_scale=True, tiles=None)
-            add_navigation_map_layers(region_map, default_roads=True)
-            if boundary_data:
+        regional_tab1, regional_tab2 = st.tabs(["📋 Local declarations & farmers", "🛰️ Parcel boundary verification"])
+        with regional_tab1:
+            st.markdown(f"#### Records assigned to {regional_wilaya}")
+            if admin_supabase_client is None:
+                st.warning("Regional records require SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL in Streamlit Secrets.")
+            else:
                 try:
-                    features = boundary_data.get("features", [])
-                    props = (features[0].get("properties") or {}) if features else {}
-                    label_keys = [k for k in ("name", "name_en", "wilaya_name", "wilaya", "NAME_1", "shapeName", "nom_fr", "name:en") if k in props]
-                    tooltip = folium.GeoJsonTooltip(fields=label_keys[:2], aliases=["Wilaya / Province"] * min(2, len(label_keys))) if label_keys else None
-                    folium.GeoJson(
-                        boundary_data, name="Wilaya boundaries", tooltip=tooltip,
-                        style_function=lambda feature: {"color": "#f6a623", "weight": 2, "fillOpacity": 0},
-                    ).add_to(region_map)
-                    for feature in features:
-                        label = wilaya_feature_name(feature)
-                        center = geojson_feature_center(feature)
-                        if center:
+                    regional_decs = (
+                        admin_supabase_client.table("declarations")
+                        .select("id,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id")
+                        .eq("wilaya", regional_wilaya)
+                        .order("id", desc=True).limit(1000).execute().data or []
+                    )
+                    st.metric("Declarations in this Wilaya", len(regional_decs))
+                    if regional_decs:
+                        st.dataframe(pd.DataFrame(regional_decs), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No declarations found for this Wilaya yet.")
+                except Exception as e:
+                    st.warning(f"Could not load declarations. If the database schema differs, check the migration and table columns. Details: {e}")
+
+        with regional_tab2:
+            st.markdown("#### Verify a farm boundary")
+            st.caption("Select a parcel, draw its boundary on the satellite map, then save it as verified. The pin alone is not treated as a verified boundary.")
+            if admin_supabase_client is None:
+                st.warning("Boundary verification requires the Supabase service-role connection in Streamlit Secrets.")
+            else:
+                try:
+                    parcels = (
+                        admin_supabase_client.table("farm_parcels").select("*")
+                        .eq("wilaya", regional_wilaya).order("id", desc=True).limit(1000).execute().data or []
+                    )
+                    if not parcels:
+                        st.info("No farm parcels are registered in this Wilaya yet. Farmers can add them through Crop Declaration after the SQL migration is applied.")
+                    else:
+                        parcel_labels = {
+                            f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'}": p
+                            for p in parcels
+                        }
+                        parcel_label = st.selectbox("Parcel to verify", list(parcel_labels.keys()), key="regional_parcel_choice")
+                        selected_parcel = parcel_labels[parcel_label]
+                        parcel_pin_lat = selected_parcel.get("pin_lat")
+                        parcel_pin_lon = selected_parcel.get("pin_lon")
+                        try:
+                            map_center = (float(parcel_pin_lat), float(parcel_pin_lon)) if parcel_pin_lat is not None and parcel_pin_lon is not None else get_wilaya_center(regional_wilaya)
+                        except Exception:
+                            map_center = get_wilaya_center(regional_wilaya)
+                        boundary_map = folium.Map(location=map_center, zoom_start=15, control_scale=True, tiles=None)
+                        add_satellite_basemap(boundary_map)
+                        add_wilaya_focus_ring(boundary_map, regional_wilaya, radius_m=12000)
+                        if parcel_pin_lat is not None and parcel_pin_lon is not None:
                             folium.Marker(
-                                center, tooltip=label,
-                                icon=folium.DivIcon(html=f'<div style="font-size:10px;font-weight:700;color:white;text-shadow:-1px -1px 2px #000,1px 1px 2px #000;white-space:nowrap">{sanitize(label)}</div>'),
-                            ).add_to(region_map)
-                except Exception as e:
-                    st.warning(f"The Wilaya boundary layer could not be rendered: {e}")
-            else:
-                st.warning("Wilaya boundaries are temporarily unavailable. The map still shows farms and the roads/satellite base layers. " + str(boundary_error))
-            for parcel in regional_parcels:
-                lat, lon = parcel.get("pin_lat"), parcel.get("pin_lon")
-                if lat is not None and lon is not None:
-                    try:
-                        status = str(parcel.get("boundary_status", "pin_pending"))
-                        folium.Marker(
-                            [float(lat), float(lon)],
-                            tooltip=f"{parcel.get('parcel_name') or 'Farm'} — {parcel.get('crop') or ''} — {status}",
-                            icon=folium.Icon(color="green" if status == "verified" else "orange", icon="leaf", prefix="fa"),
-                        ).add_to(region_map)
-                    except Exception:
-                        pass
-                if parcel.get("boundary_geojson") and parcel.get("boundary_status") == "verified":
-                    try:
-                        folium.GeoJson(parcel["boundary_geojson"], name=f"Verified parcel {parcel.get('id')}", style_function=lambda f: {"color":"#00d084","weight":3,"fillOpacity":0.12}, tooltip=f"Verified: {parcel.get('parcel_name') or parcel.get('id')}").add_to(region_map)
-                    except Exception:
-                        pass
-            folium.LayerControl(collapsed=False).add_to(region_map)
-            st_folium(region_map, height=620, width=None, key=f"regional_overview_map_{regional_wilaya}")
-            st.caption("Roads are shown by the OpenStreetMap layer. Turn-by-turn route calculation is not enabled in this update.")
-
-        with regional_tab_records:
-            st.markdown(f"#### Farmers and declarations in {regional_wilaya}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Parcels", len(regional_parcels))
-            c2.metric("Declarations", len(regional_decs))
-            c3.metric("Verified boundaries", sum(1 for p in regional_parcels if p.get("boundary_status") == "verified"))
-            if regional_decs:
-                st.dataframe(pd.DataFrame(regional_decs), use_container_width=True, hide_index=True)
-            else:
-                st.info("No declarations found for this Wilaya yet.")
-
-        with regional_tab_boundaries:
-            st.markdown("#### Verify farm boundaries")
-            st.caption("Select a farmer's pin, draw the actual parcel polygon on satellite imagery, and save it as verified. This polygon is the future AOI for parcel-level satellite analysis.")
-            if not regional_parcels:
-                st.info("No farm parcels are registered in this Wilaya yet.")
-            else:
-                parcel_labels = {f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'}": p for p in regional_parcels}
-                parcel_label = st.selectbox("Parcel to verify", list(parcel_labels.keys()), key="regional_parcel_choice_v2")
-                selected_parcel = parcel_labels[parcel_label]
-                parcel_pin_lat, parcel_pin_lon = selected_parcel.get("pin_lat"), selected_parcel.get("pin_lon")
-                try:
-                    center = (float(parcel_pin_lat), float(parcel_pin_lon)) if parcel_pin_lat is not None and parcel_pin_lon is not None else get_wilaya_center(regional_wilaya)
-                except Exception:
-                    center = get_wilaya_center(regional_wilaya)
-                boundary_map = folium.Map(location=center, zoom_start=17 if parcel_pin_lat is not None and parcel_pin_lon is not None else 14, control_scale=True, tiles=None)
-                add_navigation_map_layers(boundary_map, default_roads=False)
-                if parcel_pin_lat is not None and parcel_pin_lon is not None:
-                    folium.Marker(
-                        [float(parcel_pin_lat), float(parcel_pin_lon)],
-                        tooltip="Farmer's selected pin — use it as a reference, not the legal field edge",
-                        popup=f"Farm pin<br>Lat: {float(parcel_pin_lat):.6f}<br>Lon: {float(parcel_pin_lon):.6f}",
-                        icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
-                    ).add_to(boundary_map)
-                existing_boundary = selected_parcel.get("boundary_geojson")
-                if existing_boundary:
-                    try: folium.GeoJson(existing_boundary, name="Saved boundary").add_to(boundary_map)
-                    except Exception: pass
-                Draw(export=True, draw_options={"polyline": False, "rectangle": {"showArea": True}, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}}, edit_options={"edit": True, "remove": True}).add_to(boundary_map)
-                folium.LayerControl(collapsed=False).add_to(boundary_map)
-                st.caption("Boundary workflow: zoom in, choose Satellite, click around the field edge to draw a polygon (or rectangle for a regular field), double-click to finish, adjust vertices if needed, then save and verify.")
-                boundary_map_data = st_folium(boundary_map, height=600, width=None, returned_objects=["all_drawings", "last_active_drawing"], key=f"wilaya_boundary_map_v2_{selected_parcel.get('id')}")
-                drawing = (boundary_map_data or {}).get("last_active_drawing")
-                if not drawing:
-                    drawings = (boundary_map_data or {}).get("all_drawings") or []
-                    if drawings: drawing = drawings[-1]
-                st.caption(f"Current status: {selected_parcel.get('boundary_status', 'pin_pending')}")
-                if st.button("Save & verify boundary", key=f"save_boundary_v2_{selected_parcel.get('id')}", type="primary"):
-                    if not isinstance(drawing, dict) or drawing.get("geometry", {}).get("type") != "Polygon":
-                        st.error("Draw a polygon on the map first, then click Save & verify boundary.")
-                    else:
-                        try:
-                            db.table("farm_parcels").update({"boundary_geojson": drawing, "boundary_status": "verified", "boundary_verified_by": st.session_state.wilaya_admin_name, "boundary_verified_at": date.today().isoformat()}).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
-                            st.success("Boundary saved and marked verified.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Could not save boundary: {e}")
-
-        with regional_tab_sat:
-            st.markdown("#### Parcel-level satellite monitoring")
-            st.caption("This screen reads stored parcel observations. A farm-level Copernicus polygon/time-series pipeline must populate the observations table before real per-farm indicators and alerts appear; Wilaya-level values are not mislabeled as farm measurements.")
-            if not regional_parcels:
-                st.info("No parcels available in this Wilaya.")
-            else:
-                parcel_options = {f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop')} — {p.get('crop')} ({p.get('boundary_status')})": p for p in regional_parcels}
-                monitor_label = st.selectbox("Farm to monitor", list(parcel_options.keys()), key="regional_sat_parcel")
-                monitor_parcel = parcel_options[monitor_label]
-                try:
-                    observations = db.table("farm_satellite_observations").select("*").eq("parcel_id", monitor_parcel["id"]).order("observed_at", desc=False).limit(500).execute().data or []
-                except Exception as e:
-                    observations = []
-                    st.warning(f"Satellite observations table is not ready. Run the updated migration. Details: {e}")
-                if observations:
-                    obs_df = pd.DataFrame(observations)
-                    st.dataframe(obs_df, use_container_width=True, hide_index=True)
-                    latest = observations[-1]
-                    metrics = st.columns(4)
-                    for col, key, label in zip(metrics, ["ndvi", "ndwi", "ndre", "anomaly_percent"], ["NDVI", "NDWI", "NDRE", "Anomaly %"]):
-                        val = latest.get(key)
-                        col.metric(label, "—" if val is None else f"{float(val):.3f}" if key != "anomaly_percent" else f"{float(val):+.1f}%")
-                    if len(observations) >= 2:
-                        prev = observations[-2]
-                        prev_ndvi, curr_ndvi = prev.get("ndvi"), latest.get("ndvi")
-                        if prev_ndvi is not None and curr_ndvi is not None and float(prev_ndvi) > 0:
-                            drop = (float(curr_ndvi) - float(prev_ndvi)) / float(prev_ndvi) * 100
-                            if drop <= -25:
-                                st.warning(f"Unusual signal: NDVI fell by {abs(drop):.1f}% since the previous stored observation. This is a review flag, not a confirmed disease.")
-                else:
-                    st.info("No parcel-level observations are stored yet. The map and boundary are ready, but the field-level Sentinel processing stage is still required.")
-                if st.button("Check stored indicators and create review alerts", key=f"check_sat_{monitor_parcel['id']}"):
-                    try:
-                        obs = db.table("farm_satellite_observations").select("*").eq("parcel_id", monitor_parcel["id"]).order("observed_at", desc=False).limit(500).execute().data or []
-                        if not obs:
-                            st.info("No stored observations to check.")
-                        else:
-                            latest = obs[-1]
-                            reasons = []
-                            anomaly = latest.get("anomaly_percent")
-                            if anomaly is not None and float(anomaly) <= -20:
-                                reasons.append(f"Latest stored anomaly is {float(anomaly):.1f}% below baseline")
-                            if len(obs) >= 2 and obs[-2].get("ndvi") is not None and latest.get("ndvi") is not None and float(obs[-2]["ndvi"]) > 0:
-                                drop = (float(latest["ndvi"]) - float(obs[-2]["ndvi"])) / float(obs[-2]["ndvi"]) * 100
-                                if drop <= -25: reasons.append(f"NDVI declined by {abs(drop):.1f}% between observations")
-                            if reasons:
-                                db.table("farm_satellite_alerts").insert({"parcel_id": monitor_parcel["id"], "user_id": monitor_parcel.get("user_id"), "wilaya": regional_wilaya, "severity": "warning", "title": "Satellite indicator needs review", "message": "; ".join(reasons), "status": "open"}).execute()
-                                st.warning("Review alert saved. Confirm the cause in the field before describing it as crop damage or disease.")
+                                [float(parcel_pin_lat), float(parcel_pin_lon)],
+                                tooltip="Farmer's pin",
+                                popup="Farmer-declared field centre",
+                                icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
+                            ).add_to(boundary_map)
+                        existing_boundary = selected_parcel.get("boundary_geojson")
+                        if existing_boundary:
+                            try:
+                                folium.GeoJson(existing_boundary, name="Saved boundary").add_to(boundary_map)
+                            except Exception:
+                                pass
+                        Draw(
+                            export=True,
+                            draw_options={"polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}},
+                            edit_options={"edit": True, "remove": True},
+                        ).add_to(boundary_map)
+                        boundary_map_data = st_folium(
+                            boundary_map, height=520, width=None,
+                            returned_objects=["all_drawings", "last_active_drawing"],
+                            key=f"wilaya_boundary_map_{selected_parcel.get('id')}",
+                        )
+                        drawing = (boundary_map_data or {}).get("last_active_drawing")
+                        if not drawing:
+                            drawings = (boundary_map_data or {}).get("all_drawings") or []
+                            if drawings:
+                                drawing = drawings[-1]
+                        st.caption(f"Current status: {selected_parcel.get('boundary_status', 'pin_pending')}")
+                        if st.button("Save & verify boundary", key=f"save_boundary_{selected_parcel.get('id')}", type="primary"):
+                            if not isinstance(drawing, dict) or drawing.get("geometry", {}).get("type") != "Polygon":
+                                st.error("Draw a polygon on the map first, then click Save & verify boundary.")
                             else:
-                                st.success("No configured anomaly threshold was crossed by the stored observations.")
-                    except Exception as e:
-                        st.error(f"Could not check/save alerts. Run the updated migration first. Details: {e}")
-
-        with regional_tab_investigate:
-            st.markdown(f"#### Investigate agricultural risks in {regional_wilaya}")
-            st.caption("Uses the existing FELAH evidence engine and regional records. The result is an investigation signal, not an automatic diagnosis.")
-            regional_crops = sorted({str(r.get("crop")) for r in regional_decs if r.get("crop")})
-            if not regional_crops:
-                st.info("No crop declarations exist in this Wilaya yet.")
-            else:
-                investigate_crop = st.selectbox("Crop to investigate", regional_crops, key="regional_investigate_crop")
-                if st.button("Run Wilaya investigation", key="run_regional_investigation", type="primary"):
-                    try:
-                        regional_df = pd.DataFrame(regional_decs)
-                        if "area" not in regional_df.columns: regional_df["area"] = 0
-                        def read_regional_table(table, columns):
-                            try: return db.table(table).select(columns).execute().data or []
-                            except Exception: return []
-                        wr = read_regional_table("weather_observations", "observed_at,wilaya,tmin_c,tmax_c,rainfall_mm,source")
-                        war = read_regional_table("weather_alerts", "id,title,region,severity,message,created_at")
-                        hr = read_regional_table("historical_production", "year,crop,wilaya,area_ha,production_t,yield_t_ha,source")
-                        sr = read_regional_table("soil_observations", "observed_at,wilaya,crop,ph,ec_ds_m,caco3_percent,organic_matter_percent,soil_moisture_percent,source")
-                        ir = read_regional_table("irrigation_observations", "observed_at,wilaya,crop,water_mm,irrigation_hours,source")
-                        satr = read_regional_table("satellite_indicators", "observed_at,wilaya,crop,ndvi,ndwi,evi,fapar,anomaly_percent,source")
-                        dr = read_regional_table("disease_reports", "reported_at,wilaya,crop,disease,severity,affected_area_ha,source,status,confidence,notes")
-                        lr = read_regional_table("wilaya_locations", "wilaya,latitude,longitude")
-                        result = ai_investigate_crop_wilaya(investigate_crop, regional_wilaya, regional_df, {}, {}, weather_rows=wr, weather_alert_rows=war, historical_rows=hr, soil_rows=sr, irrigation_rows=ir, satellite_rows=satr, disease_rows=dr, location_rows=lr)
-                        st.markdown(ai_investigation_text(result))
-                        st.write("**Data availability**", result.get("data_status", {}))
-                        st.write("**Recommended next steps**")
-                        for recommendation in result.get("recommendations", []): st.write(f"- {recommendation}")
-                    except Exception as e:
-                        st.error(f"Investigation failed: {e}")
-            st.markdown("#### Open satellite review alerts")
-            try:
-                stored_alerts = db.table("farm_satellite_alerts").select("*").eq("wilaya", regional_wilaya).eq("status", "open").order("created_at", desc=True).limit(100).execute().data or []
-                if stored_alerts:
-                    st.dataframe(pd.DataFrame(stored_alerts), use_container_width=True, hide_index=True)
-                    alert_choices = {f"#{a.get('id')} — {a.get('title')} — {a.get('created_at', '')}": a for a in stored_alerts}
-                    selected_alert_label = st.selectbox("Review an alert", list(alert_choices.keys()), key="regional_alert_review_select")
-                    selected_alert = alert_choices[selected_alert_label]
-                    review_status = st.selectbox("Update alert status", ["reviewing", "resolved", "false_positive"], key="regional_alert_review_status")
-                    if st.button("Save alert review", key="regional_save_alert_review"):
-                        try:
-                            db.table("farm_satellite_alerts").update({"status": review_status, "reviewed_by": st.session_state.wilaya_admin_name, "reviewed_at": date.today().isoformat()}).eq("id", selected_alert.get("id")).eq("wilaya", regional_wilaya).execute()
-                            st.success("Alert review status saved.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Could not update alert status: {e}")
-                else:
-                    st.info("No open parcel satellite alerts stored for this Wilaya.")
-            except Exception as e:
-                st.caption(f"Alert table unavailable until the migration is run: {e}")
-
-        with regional_tab_messages:
-            st.markdown("#### Send a notification to a farmer")
-            recipient_parcels = [p for p in regional_parcels if p.get("user_id")]
-            if recipient_parcels:
-                recipients = {f"#{p.get('id')} — {p.get('farmer_name') or 'Farmer'} — {p.get('parcel_name') or p.get('crop')}": p for p in recipient_parcels}
-                recipient_label = st.selectbox("Choose farmer / parcel", list(recipients.keys()), key="regional_notif_recipient")
-                recipient = recipients[recipient_label]
-                message_title = st.text_input("Notification title", key="regional_notif_title")
-                message_body = st.text_area("Notification message", key="regional_notif_body")
-                if st.button("Send farmer notification", key="regional_send_notif", type="primary"):
-                    if not sanitize(message_title) or not sanitize(message_body):
-                        st.error("Enter both a title and a message.")
-                    else:
-                        try:
-                            recipient_profile = db.table("farmer_profiles").select("email").eq("user_id", recipient["user_id"]).limit(1).execute().data or []
-                            recipient_email = str(recipient_profile[0].get("email", "")) if recipient_profile else ""
-                            notification_payload = {"user_id": recipient["user_id"], "title": sanitize(message_title), "message": sanitize(message_body), "is_read": False}
-                            if recipient_email:
-                                notification_payload["farmer_email"] = recipient_email
-                            db.table("farmer_notifications").insert(notification_payload).execute()
-                            st.success("Notification saved to the selected farmer's FELAH account.")
-                        except Exception as e:
-                            st.error(f"Could not send notification: {e}")
-            else:
-                st.info("No parcel-linked farmer accounts are available yet. Farmer notification requires a parcel with a valid user_id.")
-            st.divider()
-            st.markdown("#### Publish a regional warning")
-            warning_title = st.text_input("Regional warning title", key="regional_warning_title")
-            warning_severity = st.selectbox("Severity", ["yellow", "orange", "red"], key="regional_warning_severity")
-            warning_message = st.text_area("Warning details", key="regional_warning_message")
-            if st.button("Publish warning for this Wilaya", key="regional_publish_warning"):
-                if not sanitize(warning_title) or not sanitize(warning_message):
-                    st.error("Enter a warning title and details.")
-                else:
-                    try:
-                        db.table("weather_alerts").insert({"title": sanitize(warning_title), "region": regional_wilaya, "severity": warning_severity, "message": sanitize(warning_message)}).execute()
-                        ai_refresh_operational_evidence_cache()
-                        st.success(f"Regional warning published for {regional_wilaya}.")
-                    except Exception as e:
-                        st.error(f"Could not publish regional warning: {e}")
-
+                                try:
+                                    admin_supabase_client.table("farm_parcels").update({
+                                        "boundary_geojson": drawing,
+                                        "boundary_status": "verified",
+                                        "boundary_verified_by": st.session_state.wilaya_admin_name,
+                                        "boundary_verified_at": date.today().isoformat(),
+                                    }).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
+                                    st.success("Boundary saved and marked verified.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Could not save boundary: {e}")
+                except Exception as e:
+                    st.warning(f"Could not load farm parcels. Run `felah_phase1_migration.sql` first. Details: {e}")
