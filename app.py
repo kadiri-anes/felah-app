@@ -4257,21 +4257,31 @@ if st.session_state.active_tab == "home":
             )
             pin_clicked = (pin_map_data or {}).get("last_clicked") or {}
             if pin_clicked.get("lat") is not None and pin_clicked.get("lng") is not None:
-                st.session_state[pin_state_key] = {
+                new_pin = {
                     "lat": float(pin_clicked["lat"]),
                     "lng": float(pin_clicked["lng"]),
                 }
+                prev = st.session_state.get(pin_state_key) or {}
+                # Update + rerun so the red marker is drawn on the map immediately
+                moved = (
+                    prev.get("lat") is None
+                    or abs(float(prev.get("lat", 0)) - new_pin["lat"]) > 1e-6
+                    or abs(float(prev.get("lng", 0)) - new_pin["lng"]) > 1e-6
+                )
+                st.session_state[pin_state_key] = new_pin
+                if moved:
+                    st.rerun()
 
             saved_pin = st.session_state.get(pin_state_key) or {}
             pin_lat = saved_pin.get("lat")
             pin_lon = saved_pin.get("lng")
             if pin_lat is not None and pin_lon is not None:
-                st.success(f"Pin selected: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
+                st.success(f"✅ Pin selected: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
                 if st.button("Clear pin / مسح النقطة", key=f"clear_pin_{selected_w}"):
                     st.session_state[pin_state_key] = None
                     st.rerun()
             else:
-                st.info("No pin selected yet. Click on the satellite map to place your farm pin.")
+                st.info("No pin selected yet. Click once on the satellite map — a red pin will appear.")
             cat_choice = st.radio(
                 "Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"]
             )
@@ -6664,7 +6674,16 @@ on public.wilaya_logistics_constraints (wilaya);
             st.session_state.wilaya_admin_name = ""
             st.rerun()
 
-        regional_tab1, regional_tab2 = st.tabs(["📋 Local declarations & farmers", "🛰️ Parcel boundary verification"])
+        regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6 = st.tabs([
+            "📋 Local declarations",
+            "📨 Notify farmers",
+            "🔍 Investigate wilaya",
+            "🛰️ Farm satellite monitor",
+            "⚠️ Regional warnings",
+            "🗺️ Parcel boundary",
+        ])
+
+        # ---------- TAB 1: Local declarations ----------
         with regional_tab1:
             st.markdown(f"#### Records assigned to {regional_wilaya}")
             if admin_supabase_client is None:
@@ -6683,9 +6702,219 @@ on public.wilaya_logistics_constraints (wilaya);
                     else:
                         st.info("No declarations found for this Wilaya yet.")
                 except Exception as e:
-                    st.warning(f"Could not load declarations. If the database schema differs, check the migration and table columns. Details: {e}")
+                    st.warning(f"Could not load declarations. Details: {e}")
 
+        # ---------- TAB 2: Notify farmers ----------
         with regional_tab2:
+            st.markdown(f"#### Send notification to farmers in {regional_wilaya}")
+            st.caption("Messages are stored in farmer_notifications for farmers who have declarations in this Wilaya.")
+            if admin_supabase_client is None:
+                st.warning("Service-role connection required.")
+            else:
+                notif_title = st.text_input("Title / العنوان", key="wilaya_notif_title")
+                notif_body = st.text_area("Message / الرسالة", key="wilaya_notif_body")
+                target_mode = st.radio(
+                    "Send to",
+                    ["All farmers with declarations in this Wilaya", "One farmer (by card number)"],
+                    key="wilaya_notif_target",
+                )
+                one_carte = ""
+                if target_mode.startswith("One"):
+                    one_carte = st.text_input("Farmer card number / رقم بطاقة الفلاح", key="wilaya_notif_carte")
+                if st.button("📨 Send notification", key="wilaya_send_notif", type="primary"):
+                    if not notif_title.strip() or not notif_body.strip():
+                        st.error("Title and message are required.")
+                    else:
+                        try:
+                            q = (
+                                admin_supabase_client.table("declarations")
+                                .select("user_id,farmer_name,carte_num")
+                                .eq("wilaya", regional_wilaya)
+                            )
+                            rows = q.execute().data or []
+                            # unique users
+                            seen = set()
+                            targets = []
+                            for r in rows:
+                                uid = r.get("user_id")
+                                if not uid or uid in seen:
+                                    continue
+                                if one_carte and str(r.get("carte_num", "")).strip() != one_carte.strip():
+                                    continue
+                                seen.add(uid)
+                                targets.append(r)
+                            if not targets:
+                                st.warning("No matching farmers found in this Wilaya.")
+                            else:
+                                sent = 0
+                                for t in targets:
+                                    try:
+                                        admin_supabase_client.table("farmer_notifications").insert({
+                                            "user_id": t["user_id"],
+                                            "title": sanitize(notif_title),
+                                            "message": sanitize(notif_body),
+                                            "is_read": False,
+                                        }).execute()
+                                        sent += 1
+                                    except Exception:
+                                        # alternate column name some schemas use
+                                        try:
+                                            admin_supabase_client.table("farmer_notifications").insert({
+                                                "user_id": t["user_id"],
+                                                "title": sanitize(notif_title),
+                                                "body": sanitize(notif_body),
+                                                "is_read": False,
+                                            }).execute()
+                                            sent += 1
+                                        except Exception as ne:
+                                            st.error(f"Failed for {t.get('farmer_name')}: {ne}")
+                                st.success(f"Notification sent to {sent} farmer(s).")
+                        except Exception as e:
+                            st.error(f"Could not send notifications: {e}")
+
+        # ---------- TAB 3: Investigate wilaya ----------
+        with regional_tab3:
+            st.markdown(f"#### Investigate crops in {regional_wilaya}")
+            st.caption("Runs the same AI investigation engine, limited to this Wilaya.")
+            inv_crops = sorted(set(list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys())))
+            inv_crop = st.selectbox("Crop to investigate", inv_crops, key="wilaya_inv_crop")
+            if st.button("🔍 Run investigation", key="wilaya_run_inv", type="primary"):
+                try:
+                    with st.spinner("Investigating..."):
+                        # Load local declarations as the live board for this Wilaya
+                        live_rows = []
+                        if admin_supabase_client is not None:
+                            live_rows = (
+                                admin_supabase_client.table("declarations")
+                                .select("crop,area,wilaya,start_date,farmer_name")
+                                .eq("wilaya", regional_wilaya)
+                                .execute().data or []
+                            )
+                        df_live = pd.DataFrame(live_rows) if live_rows else pd.DataFrame(columns=["crop", "area", "wilaya"])
+                        # Benchmarks: builtin wilaya yields
+                        national_benchmarks = {}
+                        benchmark_map = {}
+                        for cname in list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys()):
+                            y = get_builtin_wilaya_yield(cname, regional_wilaya)
+                            if y is not None:
+                                national_benchmarks[cname] = y
+                                benchmark_map[(cname, regional_wilaya)] = y
+                        # Optional live weather + satellite for this wilaya centre
+                        wlat, wlon = get_wilaya_center(regional_wilaya)
+                        weather_rows = ai_fetch_external_weather(regional_wilaya, wlat, wlon, days_back=120)
+                        sat_rows, sat_src, sat_stats = ai_fetch_copernicus_satellite(regional_wilaya, wlat, wlon, days_back=90)
+                        disease_rows = []
+                        try:
+                            disease_rows = (
+                                admin_supabase_client.table("disease_reports")
+                                .select("*").eq("wilaya", regional_wilaya).execute().data or []
+                            ) if admin_supabase_client else []
+                        except Exception:
+                            disease_rows = []
+                        result = ai_investigate_crop_wilaya(
+                            inv_crop, regional_wilaya, df_live, benchmark_map, national_benchmarks,
+                            weather_rows=weather_rows, satellite_rows=sat_rows or [],
+                            disease_rows=disease_rows,
+                        )
+                        result["satellite_source_label"] = sat_src
+                    primary = result.get("primary_label", "Unknown")
+                    conf = float(result.get("confidence") or 0) * 100
+                    st.info(f"Finding — {inv_crop} / {regional_wilaya} — {primary} — confidence {conf:.0f}%")
+                    impact = result.get("impact") or {}
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Declared area", f"{result.get('declared_area_ha', 0):,.1f} ha")
+                    c2.metric("Expected", "—" if impact.get("expected_t") is None else f"{impact['expected_t']:,.0f} t")
+                    c3.metric("Potential impact", "—" if impact.get("loss_t") is None else f"-{impact['loss_t']:,.0f} t")
+                    if result.get("recommendations"):
+                        st.markdown("**Recommendations**")
+                        for rec in result.get("recommendations") or []:
+                            st.write(f"- {rec}")
+                except Exception as e:
+                    st.error(f"Investigation failed: {e}")
+
+        # ---------- TAB 4: Farm satellite monitor ----------
+        with regional_tab4:
+            st.markdown(f"#### Satellite indicators per farm — {regional_wilaya}")
+            st.caption(
+                "Uses Copernicus NDVI/NDWI when credentials are configured. "
+                "Farms with a pin are checked; abnormal vegetation drop is flagged."
+            )
+            if admin_supabase_client is None:
+                st.warning("Service-role connection required.")
+            else:
+                try:
+                    parcels = (
+                        admin_supabase_client.table("farm_parcels").select("*")
+                        .eq("wilaya", regional_wilaya).order("id", desc=True).limit(200).execute().data or []
+                    )
+                    if not parcels:
+                        st.info("No farm parcels with pins in this Wilaya yet.")
+                    else:
+                        max_check = st.slider("Max farms to check now", 1, min(20, len(parcels)), min(5, len(parcels)), key="wilaya_sat_max")
+                        if st.button("🛰️ Check satellite indicators", key="wilaya_sat_check", type="primary"):
+                            alerts = []
+                            rows_out = []
+                            for p in parcels[:max_check]:
+                                plat, plon = p.get("pin_lat"), p.get("pin_lon")
+                                label = f"#{p.get('id')} {p.get('parcel_name') or p.get('crop') or 'Farm'}"
+                                if plat is None or plon is None:
+                                    rows_out.append({"Farm": label, "Status": "No pin", "NDVI": "—", "NDWI": "—"})
+                                    continue
+                                try:
+                                    sat_rows, sat_src, sat_stats = ai_fetch_copernicus_satellite(
+                                        regional_wilaya, float(plat), float(plon), days_back=60
+                                    )
+                                    ndvi = sat_stats.get("ndvi_mean") if isinstance(sat_stats, dict) else None
+                                    ndwi = sat_stats.get("ndwi_mean") if isinstance(sat_stats, dict) else None
+                                    status = "OK"
+                                    if ndvi is not None and float(ndvi) < 0.25:
+                                        status = "⚠️ Low NDVI"
+                                        alerts.append((label, ndvi, p))
+                                    rows_out.append({
+                                        "Farm": label,
+                                        "Status": status,
+                                        "NDVI": f"{float(ndvi):.3f}" if ndvi is not None else "—",
+                                        "NDWI": f"{float(ndwi):.3f}" if ndwi is not None else "—",
+                                        "Source": str(sat_src)[:60],
+                                    })
+                                except Exception as se:
+                                    rows_out.append({"Farm": label, "Status": f"Error: {se}", "NDVI": "—", "NDWI": "—"})
+                            if rows_out:
+                                st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+                            if alerts:
+                                st.error(f"{len(alerts)} farm(s) with abnormal indicators (low NDVI). Consider a regional warning or field visit.")
+                            else:
+                                st.success("No strong abnormal NDVI flags in the checked sample.")
+                except Exception as e:
+                    st.warning(f"Could not load parcels / satellite checks. Details: {e}")
+
+        # ---------- TAB 5: Regional warnings ----------
+        with regional_tab5:
+            st.markdown(f"#### Regional warning for {regional_wilaya}")
+            st.caption("Publishes a weather/risk alert visible in the farmer Weather & Alerts service for this Wilaya.")
+            if admin_supabase_client is None:
+                st.warning("Service-role connection required.")
+            else:
+                w_title = st.text_input("Alert title", key="wilaya_warn_title", placeholder="e.g. Heat stress risk — next 5 days")
+                w_severity = st.selectbox("Severity", ["Info", "Yellow", "Orange", "Red"], key="wilaya_warn_sev")
+                w_msg = st.text_area("Message for farmers", key="wilaya_warn_msg")
+                if st.button("⚠️ Publish regional warning", key="wilaya_warn_pub", type="primary"):
+                    if not w_title.strip() or not w_msg.strip():
+                        st.error("Title and message required.")
+                    else:
+                        try:
+                            admin_supabase_client.table("weather_alerts").insert({
+                                "title": sanitize(w_title),
+                                "region": regional_wilaya,
+                                "severity": w_severity,
+                                "message": sanitize(w_msg),
+                            }).execute()
+                            st.success("Regional warning published.")
+                        except Exception as e:
+                            st.error(f"Could not publish warning: {e}")
+
+        # ---------- TAB 6: Parcel boundary verification ----------
+        with regional_tab6:
             st.markdown("#### Verify a farm boundary")
             st.caption("Select a parcel, draw its boundary on the satellite map, then save it as verified. The pin alone is not treated as a verified boundary.")
             if admin_supabase_client is None:
@@ -6732,6 +6961,7 @@ on public.wilaya_logistics_constraints (wilaya);
                             draw_options={"polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}},
                             edit_options={"edit": True, "remove": True},
                         ).add_to(boundary_map)
+                        folium.LayerControl(collapsed=True).add_to(boundary_map)
                         boundary_map_data = st_folium(
                             boundary_map, height=520, width=None,
                             returned_objects=["all_drawings", "last_active_drawing"],
