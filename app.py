@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from io import BytesIO
 
 import folium
+from folium.plugins import Draw
 import pandas as pd
 import requests
 import qrcode
@@ -2388,6 +2389,12 @@ if "carte_num" not in st.session_state:
     st.session_state.carte_num = "DZ-2026-0000"
 if "admin_authenticated" not in st.session_state:
     st.session_state.admin_authenticated = False
+if "wilaya_admin_authenticated" not in st.session_state:
+    st.session_state.wilaya_admin_authenticated = False
+if "wilaya_admin_name" not in st.session_state:
+    st.session_state.wilaya_admin_name = ""
+if "wilaya_admin_wilaya" not in st.session_state:
+    st.session_state.wilaya_admin_wilaya = ""
 if "captcha_num1" not in st.session_state:
     st.session_state.captcha_num1 = random.randint(1, 9)
     st.session_state.captcha_num2 = random.randint(1, 9)
@@ -2679,6 +2686,29 @@ def get_admin_password() -> str:
     # Read the admin code from Streamlit Secrets without a hard-coded fallback.
     # If the secret is missing, return an empty value so the app does not crash.
     return str(st.secrets.get("ADMIN_SECRET_KEY", "")).strip()
+
+
+def get_wilaya_admin_passwords() -> dict:
+    """Read per-Wilaya passwords from [wilaya_admin_passwords] in Streamlit Secrets."""
+    try:
+        configured = st.secrets.get("wilaya_admin_passwords", {})
+        if hasattr(configured, "items"):
+            return {str(k).strip(): str(v).strip() for k, v in configured.items() if str(v).strip()}
+    except Exception:
+        pass
+    return {}
+
+
+def get_wilaya_center(wilaya: str):
+    """Approximate map centers for the initial Wilaya pilot; pin/polygon coordinates remain user-drawn."""
+    centers = {
+        "09 - Blida": (36.4700, 2.8300),
+        "16 - Alger": (36.7538, 3.0588),
+        "35 - Boumerdès": (36.7667, 3.4772),
+        "44 - Aïn Defla": (36.2641, 1.9679),
+        "68 - Bou Saada": (35.2080, 4.1740),
+    }
+    return centers.get(str(wilaya).strip(), (36.7538, 3.0588))
 
 
 def get_unread_notif_count() -> int:
@@ -3611,6 +3641,10 @@ with st.sidebar:
                 carte_input = st.text_input(
                     "Carte Fellah N° / رقم بطاقة الفلاح", placeholder="DZ-2026-XXXX"
                 )
+                phone_input = st.text_input(
+                    "Phone number / رقم الهاتف (for future verified phone login)",
+                    placeholder="+213XXXXXXXXX",
+                )
 
                 captcha_ans = st.number_input(
                     f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
@@ -3643,6 +3677,7 @@ with st.sidebar:
                                         "data": {
                                             "full_name": name_input,
                                             "carte_num": carte_input,
+                                            "phone_number": phone_input.strip(),
                                         }
                                     },
                                 }
@@ -3711,6 +3746,7 @@ with st.sidebar:
                                         "email": email_input,
                                         "full_name": st.session_state.farmer_name,
                                         "carte_num": st.session_state.carte_num,
+                                        "phone_number": (user_metadata.get("phone_number", "") or "").strip(),
                                     }, on_conflict="user_id").execute()
                                 except Exception:
                                     # Profile synchronization must not prevent a valid login.
@@ -4113,6 +4149,30 @@ if st.session_state.active_tab == "home":
             selected_w = st.selectbox(
                 "Wilaya / الولاية (69 Wilayas)", WILAYAS_69
             )
+            parcel_name = st.text_input(
+                "Farm/parcel name / اسم القطعة",
+                placeholder="e.g. Potato field North / حقل البطاطا الشمالي",
+            )
+            st.markdown("#### 📍 Drop a farm pin on the satellite map / حدّد موقع القطعة")
+            st.caption("Tap the approximate centre of your field. A Wilaya officer can draw and verify the exact boundary later.")
+            pin_center = get_wilaya_center(selected_w)
+            pin_map = folium.Map(location=pin_center, zoom_start=12, control_scale=True, tiles=None)
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery", name="Satellite", overlay=False, control=True
+            ).add_to(pin_map)
+            folium.LayerControl(collapsed=True).add_to(pin_map)
+            pin_map_data = st_folium(
+                pin_map, height=360, width=None, returned_objects=["last_clicked"],
+                key=f"farmer_parcel_pin_map_{selected_w}",
+            )
+            pin_clicked = (pin_map_data or {}).get("last_clicked") or {}
+            pin_lat = pin_clicked.get("lat")
+            pin_lon = pin_clicked.get("lng")
+            if pin_lat is not None and pin_lon is not None:
+                st.success(f"Pin selected: {float(pin_lat):.6f}, {float(pin_lon):.6f}")
+            else:
+                st.info("No pin selected yet. You can still submit the existing declaration; add a pin when ready.")
             cat_choice = st.radio(
                 "Category / الصنف:", ["Vegetables (خضروات)", "Fruits (فواكه)"]
             )
@@ -4160,7 +4220,37 @@ if st.session_state.active_tab == "home":
             if st.button("Submit & Generate QR Permit"):
                 if st.session_state.logged_in:
                     try:
-                        supabase_client.table("declarations").insert({
+                        parcel_id = None
+                        if not admin_supabase_client and not supabase_client:
+                            raise RuntimeError("Supabase connection is not available.")
+                        # Store the farm/parcel separately so one farmer can later register multiple fields.
+                        # This table is created by the SQL migration supplied with this code.
+                        try:
+                            parcel_payload = {
+                                "user_id": st.session_state.user_id,
+                                "farmer_name": st.session_state.farmer_name,
+                                "carte_num": st.session_state.carte_num,
+                                "parcel_name": sanitize(parcel_name) or f"{selected_c} parcel",
+                                "wilaya": selected_w,
+                                "crop": selected_c,
+                                "category": cat_choice,
+                                "area_ha": float(area_ha),
+                                "planting_date": str(start_date),
+                                "pin_lat": float(pin_lat) if pin_lat is not None else None,
+                                "pin_lon": float(pin_lon) if pin_lon is not None else None,
+                                "boundary_status": "pin_received" if pin_lat is not None and pin_lon is not None else "pin_pending",
+                            }
+                            parcel_res = supabase_client.table("farm_parcels").insert(parcel_payload).execute()
+                            if parcel_res.data:
+                                parcel_id = parcel_res.data[0].get("id")
+                        except Exception as parcel_error:
+                            st.error(
+                                "Farm parcel storage is not ready. Run the supplied `felah_phase1_migration.sql` in Supabase SQL Editor, "
+                                f"then retry. Details: {parcel_error}"
+                            )
+                            st.stop()
+
+                        declaration_payload = {
                             "user_id": st.session_state.user_id,
                             "farmer_name": st.session_state.farmer_name,
                             "carte_num": st.session_state.carte_num,
@@ -4169,9 +4259,12 @@ if st.session_state.active_tab == "home":
                             "crop": selected_c,
                             "area": area_ha,
                             "start_date": str(start_date),
-                        }).execute()
+                        }
+                        if parcel_id is not None:
+                            declaration_payload["parcel_id"] = parcel_id
+                        supabase_client.table("declarations").insert(declaration_payload).execute()
 
-                        st.success("Declaration registered successfully!")
+                        st.success("Farm parcel and declaration registered successfully!")
                         qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA|START:{start_date}"
                         qr = qrcode.make(qr_payload)
                         buf = BytesIO()
@@ -6422,3 +6515,147 @@ on public.wilaya_logistics_constraints (wilaya);
         if st.button("🔒 Lock Admin Console"):
             st.session_state.admin_authenticated = False
             st.rerun()
+
+    # ---------------------------------------------------------
+    # WILAYA OFFICER CONSOLE (separate from national owner admin)
+    # ---------------------------------------------------------
+    st.divider()
+    st.subheader("🗺️ Wilaya Officer Console / منصة مسؤول الولاية")
+    if not st.session_state.wilaya_admin_authenticated:
+        wilaya_passwords = get_wilaya_admin_passwords()
+        if not wilaya_passwords:
+            st.info(
+                "No Wilaya passwords are configured yet. Add a [wilaya_admin_passwords] section in Streamlit Secrets; "
+                "the example is provided with this update."
+            )
+        with st.form("wilaya_admin_login_form", clear_on_submit=False):
+            pilot_wilayas = [
+                "16 - Alger", "44 - Aïn Defla", "68 - Bou Saada",
+                "35 - Boumerdès", "09 - Blida",
+            ]
+            configured_wilayas = [w for w in pilot_wilayas if w in wilaya_passwords]
+            # Still display the five pilot Wilayas even before Secrets are filled in.
+            chosen_wilaya = st.selectbox(
+                "Select your Wilaya / اختر الولاية",
+                configured_wilayas or pilot_wilayas,
+                key="wilaya_admin_login_select",
+            )
+            officer_name = st.text_input("Officer name / اسم المسؤول", key="wilaya_admin_login_name")
+            officer_password = st.text_input(
+                "Wilaya password / كلمة مرور الولاية", type="password", key="wilaya_admin_login_password"
+            )
+            wilaya_login_submit = st.form_submit_button("Open Wilaya Console / دخول منصة الولاية", use_container_width=True)
+        if wilaya_login_submit:
+            expected_wilaya_password = wilaya_passwords.get(chosen_wilaya, "")
+            if not expected_wilaya_password:
+                st.error(f"No password is configured for {chosen_wilaya}. Add it under [wilaya_admin_passwords] in Streamlit Secrets.")
+            elif officer_password != expected_wilaya_password:
+                st.error("Incorrect Wilaya password.")
+            else:
+                st.session_state.wilaya_admin_authenticated = True
+                st.session_state.wilaya_admin_wilaya = chosen_wilaya
+                st.session_state.wilaya_admin_name = sanitize(officer_name) or f"{chosen_wilaya} Officer"
+                st.rerun()
+    else:
+        regional_wilaya = st.session_state.wilaya_admin_wilaya
+        st.success(f"Signed in: {st.session_state.wilaya_admin_name} — {regional_wilaya}")
+        if st.button("🔒 Lock Wilaya Console", key="lock_wilaya_console"):
+            st.session_state.wilaya_admin_authenticated = False
+            st.session_state.wilaya_admin_wilaya = ""
+            st.session_state.wilaya_admin_name = ""
+            st.rerun()
+
+        regional_tab1, regional_tab2 = st.tabs(["📋 Local declarations & farmers", "🛰️ Parcel boundary verification"])
+        with regional_tab1:
+            st.markdown(f"#### Records assigned to {regional_wilaya}")
+            if admin_supabase_client is None:
+                st.warning("Regional records require SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL in Streamlit Secrets.")
+            else:
+                try:
+                    regional_decs = (
+                        admin_supabase_client.table("declarations")
+                        .select("id,created_at,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id")
+                        .eq("wilaya", regional_wilaya)
+                        .order("id", desc=True).limit(1000).execute().data or []
+                    )
+                    st.metric("Declarations in this Wilaya", len(regional_decs))
+                    if regional_decs:
+                        st.dataframe(pd.DataFrame(regional_decs), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No declarations found for this Wilaya yet.")
+                except Exception as e:
+                    st.warning(f"Could not load declarations. If the database schema differs, check the migration and table columns. Details: {e}")
+
+        with regional_tab2:
+            st.markdown("#### Verify a farm boundary")
+            st.caption("Select a parcel, draw its boundary on the satellite map, then save it as verified. The pin alone is not treated as a verified boundary.")
+            if admin_supabase_client is None:
+                st.warning("Boundary verification requires the Supabase service-role connection in Streamlit Secrets.")
+            else:
+                try:
+                    parcels = (
+                        admin_supabase_client.table("farm_parcels").select("*")
+                        .eq("wilaya", regional_wilaya).order("id", desc=True).limit(1000).execute().data or []
+                    )
+                    if not parcels:
+                        st.info("No farm parcels are registered in this Wilaya yet. Farmers can add them through Crop Declaration after the SQL migration is applied.")
+                    else:
+                        parcel_labels = {
+                            f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'}": p
+                            for p in parcels
+                        }
+                        parcel_label = st.selectbox("Parcel to verify", list(parcel_labels.keys()), key="regional_parcel_choice")
+                        selected_parcel = parcel_labels[parcel_label]
+                        parcel_pin_lat = selected_parcel.get("pin_lat")
+                        parcel_pin_lon = selected_parcel.get("pin_lon")
+                        try:
+                            map_center = (float(parcel_pin_lat), float(parcel_pin_lon)) if parcel_pin_lat is not None and parcel_pin_lon is not None else get_wilaya_center(regional_wilaya)
+                        except Exception:
+                            map_center = get_wilaya_center(regional_wilaya)
+                        boundary_map = folium.Map(location=map_center, zoom_start=15, control_scale=True, tiles=None)
+                        folium.TileLayer(
+                            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                            attr="Esri World Imagery", name="Satellite", overlay=False, control=True
+                        ).add_to(boundary_map)
+                        if parcel_pin_lat is not None and parcel_pin_lon is not None:
+                            folium.Marker([float(parcel_pin_lat), float(parcel_pin_lon)], tooltip="Farmer's pin", icon=folium.Icon(color="orange", icon="map-pin", prefix="fa")).add_to(boundary_map)
+                        existing_boundary = selected_parcel.get("boundary_geojson")
+                        if existing_boundary:
+                            try:
+                                folium.GeoJson(existing_boundary, name="Saved boundary").add_to(boundary_map)
+                            except Exception:
+                                pass
+                        Draw(
+                            export=True,
+                            draw_options={"polyline": False, "rectangle": False, "circle": False, "circlemarker": False, "marker": False, "polygon": {"allowIntersection": False, "showArea": True}},
+                            edit_options={"edit": True, "remove": True},
+                        ).add_to(boundary_map)
+                        boundary_map_data = st_folium(
+                            boundary_map, height=520, width=None,
+                            returned_objects=["all_drawings", "last_active_drawing"],
+                            key=f"wilaya_boundary_map_{selected_parcel.get('id')}",
+                        )
+                        drawing = (boundary_map_data or {}).get("last_active_drawing")
+                        if not drawing:
+                            drawings = (boundary_map_data or {}).get("all_drawings") or []
+                            if drawings:
+                                drawing = drawings[-1]
+                        st.caption(f"Current status: {selected_parcel.get('boundary_status', 'pin_pending')}")
+                        if st.button("Save & verify boundary", key=f"save_boundary_{selected_parcel.get('id')}", type="primary"):
+                            if not isinstance(drawing, dict) or drawing.get("geometry", {}).get("type") != "Polygon":
+                                st.error("Draw a polygon on the map first, then click Save & verify boundary.")
+                            else:
+                                try:
+                                    admin_supabase_client.table("farm_parcels").update({
+                                        "boundary_geojson": drawing,
+                                        "boundary_status": "verified",
+                                        "boundary_verified_by": st.session_state.wilaya_admin_name,
+                                        "boundary_verified_at": date.today().isoformat(),
+                                    }).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
+                                    st.success("Boundary saved and marked verified.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Could not save boundary: {e}")
+                except Exception as e:
+                    st.warning(f"Could not load farm parcels. Run `felah_phase1_migration.sql` first. Details: {e}")
+
