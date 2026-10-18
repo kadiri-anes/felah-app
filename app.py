@@ -6675,13 +6675,15 @@ on public.wilaya_logistics_constraints (wilaya);
             st.session_state.wilaya_admin_name = ""
             st.rerun()
 
-        regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6 = st.tabs([
+        regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
             "📋 Local declarations",
             "📨 Notify farmers",
             "🔍 Investigate wilaya",
             "🛰️ Farm satellite monitor",
             "⚠️ Regional warnings",
             "🗺️ Parcel boundary",
+            "🦠 Disease reports",
+            "🗄️ Wilaya database",
         ])
 
         # ---------- TAB 1: Local declarations ----------
@@ -7002,4 +7004,212 @@ on public.wilaya_logistics_constraints (wilaya);
                                     st.error(f"Could not save boundary: {e}")
                 except Exception as e:
                     st.warning(f"Could not load farm parcels. Run `felah_phase1_migration.sql` first. Details: {e}")
+
+
+        # ---------- TAB 7: Disease reports (this Wilaya only) ----------
+        with regional_tab7:
+            st.markdown(f"#### 🦠 Disease reports — {regional_wilaya}")
+            st.caption(
+                "Field observations for this Wilaya only. "
+                "Use Confirmed + trusted source (field officer / lab / official service) when diagnosis is verified."
+            )
+            if admin_supabase_client is None:
+                st.warning("Service-role connection required.")
+            else:
+                disease_crop_options = list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys())
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    w_disease_crop = st.selectbox(
+                        "Crop / المحصول",
+                        disease_crop_options,
+                        key="wilaya_disease_crop",
+                    )
+                with dc2:
+                    w_disease_status = st.selectbox(
+                        "Observation status / حالة الملاحظة",
+                        ["Suspected / مشتبه", "Confirmed / مؤكد", "Checked — no disease / تمت المعاينة دون مرض"],
+                        key="wilaya_disease_status",
+                    )
+                try:
+                    w_disease_options = ai_common_diseases(w_disease_crop)
+                except Exception:
+                    w_disease_options = ["Other / Unknown disease"]
+                w_disease_name_choice = st.selectbox(
+                    "Disease / المرض",
+                    w_disease_options,
+                    key="wilaya_disease_name",
+                )
+                w_disease_custom_name = ""
+                if w_disease_name_choice == "Other / Unknown disease":
+                    w_disease_custom_name = st.text_input(
+                        "Observed/unknown disease name",
+                        key="wilaya_disease_custom_name",
+                    )
+                wd1, wd2, wd3 = st.columns(3)
+                with wd1:
+                    w_disease_severity = st.selectbox(
+                        "Severity / الشدة",
+                        ["Low / خفيفة", "Moderate / متوسطة", "High / شديدة", "Critical / حرجة"],
+                        key="wilaya_disease_severity",
+                    )
+                with wd2:
+                    w_disease_area = st.number_input(
+                        "Affected area (ha)",
+                        min_value=0.0, value=0.0, step=1.0,
+                        key="wilaya_disease_area",
+                    )
+                with wd3:
+                    w_disease_date = st.date_input(
+                        "Observation date",
+                        value=date.today(),
+                        key="wilaya_disease_date",
+                    )
+                ws1, ws2 = st.columns(2)
+                with ws1:
+                    w_disease_source = st.selectbox(
+                        "Source / المصدر",
+                        [
+                            "Field officer / مفتش ميداني",
+                            "Farmer report / بلاغ فلاح",
+                            "Laboratory / مخبر",
+                            "Agricultural extension / إرشاد فلاحي",
+                            "Official agricultural service / مصلحة فلاحية رسمية",
+                            "Other / مصدر آخر",
+                        ],
+                        key="wilaya_disease_source",
+                    )
+                with ws2:
+                    w_disease_confidence = st.slider(
+                        "Confidence / الثقة", 0.0, 1.0, 0.70, 0.05,
+                        key="wilaya_disease_confidence",
+                    )
+                w_disease_notes = st.text_area(
+                    "Notes / ملاحظات",
+                    placeholder="Symptoms, varieties, field observations...",
+                    key="wilaya_disease_notes",
+                )
+                if st.button("🦠 Save disease report for this Wilaya", key="wilaya_save_disease", type="primary"):
+                    if w_disease_name_choice == "Other / Unknown disease" and not str(w_disease_custom_name).strip():
+                        st.error("Enter the observed disease name.")
+                    else:
+                        final_name = str(w_disease_custom_name).strip() if w_disease_name_choice == "Other / Unknown disease" else w_disease_name_choice
+                        payload = {
+                            "reported_at": w_disease_date.isoformat(),
+                            "wilaya": regional_wilaya,
+                            "crop": w_disease_crop,
+                            "disease": sanitize(final_name),
+                            "severity": w_disease_severity,
+                            "affected_area_ha": w_disease_area if w_disease_area > 0 else None,
+                            "source": w_disease_source,
+                            "status": w_disease_status,
+                            "confidence": float(w_disease_confidence),
+                            "notes": sanitize(w_disease_notes),
+                        }
+                        try:
+                            admin_supabase_client.table("disease_reports").insert(payload).execute()
+                            st.success(f"Disease report saved for {regional_wilaya}.")
+                            st.rerun()
+                        except Exception as full_exc:
+                            legacy = {k: payload[k] for k in [
+                                "reported_at", "wilaya", "crop", "disease", "severity",
+                                "affected_area_ha", "source"
+                            ]}
+                            try:
+                                admin_supabase_client.table("disease_reports").insert(legacy).execute()
+                                st.warning(f"Saved without status/confidence columns. ({full_exc})")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Could not save disease report: {e}")
+
+                st.divider()
+                st.markdown("##### Recent disease reports in this Wilaya")
+                try:
+                    recent = (
+                        admin_supabase_client.table("disease_reports")
+                        .select("*")
+                        .eq("wilaya", regional_wilaya)
+                        .order("id", desc=True)
+                        .limit(100)
+                        .execute().data or []
+                    )
+                    if recent:
+                        st.dataframe(pd.DataFrame(recent), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No disease reports for this Wilaya yet.")
+                except Exception as e:
+                    st.warning(f"Could not load disease reports: {e}")
+
+        # ---------- TAB 8: Wilaya-scoped database ----------
+        with regional_tab8:
+            st.markdown(f"#### 🗄️ Wilaya database — {regional_wilaya}")
+            st.caption(
+                "Inspect operational records for this Wilaya only (filtered version of the national database console)."
+            )
+            if admin_supabase_client is None:
+                st.warning("Service-role connection required.")
+            else:
+                w_table = st.selectbox(
+                    "Select table",
+                    [
+                        "declarations",
+                        "farm_parcels",
+                        "disease_reports",
+                        "support_requests",
+                        "farmer_notifications",
+                        "weather_alerts",
+                    ],
+                    key="wilaya_db_table",
+                )
+                try:
+                    if w_table == "farmer_notifications":
+                        decs = (
+                            admin_supabase_client.table("declarations")
+                            .select("user_id")
+                            .eq("wilaya", regional_wilaya)
+                            .execute().data or []
+                        )
+                        uids = {r.get("user_id") for r in decs if r.get("user_id")}
+                        all_n = (
+                            admin_supabase_client.table("farmer_notifications")
+                            .select("*")
+                            .order("id", desc=True)
+                            .limit(500)
+                            .execute().data or []
+                        )
+                        records = [r for r in all_n if r.get("user_id") in uids]
+                    else:
+                        q = admin_supabase_client.table(w_table).select("*")
+                        if w_table in ("declarations", "farm_parcels", "disease_reports", "support_requests"):
+                            q = q.eq("wilaya", regional_wilaya)
+                        elif w_table == "weather_alerts":
+                            q = q.eq("region", regional_wilaya)
+                        records = q.order("id", desc=True).limit(1000).execute().data or []
+
+                    if records:
+                        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+                        st.caption(f"{len(records)} row(s) in `{w_table}` for {regional_wilaya}.")
+                        id_values = [r.get("id") for r in records if r.get("id") is not None]
+                        if id_values and w_table != "farmer_notifications":
+                            st.divider()
+                            st.markdown("##### Manage one record")
+                            rid = st.selectbox("Record ID", id_values, key=f"wilaya_db_id_{w_table}")
+                            confirm = st.checkbox(
+                                "Confirm permanent deletion",
+                                key=f"wilaya_db_del_confirm_{w_table}_{rid}",
+                            )
+                            if st.button(
+                                f"🗑️ Delete from {w_table}",
+                                key=f"wilaya_db_del_{w_table}_{rid}",
+                                disabled=not confirm,
+                            ):
+                                try:
+                                    admin_supabase_client.table(w_table).delete().eq("id", rid).execute()
+                                    st.success(f"Deleted record {rid}.")
+                                    st.rerun()
+                                except Exception as de:
+                                    st.error(f"Delete failed: {de}")
+                    else:
+                        st.info(f"No rows in `{w_table}` for this Wilaya.")
+                except Exception as e:
+                    st.error(f"Could not query `{w_table}`: {e}")
                     
