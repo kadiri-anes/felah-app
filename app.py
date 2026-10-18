@@ -1,3 +1,4 @@
+
 import math
 import random
 import re
@@ -6850,7 +6851,18 @@ on public.wilaya_logistics_constraints (wilaya);
                     if not parcels:
                         st.info("No farm parcels with pins in this Wilaya yet.")
                     else:
-                        max_check = st.slider("Max farms to check now", 1, min(20, len(parcels)), min(5, len(parcels)), key="wilaya_sat_max")
+                        n_parcels = len(parcels)
+                        if n_parcels <= 1:
+                            max_check = n_parcels
+                            st.caption(f"1 farm available — will check all.")
+                        else:
+                            max_check = st.slider(
+                                "Max farms to check now",
+                                min_value=1,
+                                max_value=min(20, n_parcels),
+                                value=min(5, n_parcels),
+                                key="wilaya_sat_max",
+                            )
                         if st.button("🛰️ Check satellite indicators", key="wilaya_sat_check", type="primary"):
                             alerts = []
                             rows_out = []
@@ -6990,3 +7002,4 @@ on public.wilaya_logistics_constraints (wilaya);
                                     st.error(f"Could not save boundary: {e}")
                 except Exception as e:
                     st.warning(f"Could not load farm parcels. Run `felah_phase1_migration.sql` first. Details: {e}")
+                    
