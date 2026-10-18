@@ -3596,41 +3596,106 @@ def render_sidebar_toggle():
     <script>
       (function () {
         const button = document.getElementById("felah-sidebar-toggle");
+        if (!button) return;
 
-        function nativeSidebarButton() {
-          try {
-            return window.parent.document.querySelector(
-              '[data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"]'
-            ) || window.parent.document.querySelector(
-              '[data-testid="stSidebarCollapseButton"] button'
-            );
-          } catch (e) {
-            return null;
+        function parentDoc() {
+          try { return window.parent.document; } catch (e) { return null; }
+        }
+
+        function isSidebarOpen() {
+          const doc = parentDoc();
+          if (!doc) return false;
+          const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+          if (!sidebar) return false;
+          // Streamlit versions differ: aria-expanded, data-testid, or width/transform.
+          const aria = sidebar.getAttribute("aria-expanded");
+          if (aria === "true") return true;
+          if (aria === "false") return false;
+          const style = window.parent.getComputedStyle(sidebar);
+          const transform = style.transform || "";
+          if (transform.includes("matrix") && transform !== "none") {
+            // collapsed sidebars are often translated off-screen
+            try {
+              const m = transform.match(/matrix\\(([^)]+)\\)/);
+              if (m) {
+                const parts = m[1].split(",").map(function (x) { return parseFloat(x.trim()); });
+                if (parts.length >= 6 && Math.abs(parts[4]) > 100) return false;
+              }
+            } catch (e) {}
           }
+          const rect = sidebar.getBoundingClientRect();
+          return rect.width > 40 && rect.left > -rect.width + 20;
+        }
+
+        function findNativeToggle() {
+          const doc = parentDoc();
+          if (!doc) return null;
+          const selectors = [
+            // Expand / open (when collapsed)
+            '[data-testid="stExpandSidebarButton"] button',
+            '[data-testid="stExpandSidebarButton"]',
+            'button[kind="header"][aria-label*="keyboard_double_arrow_right"]',
+            'button[aria-label="Open sidebar"]',
+            'button[aria-label="Open navigation"]',
+            // Collapse / header controls
+            '[data-testid="stSidebarCollapsedControl"] button',
+            '[data-testid="stSidebarCollapsedControl"]',
+            '[data-testid="stSidebarCollapseButton"] button[data-testid="stBaseButton-headerNoPadding"]',
+            '[data-testid="stSidebarCollapseButton"] button',
+            '[data-testid="stSidebarCollapseButton"]',
+            '[data-testid="collapsedControl"] button',
+            '[data-testid="collapsedControl"]',
+            // Generic header icon buttons near the top-left
+            'section[data-testid="stSidebar"] button[kind="header"]',
+            'button[kind="headerNoPadding"]',
+          ];
+          for (let i = 0; i < selectors.length; i++) {
+            const el = doc.querySelector(selectors[i]);
+            if (!el) continue;
+            // Prefer an actual button element
+            if (el.tagName === "BUTTON") return el;
+            const inner = el.querySelector("button");
+            if (inner) return inner;
+            if (typeof el.click === "function") return el;
+          }
+          // Last resort: any visible top-left header button in the app chrome
+          const candidates = Array.from(doc.querySelectorAll("button"));
+          for (let i = 0; i < candidates.length; i++) {
+            const b = candidates[i];
+            const label = (b.getAttribute("aria-label") || b.title || "").toLowerCase();
+            if (label.includes("sidebar") || label.includes("navigation") || label.includes("menu")) {
+              return b;
+            }
+          }
+          return null;
         }
 
         function syncVisibility() {
           try {
-            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-            const isExpanded = sidebar && sidebar.getAttribute("aria-expanded") === "true";
-            button.classList.toggle("hidden", !!isExpanded);
+            button.classList.toggle("hidden", isSidebarOpen());
           } catch (e) {
-            // Keep the opener visible if the parent DOM cannot be inspected.
             button.classList.remove("hidden");
           }
         }
 
-        button.addEventListener("click", function () {
-          const nativeButton = nativeSidebarButton();
+        button.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const nativeButton = findNativeToggle();
           if (nativeButton) {
             nativeButton.click();
-            setTimeout(syncVisibility, 80);
-            setTimeout(syncVisibility, 350);
+            setTimeout(syncVisibility, 50);
+            setTimeout(syncVisibility, 200);
+            setTimeout(syncVisibility, 500);
+          } else {
+            // Fallback: try dispatching keyboard-like open via Streamlit URL hash is not reliable;
+            // show a brief title change so the user knows the click registered.
+            button.setAttribute("title", "Native sidebar button not found — use the Streamlit arrow at the top left");
           }
         });
 
         syncVisibility();
-        setInterval(syncVisibility, 300);
+        setInterval(syncVisibility, 250);
       })();
     </script>
     """
@@ -7212,4 +7277,3 @@ on public.wilaya_logistics_constraints (wilaya);
                         st.info(f"No rows in `{w_table}` for this Wilaya.")
                 except Exception as e:
                     st.error(f"Could not query `{w_table}`: {e}")
-                    
