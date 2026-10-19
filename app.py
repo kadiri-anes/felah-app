@@ -1,4 +1,5 @@
 
+import hashlib
 import math
 import random
 import re
@@ -2682,6 +2683,169 @@ def sanitize(text: str) -> str:
     return re.sub(r"[<>]", "", str(text)).strip()
 
 
+def normalize_phone(phone: str) -> str:
+    """Keep digits only. Algerian numbers starting with 0 are kept as-is (e.g. 0555...)."""
+    return re.sub(r"\D", "", str(phone or ""))
+
+
+def phone_auth_synthetic_email(phone: str) -> str:
+    """Stable synthetic email for phone+carte accounts (not a real inbox)."""
+    digits = normalize_phone(phone)
+    return f"{digits}@phone.felah.auth"
+
+
+def phone_auth_secret() -> str:
+    """Server-side secret used to derive the internal password for phone+carte accounts."""
+    try:
+        secret = str(st.secrets.get("PHONE_AUTH_SECRET", "") or "").strip()
+        if secret:
+            return secret
+        secret = str(st.secrets.get("ADMIN_SECRET_KEY", "") or "").strip()
+        if secret:
+            return secret
+    except Exception:
+        pass
+    return "felah-phone-auth-dev-secret"
+
+
+def phone_auth_password(phone: str, carte: str) -> str:
+    """Deterministic internal password from phone + carte + server secret (farmer never types it)."""
+    material = f"{phone_auth_secret()}|{normalize_phone(phone)}|{sanitize(carte).upper()}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def apply_farmer_session(user, email_fallback: str = "", phone: str = "", carte: str = "", name: str = ""):
+    """Set the standard farmer session keys after any successful auth path."""
+    st.session_state.logged_in = True
+    st.session_state.user_id = str(user.id) if user else ""
+    meta = (user.user_metadata if user else {}) or {}
+    st.session_state.farmer_email = (getattr(user, "email", None) or email_fallback or "").strip()
+    st.session_state.farmer_name = (
+        name
+        or meta.get("full_name")
+        or (email_fallback.split("@")[0] if email_fallback else "")
+        or "فلاح مسجل"
+    )
+    st.session_state.carte_num = carte or meta.get("carte_num") or "DZ-2026-0000"
+    phone_val = phone or meta.get("phone_number") or ""
+    if st.session_state.user_id and supabase_client:
+        try:
+            payload = {
+                "user_id": st.session_state.user_id,
+                "email": st.session_state.farmer_email,
+                "full_name": st.session_state.farmer_name,
+                "carte_num": st.session_state.carte_num,
+                "phone_number": sanitize(phone_val),
+            }
+            supabase_client.table("farmer_profiles").upsert(
+                payload, on_conflict="user_id"
+            ).execute()
+        except Exception:
+            pass
+
+
+def register_phone_carte_account(name: str, phone: str, carte: str, wilaya: str = "", opened_by: str = ""):
+    """
+    Create a phone+carte farmer account in Supabase Auth + farmer_profiles.
+    Uses a synthetic email and an internal derived password so login only needs phone + carte.
+    Prefer service-role admin client when available (Wilaya officer / reliable confirm).
+    """
+    name = sanitize(name)
+    phone_digits = normalize_phone(phone)
+    carte = sanitize(carte)
+    if not name or not phone_digits or not carte:
+        raise ValueError("Name, phone number and Carte Fellah number are required.")
+    if len(phone_digits) < 8:
+        raise ValueError("Phone number looks too short.")
+
+    synthetic_email = phone_auth_synthetic_email(phone_digits)
+    internal_password = phone_auth_password(phone_digits, carte)
+    metadata = {
+        "full_name": name,
+        "carte_num": carte,
+        "phone_number": phone_digits,
+        "auth_method": "phone_carte",
+    }
+    if wilaya:
+        metadata["wilaya"] = wilaya
+    if opened_by:
+        metadata["opened_by"] = opened_by
+
+    if not (admin_supabase_client or supabase_client):
+        raise RuntimeError("Supabase connection unavailable.")
+
+    user_id = None
+    if admin_supabase_client is not None:
+        res = admin_supabase_client.auth.admin.create_user({
+            "email": synthetic_email,
+            "password": internal_password,
+            "email_confirm": True,
+            "user_metadata": metadata,
+        })
+        user = getattr(res, "user", None)
+        if user is None and isinstance(res, dict):
+            user = res.get("user")
+        if user is not None:
+            user_id = str(user.id) if hasattr(user, "id") else str(user.get("id", ""))
+    else:
+        res = supabase_client.auth.sign_up({
+            "email": synthetic_email,
+            "password": internal_password,
+            "options": {"data": metadata},
+        })
+        user = res.user if res else None
+        user_id = str(user.id) if user else None
+
+    if not user_id:
+        raise RuntimeError("Account was created but no user id was returned.")
+
+    profile = {
+        "user_id": user_id,
+        "email": synthetic_email,
+        "full_name": name,
+        "carte_num": carte,
+        "phone_number": phone_digits,
+    }
+    if wilaya:
+        profile["wilaya"] = wilaya
+    if opened_by:
+        profile["opened_by"] = opened_by
+
+    db = admin_supabase_client or supabase_client
+    try:
+        db.table("farmer_profiles").upsert(profile, on_conflict="user_id").execute()
+    except Exception:
+        try:
+            db.table("farmer_profiles").insert(profile).execute()
+        except Exception:
+            pass
+
+    return {
+        "user_id": user_id,
+        "email": synthetic_email,
+        "phone": phone_digits,
+        "carte_num": carte,
+        "full_name": name,
+    }
+
+
+def login_phone_carte(phone: str, carte: str):
+    """Authenticate with phone + carte only (no password typed by the farmer)."""
+    phone_digits = normalize_phone(phone)
+    carte = sanitize(carte)
+    if not phone_digits or not carte:
+        raise ValueError("Phone number and Carte Fellah number are required.")
+    if not supabase_client:
+        raise RuntimeError("Supabase connection unavailable.")
+    synthetic_email = phone_auth_synthetic_email(phone_digits)
+    internal_password = phone_auth_password(phone_digits, carte)
+    res = supabase_client.auth.sign_in_with_password({
+        "email": synthetic_email,
+        "password": internal_password,
+    })
+    return res
+
+
 def get_admin_password() -> str:
     # Read the admin code from Streamlit Secrets without a hard-coded fallback.
     # If the secret is missing, return an empty value so the app does not crash.
@@ -3757,147 +3921,250 @@ with st.sidebar:
     # The whole header is tappable, which is easier to use on phones.
     with st.expander("👤 Account / تسجيل الدخول", expanded=not st.session_state.logged_in):
         if not st.session_state.logged_in:
-            auth_mode = st.selectbox(
-                "Action / الإجراء",
-                ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password"],
-                key="auth_mode_select",
+            auth_method = st.selectbox(
+                "Account type / نوع الحساب",
+                [
+                    "Email + Password / بريد وكلمة سر",
+                    "Phone + Carte Fellah / هاتف وبطاقة الفلاح",
+                ],
+                key="auth_method_select",
             )
 
-            email_input = st.text_input("Email / البريد الإلكتروني")
-            pass_input = st.text_input("Password / كلمة السر", type="password")
-
-            if auth_mode == "Register (إنشاء حساب)":
-                name_input = st.text_input("Full Name / الاسم الكامل")
-                carte_input = st.text_input(
-                    "Carte Fellah N° / رقم بطاقة الفلاح", placeholder="DZ-2026-XXXX"
-                )
-                phone_input = st.text_input(
-                    "Phone number / رقم الهاتف (for future verified phone login)",
-                    placeholder="+213XXXXXXXXX",
+            if auth_method.startswith("Email"):
+                auth_mode = st.selectbox(
+                    "Action / الإجراء",
+                    ["Log In (دخول)", "Register (إنشاء حساب)", "Forgot Password"],
+                    key="auth_mode_select",
                 )
 
-                captcha_ans = st.number_input(
-                    f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
-                    step=1,
-                    value=0,
-                )
+                email_input = st.text_input("Email / البريد الإلكتروني", key="auth_email_input")
+                pass_input = st.text_input("Password / كلمة السر", type="password", key="auth_pass_input")
 
-                terms_agreed = st.checkbox(
-                    TERMS_TEXTS[st.session_state.lang]["agree"],
-                    key="register_terms_agreed",
-                )
-                st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+                if auth_mode == "Register (إنشاء حساب)":
+                    name_input = st.text_input("Full Name / الاسم الكامل", key="auth_email_name")
+                    carte_input = st.text_input(
+                        "Carte Fellah N° / رقم بطاقة الفلاح",
+                        placeholder="DZ-2026-XXXX",
+                        key="auth_email_carte",
+                    )
+                    phone_input = st.text_input(
+                        "Phone number / رقم الهاتف (optional)",
+                        placeholder="0XXXXXXXXX",
+                        key="auth_email_phone",
+                    )
 
-                if st.button("Submit Registration", use_container_width=True):
-                    if not terms_agreed:
-                        st.error("Please accept the Terms of Use and Privacy Policy before registering.")
-                    elif (
-                        captcha_ans
-                        != st.session_state.captcha_num1
-                        + st.session_state.captcha_num2
-                    ):
-                        st.error("Incorrect CAPTCHA answer.")
-                    elif email_input and pass_input and supabase_client:
-                        try:
-                            res = supabase_client.auth.sign_up(
-                                {
-                                    "email": email_input,
-                                    "password": pass_input,
-                                    "options": {
-                                        "data": {
-                                            "full_name": name_input,
-                                            "carte_num": carte_input,
-                                            "phone_number": phone_input.strip(),
-                                        }
-                                    },
-                                }
-                            )
-                            st.success(
-                                "Account created successfully! You may now log in."
-                            )
-                        except Exception as e:
-                            st.error(f"Registration Error: {e}")
+                    captcha_ans = st.number_input(
+                        f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
+                        step=1,
+                        value=0,
+                        key="auth_email_captcha",
+                    )
 
-            elif auth_mode == "Log In (دخول)":
-                # Clear notice immediately above the Login button so every user
-                # sees the student-project status before entering the application.
-                st.markdown(
-                    f"""
-                    <div style="
-                        border:1.5px solid #f59e0b;
-                        border-radius:9px;
-                        padding:9px 11px;
-                        margin:6px 0 7px 0;
-                        background:rgba(245,158,11,0.08);
-                    ">
-                        <div style="font-weight:800; font-size:0.88rem;">
-                            {TERMS_TEXTS[st.session_state.lang]['badge']}
-                        </div>
-                        <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
-                            {TERMS_TEXTS[st.session_state.lang]['short']}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                login_terms_agreed = st.checkbox(
-                    TERMS_TEXTS[st.session_state.lang]["agree"],
-                    key="login_terms_agreed",
-                )
-                st.caption(TERMS_TEXTS[st.session_state.lang]["continue"])
-                if st.button("Login", use_container_width=True):
-                    if not login_terms_agreed:
-                        st.error(
-                            "Please accept the Terms of Use and Privacy Policy before logging in."
-                        )
-                    elif email_input and pass_input and supabase_client:
-                        try:
-                            res = supabase_client.auth.sign_in_with_password(
-                                {"email": email_input, "password": pass_input}
-                            )
-                            st.session_state.logged_in = True
-                            st.session_state.user_id = str(res.user.id) if res.user else ""
-                            st.session_state.farmer_email = email_input
-                            user_metadata = (
-                                res.user.user_metadata if res.user else {}
-                            )
-                            st.session_state.farmer_name = user_metadata.get(
-                                "full_name", email_input.split("@")[0]
-                            )
-                            st.session_state.carte_num = user_metadata.get(
-                                "carte_num", "DZ-2026-1088"
-                            )
-                            # Keep the application profile linked to the authenticated
-                            # Supabase user. This UUID becomes the database ownership key.
-                            if st.session_state.user_id:
-                                try:
-                                    supabase_client.table("farmer_profiles").upsert({
-                                        "user_id": st.session_state.user_id,
+                    terms_agreed = st.checkbox(
+                        TERMS_TEXTS[st.session_state.lang]["agree"],
+                        key="register_terms_agreed",
+                    )
+                    st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+
+                    if st.button("Submit Registration", use_container_width=True, key="auth_email_register_btn"):
+                        if not terms_agreed:
+                            st.error("Please accept the Terms of Use and Privacy Policy before registering.")
+                        elif (
+                            captcha_ans
+                            != st.session_state.captcha_num1
+                            + st.session_state.captcha_num2
+                        ):
+                            st.error("Incorrect CAPTCHA answer.")
+                        elif email_input and pass_input and supabase_client:
+                            try:
+                                res = supabase_client.auth.sign_up(
+                                    {
                                         "email": email_input,
-                                        "full_name": st.session_state.farmer_name,
-                                        "carte_num": st.session_state.carte_num,
-                                        "phone_number": (user_metadata.get("phone_number", "") or "").strip(),
-                                    }, on_conflict="user_id").execute()
-                                except Exception:
-                                    # Profile synchronization must not prevent a valid login.
-                                    pass
-                            st.success("Logged in successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Authentication Failed: {e}")
-                    else:
-                        st.error("Please enter email and password.")
+                                        "password": pass_input,
+                                        "options": {
+                                            "data": {
+                                                "full_name": name_input,
+                                                "carte_num": carte_input,
+                                                "phone_number": phone_input.strip(),
+                                                "auth_method": "email_password",
+                                            }
+                                        },
+                                    }
+                                )
+                                st.success(
+                                    "Account created successfully! You may now log in."
+                                )
+                            except Exception as e:
+                                st.error(f"Registration Error: {e}")
+                        else:
+                            st.error("Please enter email and password.")
 
-            elif auth_mode == "Forgot Password":
-                if st.button("Send Reset Link", use_container_width=True):
-                    if email_input and supabase_client:
-                        try:
-                            supabase_client.auth.reset_password_for_email(
-                                email_input
-                            )
-                            st.info("Password reset link sent to your email.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                elif auth_mode == "Log In (دخول)":
+                    st.markdown(
+                        f"""
+                        <div style="
+                            border:1.5px solid #f59e0b;
+                            border-radius:9px;
+                            padding:9px 11px;
+                            margin:6px 0 7px 0;
+                            background:rgba(245,158,11,0.08);
+                        ">
+                            <div style="font-weight:800; font-size:0.88rem;">
+                                {TERMS_TEXTS[st.session_state.lang]['badge']}
+                            </div>
+                            <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
+                                {TERMS_TEXTS[st.session_state.lang]['short']}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    login_terms_agreed = st.checkbox(
+                        TERMS_TEXTS[st.session_state.lang]["agree"],
+                        key="login_terms_agreed",
+                    )
+                    if st.button("Log In", use_container_width=True, key="auth_email_login_btn"):
+                        if not login_terms_agreed:
+                            st.error("Please accept the Terms of Use and Privacy Policy before logging in.")
+                        elif email_input and pass_input and supabase_client:
+                            try:
+                                res = supabase_client.auth.sign_in_with_password(
+                                    {"email": email_input, "password": pass_input}
+                                )
+                                apply_farmer_session(res.user, email_fallback=email_input)
+                                st.success("Logged in successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Authentication Failed: {e}")
+                        else:
+                            st.error("Please enter email and password.")
+
+                elif auth_mode == "Forgot Password":
+                    if st.button("Send Reset Link", use_container_width=True, key="auth_forgot_btn"):
+                        if email_input and supabase_client:
+                            try:
+                                supabase_client.auth.reset_password_for_email(
+                                    email_input
+                                )
+                                st.info("Password reset link sent to your email.")
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+                        else:
+                            st.error("Please enter your email.")
+
+            else:
+                # Phone + Carte Fellah (no password typed by farmer)
+                auth_mode_phone = st.selectbox(
+                    "Action / الإجراء",
+                    ["Log In (دخول)", "Register (إنشاء حساب)"],
+                    key="auth_mode_phone_select",
+                )
+                st.caption(
+                    "No password needed. Use your phone number (starting with 0…) and Carte Fellah number only. "
+                    "لا حاجة لكلمة سر — استخدم رقم الهاتف (يبدأ بـ 0) ورقم بطاقة الفلاح فقط."
+                )
+
+                phone_pc = st.text_input(
+                    "Phone number / رقم الهاتف",
+                    placeholder="0XXXXXXXXX",
+                    key="auth_phone_pc_input",
+                )
+                carte_pc = st.text_input(
+                    "Carte Fellah N° / رقم بطاقة الفلاح",
+                    placeholder="DZ-2026-XXXX",
+                    key="auth_carte_pc_input",
+                )
+
+                if auth_mode_phone == "Register (إنشاء حساب)":
+                    name_pc = st.text_input(
+                        "Full Name / الاسم الكامل",
+                        key="auth_phone_name_input",
+                    )
+                    captcha_ans_pc = st.number_input(
+                        f"Security Check: {st.session_state.captcha_num1} + {st.session_state.captcha_num2} = ?",
+                        step=1,
+                        value=0,
+                        key="auth_phone_captcha",
+                    )
+                    terms_pc = st.checkbox(
+                        TERMS_TEXTS[st.session_state.lang]["agree"],
+                        key="register_phone_terms_agreed",
+                    )
+                    st.caption(TERMS_TEXTS[st.session_state.lang]["short"])
+
+                    if st.button("Create phone + carte account", use_container_width=True, key="auth_phone_register_btn"):
+                        if not terms_pc:
+                            st.error("Please accept the Terms of Use and Privacy Policy before registering.")
+                        elif captcha_ans_pc != st.session_state.captcha_num1 + st.session_state.captcha_num2:
+                            st.error("Incorrect CAPTCHA answer.")
+                        elif not (name_pc and phone_pc and carte_pc):
+                            st.error("Name, phone number and Carte Fellah number are required.")
+                        else:
+                            try:
+                                register_phone_carte_account(
+                                    name=name_pc,
+                                    phone=phone_pc,
+                                    carte=carte_pc,
+                                )
+                                res = login_phone_carte(phone_pc, carte_pc)
+                                apply_farmer_session(
+                                    res.user,
+                                    phone=normalize_phone(phone_pc),
+                                    carte=sanitize(carte_pc),
+                                    name=sanitize(name_pc),
+                                )
+                                st.success("Account created and logged in successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                err = str(e)
+                                if "already" in err.lower() or "registered" in err.lower() or "exists" in err.lower():
+                                    st.error("This phone number is already registered. Use Log In instead.")
+                                else:
+                                    st.error(f"Registration Error: {e}")
+
+                else:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            border:1.5px solid #f59e0b;
+                            border-radius:9px;
+                            padding:9px 11px;
+                            margin:6px 0 7px 0;
+                            background:rgba(245,158,11,0.08);
+                        ">
+                            <div style="font-weight:800; font-size:0.88rem;">
+                                {TERMS_TEXTS[st.session_state.lang]['badge']}
+                            </div>
+                            <div style="font-size:0.76rem; line-height:1.35; margin-top:3px;">
+                                {TERMS_TEXTS[st.session_state.lang]['short']}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    login_terms_pc = st.checkbox(
+                        TERMS_TEXTS[st.session_state.lang]["agree"],
+                        key="login_phone_terms_agreed",
+                    )
+                    if st.button("Log In with phone + carte", use_container_width=True, key="auth_phone_login_btn"):
+                        if not login_terms_pc:
+                            st.error("Please accept the Terms of Use and Privacy Policy before logging in.")
+                        elif not (phone_pc and carte_pc):
+                            st.error("Please enter phone number and Carte Fellah number.")
+                        else:
+                            try:
+                                res = login_phone_carte(phone_pc, carte_pc)
+                                apply_farmer_session(
+                                    res.user,
+                                    phone=normalize_phone(phone_pc),
+                                    carte=sanitize(carte_pc),
+                                )
+                                st.success("Logged in successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(
+                                    f"Authentication failed. Check phone + carte, or register first. ({e})"
+                                )
         else:
             st.success(f"Logged in: {st.session_state.farmer_name}")
             st.caption(f"Carte N°: {st.session_state.carte_num}")
@@ -6740,7 +7007,8 @@ on public.wilaya_logistics_constraints (wilaya);
             st.session_state.wilaya_admin_name = ""
             st.rerun()
 
-        regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
+        regional_tab_accounts, regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
+            "👤 Open farmer accounts",
             "📋 Local declarations",
             "📨 Notify farmers",
             "🔍 Investigate wilaya",
@@ -6750,6 +7018,78 @@ on public.wilaya_logistics_constraints (wilaya);
             "🦠 Disease reports",
             "🗄️ Wilaya database",
         ])
+
+        # ---------- TAB: Open farmer accounts (phone + carte) ----------
+        with regional_tab_accounts:
+            st.markdown(f"#### Open a farmer account — {regional_wilaya}")
+            st.caption(
+                "Creates a phone + Carte Fellah account for a farmer in this Wilaya. "
+                "The farmer can then log in with phone number (0…) and card number only (no password). "
+                "Email + password accounts remain available for self-registration in the sidebar."
+            )
+            if admin_supabase_client is None and supabase_client is None:
+                st.warning("Supabase connection required to open accounts.")
+            else:
+                oa_name = st.text_input("Full name / الاسم الكامل", key="wilaya_open_name")
+                oa_phone = st.text_input(
+                    "Phone number / رقم الهاتف",
+                    placeholder="0XXXXXXXXX",
+                    key="wilaya_open_phone",
+                )
+                oa_carte = st.text_input(
+                    "Carte Fellah N° / رقم بطاقة الفلاح",
+                    placeholder="DZ-2026-XXXX",
+                    key="wilaya_open_carte",
+                )
+                st.caption(f"Account will be tagged with Wilaya: **{regional_wilaya}**")
+                if st.button("👤 Open account", key="wilaya_open_account_btn", type="primary"):
+                    if not (oa_name and oa_phone and oa_carte):
+                        st.error("Name, phone and Carte Fellah number are required.")
+                    else:
+                        try:
+                            created = register_phone_carte_account(
+                                name=oa_name,
+                                phone=oa_phone,
+                                carte=oa_carte,
+                                wilaya=regional_wilaya,
+                                opened_by=st.session_state.wilaya_admin_name,
+                            )
+                            st.success(
+                                f"Account opened for **{created['full_name']}** — "
+                                f"phone `{created['phone']}` — carte `{created['carte_num']}`. "
+                                "They can log in from the sidebar with **Phone + Carte Fellah**."
+                            )
+                        except Exception as e:
+                            err = str(e)
+                            if "already" in err.lower() or "registered" in err.lower() or "exists" in err.lower():
+                                st.error("An account with this phone number already exists.")
+                            else:
+                                st.error(f"Could not open account: {e}")
+
+                st.divider()
+                st.markdown("##### Recent profiles linked to this Wilaya")
+                try:
+                    db = admin_supabase_client or supabase_client
+                    rows = (
+                        db.table("farmer_profiles")
+                        .select("user_id,full_name,phone_number,carte_num,email,wilaya,opened_by")
+                        .eq("wilaya", regional_wilaya)
+                        .limit(200)
+                        .execute()
+                        .data
+                        or []
+                    )
+                    if rows:
+                        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                    else:
+                        st.info(
+                            "No profiles with this Wilaya tag yet. "
+                            "Opened accounts appear here when the `wilaya` column exists on `farmer_profiles`."
+                        )
+                except Exception as e:
+                    st.caption(
+                        f"Could not list profiles (optional `wilaya` column may be missing): {e}"
+                    )
 
         # ---------- TAB 1: Local declarations ----------
         with regional_tab1:
