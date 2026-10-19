@@ -2900,35 +2900,111 @@ def get_wilaya_admin_passwords() -> dict:
 
 
 def get_wilaya_center(wilaya: str):
-    """Approximate map centers for pin maps; pin/polygon coordinates remain user-drawn."""
+    """Approximate map centres (Wilaya capital / main town) for all 69 labels.
+
+    Missing keys used to fall back to Algiers — that is fixed: every code 01–69
+    has its own coordinates, with a numeric-code fallback if the label text differs.
+    """
     centers = {
         "01 - Adrar": (27.8742, -0.2939),
         "02 - Chlef": (36.1654, 1.3347),
         "03 - Laghouat": (33.8000, 2.8650),
+        "04 - Oum El Bouaghi": (35.8750, 7.1140),
         "05 - Batna": (35.5550, 6.1740),
         "06 - Béjaïa": (36.7511, 5.0557),
         "07 - Biskra": (34.8480, 5.7280),
+        "08 - Béchar": (31.6167, -2.2167),
         "09 - Blida": (36.4700, 2.8300),
+        "10 - Bouira": (36.3740, 3.9020),
+        "11 - Tamanrasset": (22.7850, 5.5228),
+        "12 - Tébessa": (35.4042, 8.1242),
         "13 - Tlemcen": (34.8783, -1.3150),
+        "14 - Tiaret": (35.3710, 1.3170),
         "15 - Tizi Ouzou": (36.7117, 4.0458),
         "16 - Alger": (36.7538, 3.0588),
+        "17 - Djelfa": (34.6700, 3.2500),
+        "18 - Jijel": (36.8210, 5.7660),
         "19 - Sétif": (36.1911, 5.4137),
+        "20 - Saïda": (34.8304, 0.1517),
+        "21 - Skikda": (36.8760, 6.9090),
+        "22 - Sidi Bel Abbès": (35.1890, -0.6310),
         "23 - Annaba": (36.9000, 7.7670),
+        "24 - Guelma": (36.4620, 7.4260),
         "25 - Constantine": (36.3650, 6.6147),
+        "26 - Médéa": (36.2640, 2.7540),
         "27 - Mostaganem": (35.9311, 0.0892),
+        "28 - M'Sila": (35.7060, 4.5420),
+        "29 - Mascara": (35.3970, 0.1400),
         "30 - Ouargla": (31.9525, 5.3333),
         "31 - Oran": (35.6971, -0.6308),
+        "32 - El Bayadh": (33.6830, 1.0200),
+        "33 - Illizi": (26.4830, 8.4670),
+        "34 - Bordj Bou Arréridj": (36.0730, 4.7610),
         "35 - Boumerdès": (36.7667, 3.4772),
+        "36 - El Tarf": (36.7670, 8.3140),
+        "37 - Tindouf": (27.6710, -8.1470),
+        "38 - Tissemsilt": (35.6070, 1.8110),
         "39 - El Oued": (33.3683, 6.8674),
+        "40 - Khenchela": (35.4360, 7.1430),
+        "41 - Souk Ahras": (36.2860, 7.9510),
         "42 - Tipaza": (36.5897, 2.4475),
         "43 - Mila": (36.4500, 6.2667),
         "44 - Aïn Defla": (36.2641, 1.9679),
+        "45 - Naâma": (33.2670, -0.3170),
+        "46 - Aïn Témouchent": (35.2970, -1.1400),
         "47 - Ghardaïa": (32.4900, 3.6700),
         "48 - Relizane": (35.7370, 0.5560),
+        "49 - Timimoun": (29.2640, 0.2310),
+        "50 - Bordj Badji Mokhtar": (21.3290, 0.9550),
+        "51 - Ouled Djellal": (34.4330, 5.0670),
+        "52 - Béni Abbès": (30.1310, -2.1660),
+        "53 - In Salah": (27.1930, 2.4820),
+        "54 - In Guezzam": (19.5690, 5.7720),
         "55 - Touggourt": (33.1000, 6.0667),
+        "56 - Djanet": (24.5550, 9.4840),
+        "57 - El Meghaier": (33.9510, 5.9220),
+        "58 - El Meniaâ": (30.5790, 2.8840),
+        "59 - Aflou": (34.1120, 2.1020),
+        "60 - Barika": (35.3890, 5.3660),
+        "61 - El Kantara": (35.2250, 5.7070),
+        "62 - Bir El Ater": (34.7450, 8.0600),
+        "63 - El Aricha": (34.6800, -1.2600),
+        "64 - Ksar Chellala": (35.2120, 2.3190),
+        "65 - Aïn Oussara": (35.4510, 2.9060),
+        "66 - Messaad": (34.1540, 3.5030),
+        "67 - Ksar El Boukhari": (35.8880, 2.7500),
         "68 - Bou Saada": (35.2080, 4.1740),
+        "69 - El Abiodh Sidi Cheikh": (32.8930, 0.5480),
     }
-    return centers.get(str(wilaya).strip(), (36.7538, 3.0588))
+    key = str(wilaya or "").strip()
+    if key in centers:
+        return centers[key]
+    # Match by leading Wilaya code (e.g. "12 - Tebessa" still finds 12)
+    m = re.match(r"^(\d{1,2})", key)
+    if m:
+        code = m.group(1).zfill(2)
+        for k, v in centers.items():
+            if k.startswith(code + " ") or k.startswith(code + " -"):
+                return v
+    # Last resort: fuzzy name without accents
+    bare = re.sub(r"^\d+\s*-\s*", "", key).lower()
+    bare = (
+        bare.replace("é", "e").replace("è", "e").replace("ê", "e")
+        .replace("à", "a").replace("â", "a").replace("ï", "i")
+        .replace("ô", "o").replace("û", "u").replace("ç", "c")
+    )
+    bare = re.sub(r"[^a-z]", "", bare)
+    for k, v in centers.items():
+        kb = re.sub(r"^\d+\s*-\s*", "", k).lower()
+        kb = (
+            kb.replace("é", "e").replace("è", "e").replace("ê", "e")
+            .replace("à", "a").replace("â", "a").replace("ï", "i")
+            .replace("ô", "o").replace("û", "u").replace("ç", "c")
+        )
+        kb = re.sub(r"[^a-z]", "", kb)
+        if bare and (bare == kb or bare in kb or kb in bare):
+            return v
+    return (36.7538, 3.0588)
 
 
 def add_satellite_basemap(m):
@@ -7161,6 +7237,35 @@ on public.wilaya_logistics_constraints (wilaya);
             st.session_state.wilaya_admin_name = ""
             st.rerun()
 
+        # Count parcels still waiting for a verified boundary drawing
+        pending_boundary_count = 0
+        try:
+            if admin_supabase_client is not None:
+                _parcels_for_badge = (
+                    admin_supabase_client.table("farm_parcels")
+                    .select("id,boundary_status,boundary_geojson,pin_lat,pin_lon")
+                    .eq("wilaya", regional_wilaya)
+                    .limit(2000)
+                    .execute()
+                    .data
+                    or []
+                )
+                for _p in _parcels_for_badge:
+                    status = str(_p.get("boundary_status") or "").strip().lower()
+                    has_geom = bool(_p.get("boundary_geojson"))
+                    if has_geom and status in {"verified", "verified_boundary", "ok"}:
+                        continue
+                    # Waiting: pin exists (or any parcel) but boundary not verified yet
+                    pending_boundary_count += 1
+        except Exception:
+            pending_boundary_count = 0
+
+        parcel_tab_label = (
+            f"🗺️ Parcel boundary 🔴 {pending_boundary_count}"
+            if pending_boundary_count > 0
+            else "🗺️ Parcel boundary"
+        )
+
         regional_tab_accounts, regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
             "👤 Open farmer accounts",
             "📋 Local declarations",
@@ -7168,7 +7273,7 @@ on public.wilaya_logistics_constraints (wilaya);
             "🔍 Investigate wilaya",
             "🛰️ Farm satellite monitor",
             "⚠️ Regional warnings",
-            "🗺️ Parcel boundary",
+            parcel_tab_label,
             "🦠 Disease reports",
             "🗄️ Wilaya database",
         ])
@@ -7618,6 +7723,13 @@ on public.wilaya_logistics_constraints (wilaya);
         # ---------- TAB 6: Parcel boundary verification ----------
         with regional_tab6:
             st.markdown("#### Verify a farm boundary")
+            if pending_boundary_count > 0:
+                st.warning(
+                    f"🔔 **{pending_boundary_count} farm(s)** in {regional_wilaya} are still waiting for a boundary "
+                    f"to be drawn and saved. Select each parcel below, draw the polygon, then **Save & verify**."
+                )
+            else:
+                st.success("✅ No farms are waiting for a boundary drawing in this Wilaya right now.")
             st.caption(
                 "1) Select a parcel · 2) Click the polygon tool (pentagon icon) · 3) Click points around the field · "
                 "4) Click the first point again to close · 5) Save. "
