@@ -2388,6 +2388,8 @@ if "farmer_name" not in st.session_state:
     st.session_state.farmer_name = "فلاح مسجل"
 if "carte_num" not in st.session_state:
     st.session_state.carte_num = "DZ-2026-0000"
+if "farmer_phone" not in st.session_state:
+    st.session_state.farmer_phone = ""
 if "admin_authenticated" not in st.session_state:
     st.session_state.admin_authenticated = False
 if "wilaya_admin_authenticated" not in st.session_state:
@@ -2688,6 +2690,27 @@ def normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", str(phone or ""))
 
 
+def phone_from_profile_or_email(phone=None, email=None, metadata=None):
+    """Resolve a display phone from stored phone, synthetic auth email, or user metadata."""
+    meta = metadata or {}
+    candidates = [
+        phone,
+        meta.get("phone_number") if isinstance(meta, dict) else None,
+        meta.get("phone") if isinstance(meta, dict) else None,
+    ]
+    for c in candidates:
+        digits = normalize_phone(c)
+        if digits:
+            return digits
+    em = str(email or "").strip()
+    # Phone+carte accounts use {digits}@phone.felah.auth
+    if em.lower().endswith("@phone.felah.auth"):
+        digits = normalize_phone(em.split("@", 1)[0])
+        if digits:
+            return digits
+    return ""
+
+
 def phone_auth_synthetic_email(phone: str) -> str:
     """Stable synthetic email for phone+carte accounts (not a real inbox)."""
     digits = normalize_phone(phone)
@@ -2719,7 +2742,8 @@ def apply_farmer_session(user, email_fallback: str = "", phone: str = "", carte:
     st.session_state.logged_in = True
     st.session_state.user_id = str(user.id) if user else ""
     meta = (user.user_metadata if user else {}) or {}
-    st.session_state.farmer_email = (getattr(user, "email", None) or email_fallback or "").strip()
+    user_email = (getattr(user, "email", None) or email_fallback or "").strip()
+    st.session_state.farmer_email = user_email
     st.session_state.farmer_name = (
         name
         or meta.get("full_name")
@@ -2727,21 +2751,33 @@ def apply_farmer_session(user, email_fallback: str = "", phone: str = "", carte:
         or "فلاح مسجل"
     )
     st.session_state.carte_num = carte or meta.get("carte_num") or "DZ-2026-0000"
-    phone_val = phone or meta.get("phone_number") or ""
-    if st.session_state.user_id and supabase_client:
+    phone_val = phone_from_profile_or_email(
+        phone=phone,
+        email=user_email,
+        metadata=meta,
+    )
+    st.session_state.farmer_phone = phone_val
+    db = admin_supabase_client or supabase_client
+    if st.session_state.user_id and db:
+        payload = {
+            "user_id": st.session_state.user_id,
+            "email": st.session_state.farmer_email,
+            "full_name": st.session_state.farmer_name,
+            "carte_num": st.session_state.carte_num,
+            "phone_number": phone_val,
+        }
         try:
-            payload = {
-                "user_id": st.session_state.user_id,
-                "email": st.session_state.farmer_email,
-                "full_name": st.session_state.farmer_name,
-                "carte_num": st.session_state.carte_num,
-                "phone_number": sanitize(phone_val),
-            }
-            supabase_client.table("farmer_profiles").upsert(
-                payload, on_conflict="user_id"
-            ).execute()
+            db.table("farmer_profiles").upsert(payload, on_conflict="user_id").execute()
         except Exception:
-            pass
+            try:
+                db.table("farmer_profiles").insert(payload).execute()
+            except Exception:
+                # Column phone_number may be missing — still try without it
+                try:
+                    slim = {k: v for k, v in payload.items() if k != "phone_number"}
+                    db.table("farmer_profiles").upsert(slim, on_conflict="user_id").execute()
+                except Exception:
+                    pass
 
 
 def register_phone_carte_account(name: str, phone: str, carte: str, wilaya: str = "", opened_by: str = ""):
@@ -2920,15 +2956,14 @@ def add_satellite_basemap(m):
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _load_algeria_adm1_geojson():
-    """Optional ADM1 borders for a light Wilaya outline (not an official legal map)."""
+    """Real ADM1 Wilaya borders (GADM). No circle is drawn — only polygon borders."""
     urls = [
-        "https://raw.githubusercontent.com/wmgeolab/geoBoundaries/main/releaseData/gbOpen/DZA/ADM1/geoBoundaries-DZA-ADM1.geojson",
-        "https://cdn.jsdelivr.net/gh/wmgeolab/geoBoundaries@main/releaseData/gbOpen/DZA/ADM1/geoBoundaries-DZA-ADM1.geojson",
+        "https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_DZA_1.json",
     ]
     for url in urls:
         try:
-            r = requests.get(url, timeout=12)
-            if r.ok:
+            r = requests.get(url, timeout=25)
+            if r.ok and r.content and r.content[:1] in (b"{", b"["):
                 return r.json()
         except Exception:
             continue
@@ -2936,57 +2971,82 @@ def _load_algeria_adm1_geojson():
 
 
 def _wilaya_name_key(name: str) -> str:
+    """Normalize for matching app labels to GADM NAME_1 (often without spaces)."""
     t = str(name or "").strip().lower()
     t = re.sub(r"^\d+\s*-\s*", "", t)
-    t = t.replace("é", "e").replace("è", "e").replace("ê", "e").replace("à", "a")
-    t = t.replace("ï", "i").replace("â", "a").replace("ô", "o").replace("û", "u")
-    t = re.sub(r"[^a-z0-9\s]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
+    for a, b in (
+        ("é", "e"), ("è", "e"), ("ê", "e"), ("à", "a"), ("â", "a"),
+        ("ï", "i"), ("î", "i"), ("ô", "o"), ("û", "u"), ("ü", "u"),
+        ("ç", "c"), ("œ", "oe"), ("'", ""), ("'", ""),
+    ):
+        t = t.replace(a, b)
+    # letters/digits only so "Aïn Defla" and "AïnDefla" both become "aindefla"
+    t = re.sub(r"[^a-z0-9]", "", t)
     return t
 
 
 def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
-    """Light border highlight for the selected Wilaya (no yellow focus circle)."""
+    """Highlight the actual Wilaya border polygon. Never draws a circle."""
     short = re.sub(r"^\d+\s*-\s*", "", str(wilaya).strip())
     key = _wilaya_name_key(short)
+    # Manual aliases: app label key -> possible GADM keys
+    aliases = {
+        "alger": ["alger", "algiers"],
+        "aindefla": ["aindefla"],
+        "aintemouchent": ["aintemouchent"],
+        "bejaia": ["bejaia"],
+        "bechar": ["bechar"],
+        "bordjbouarreridj": ["bordjbouarreridj"],
+        "boumerdes": ["boumerdes"],
+        "elbayadh": ["elbayadh"],
+        "eloed": ["eloed", "eloued"],
+        "eloued": ["eloued", "eloed"],
+        "eltarf": ["eltarf"],
+        "ghardaia": ["ghardaia"],
+        "medea": ["medea"],
+        "msila": ["msila"],
+        "oum el bouaghi": ["oumelbouaghi"],
+        "oumelbouaghi": ["oumelbouaghi"],
+        "setif": ["setif"],
+        "sidibelabbes": ["sidibelabbes"],
+        "soukahras": ["soukahras"],
+        "tamanrasset": ["tamanrasset", "tamanghasset"],
+        "tamanghasset": ["tamanghasset", "tamanrasset"],
+        "tebessa": ["tebessa"],
+        "tiziouzou": ["tiziouzou"],
+        "bousaada": ["bousaada", "bousada"],
+        # newer wilayas may not exist in GADM 48-province set
+    }
+    want = {key}
+    for k, vals in aliases.items():
+        if key == k or key in vals:
+            want.update(vals)
+            want.add(k)
+
     geo = _load_algeria_adm1_geojson()
     matched = None
     if isinstance(geo, dict) and geo.get("features"):
-        aliases = {
-            "alger": ["alger", "algiers"],
-            "bejaia": ["bejaia", "bejaya"],
-            "tizi ouzou": ["tizi ouzou", "tizi-ouzou"],
-            "ain defla": ["ain defla", "aïn defla"],
-            "boumerdes": ["boumerdes", "boumerdès", "boumerdas"],
-            "setif": ["setif", "sétif"],
-            "medea": ["medea", "médéa"],
-            "msila": ["msila", "m sila", "m'sila"],
-            "el oued": ["el oued", "oued souf"],
-            "touggourt": ["touggourt", "tougourt"],
-            "ouargla": ["ouargla", "wargla"],
-            "ghardaia": ["ghardaia", "ghardaïa"],
-            "ain temouchent": ["ain temouchent", "aïn témouchent"],
-            "sidi bel abbes": ["sidi bel abbes", "sidi bel abbès"],
-            "bordj bou arreridj": ["bordj bou arreridj", "bordj bou arréridj"],
-            "bou saada": ["bou saada", "bousaada"],
-        }
-        want = set([key])
-        for k, vals in aliases.items():
-            if key == k or key in vals:
-                want.update(vals)
-                want.add(k)
         for feat in geo.get("features", []):
             props = feat.get("properties") or {}
-            shape_name = (
-                props.get("shapeName")
-                or props.get("name")
-                or props.get("NAME_1")
-                or props.get("wilaya")
-                or ""
-            )
-            sk = _wilaya_name_key(shape_name)
-            if sk in want or key in sk or sk in key:
-                matched = feat
+            candidates = [
+                props.get("NAME_1"),
+                props.get("VARNAME_1"),
+                props.get("shapeName"),
+                props.get("name"),
+                props.get("wilaya"),
+            ]
+            for c in candidates:
+                if not c:
+                    continue
+                # VARNAME may be comma-separated
+                for part in str(c).split("|")[0].split(","):
+                    sk = _wilaya_name_key(part)
+                    if sk and (sk in want or key == sk or key in sk or sk in key):
+                        matched = feat
+                        break
+                if matched is not None:
+                    break
+            if matched is not None:
                 break
 
     if matched is not None:
@@ -2995,27 +3055,14 @@ def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
             name=f"Wilaya border — {short}",
             style_function=lambda _f: {
                 "color": "#38bdf8",
-                "weight": 2.5,
+                "weight": 3,
                 "fillColor": "#38bdf8",
-                "fillOpacity": 0.07,
-                "opacity": 0.9,
+                "fillOpacity": 0.08,
+                "opacity": 0.95,
             },
             tooltip=str(wilaya),
         ).add_to(m)
-    else:
-        # Fallback: soft outline only (no yellow dashed ring)
-        lat, lon = get_wilaya_center(wilaya)
-        folium.Circle(
-            location=(lat, lon),
-            radius=max(8000, int(radius_m * 0.7)),
-            color="#38bdf8",
-            weight=2,
-            fill=True,
-            fill_color="#38bdf8",
-            fill_opacity=0.05,
-            opacity=0.7,
-            tooltip=f"{wilaya}",
-        ).add_to(m)
+    # No circle fallback — only real borders (or nothing if border data missing)
 
     folium.Marker(
         location=get_wilaya_center(wilaya),
@@ -4770,6 +4817,10 @@ if st.session_state.active_tab == "home":
                                 "user_id": st.session_state.user_id,
                                 "farmer_name": st.session_state.farmer_name,
                                 "carte_num": st.session_state.carte_num,
+                                "phone_number": st.session_state.get("farmer_phone")
+                                    or phone_from_profile_or_email(
+                                        email=st.session_state.get("farmer_email"),
+                                    ),
                                 "parcel_name": sanitize(parcel_name) or f"{selected_c} parcel",
                                 "wilaya": selected_w,
                                 "crop": selected_c,
@@ -4780,7 +4831,12 @@ if st.session_state.active_tab == "home":
                                 "pin_lon": float(pin_lon) if pin_lon is not None else None,
                                 "boundary_status": "pin_received" if pin_lat is not None and pin_lon is not None else "pin_pending",
                             }
-                            parcel_res = supabase_client.table("farm_parcels").insert(parcel_payload).execute()
+                            try:
+                                parcel_res = supabase_client.table("farm_parcels").insert(parcel_payload).execute()
+                            except Exception:
+                                # phone_number column may not exist yet on farm_parcels
+                                parcel_payload.pop("phone_number", None)
+                                parcel_res = supabase_client.table("farm_parcels").insert(parcel_payload).execute()
                             if parcel_res.data:
                                 parcel_id = parcel_res.data[0].get("id")
                         except Exception as parcel_error:
@@ -7343,7 +7399,8 @@ on public.wilaya_logistics_constraints (wilaya);
             st.markdown(f"#### Satellite indicators per farm — {regional_wilaya}")
             st.caption(
                 "Uses Copernicus NDVI/NDWI when credentials are configured. "
-                "Farms with a pin are checked; abnormal vegetation drop is flagged."
+                "Farms with a pin are checked; abnormal vegetation drop is flagged. "
+                "Phone / email are loaded from farmer profiles (by user or Carte Fellah)."
             )
             if admin_supabase_client is None:
                 st.warning("Service-role connection required.")
@@ -7356,6 +7413,127 @@ on public.wilaya_logistics_constraints (wilaya);
                     if not parcels:
                         st.info("No farm parcels with pins in this Wilaya yet.")
                     else:
+                        # Build contact map: by user_id and by carte_num (+ Auth metadata fallback)
+                        profile_by_uid = {}
+                        profile_by_carte = {}
+                        try:
+                            uids = list({str(p.get("user_id")) for p in parcels if p.get("user_id")})
+                            cartes = list({str(p.get("carte_num")).strip() for p in parcels if p.get("carte_num")})
+                            prof_rows = []
+                            try:
+                                # Load profiles broadly then filter (avoids .in_ / column errors)
+                                all_prof = (
+                                    admin_supabase_client.table("farmer_profiles")
+                                    .select("*")
+                                    .limit(3000)
+                                    .execute()
+                                    .data
+                                    or []
+                                )
+                                uid_set = set(uids)
+                                carte_set = {c.upper() for c in cartes}
+                                for r in all_prof:
+                                    uid = str(r.get("user_id") or "")
+                                    c = str(r.get("carte_num") or "").strip().upper()
+                                    if (uid and uid in uid_set) or (c and c in carte_set):
+                                        prof_rows.append(r)
+                            except Exception:
+                                pass
+                            for r in prof_rows:
+                                if r.get("user_id"):
+                                    profile_by_uid[str(r.get("user_id"))] = r
+                                c = str(r.get("carte_num") or "").strip().upper()
+                                if c:
+                                    profile_by_carte[c] = r
+
+                            # Fallback: read phone from Supabase Auth user metadata / synthetic email
+                            for uid in uids:
+                                cur = profile_by_uid.get(uid) or {}
+                                has_phone = phone_from_profile_or_email(
+                                    phone=cur.get("phone_number"),
+                                    email=cur.get("email"),
+                                )
+                                if has_phone:
+                                    continue
+                                try:
+                                    auth_res = admin_supabase_client.auth.admin.get_user_by_id(uid)
+                                    u = getattr(auth_res, "user", None) or auth_res
+                                    meta = getattr(u, "user_metadata", None) or {}
+                                    if isinstance(u, dict):
+                                        meta = u.get("user_metadata") or {}
+                                        u_email = u.get("email") or ""
+                                    else:
+                                        u_email = getattr(u, "email", "") or ""
+                                    ph = phone_from_profile_or_email(
+                                        phone=(meta or {}).get("phone_number"),
+                                        email=u_email,
+                                        metadata=meta,
+                                    )
+                                    if ph:
+                                        merged = {
+                                            **cur,
+                                            "user_id": uid,
+                                            "phone_number": ph,
+                                            "email": u_email or cur.get("email"),
+                                            "full_name": (meta or {}).get("full_name") or cur.get("full_name"),
+                                            "carte_num": (meta or {}).get("carte_num") or cur.get("carte_num"),
+                                        }
+                                        profile_by_uid[uid] = merged
+                                        c = str(merged.get("carte_num") or "").strip().upper()
+                                        if c:
+                                            profile_by_carte[c] = merged
+                                except Exception:
+                                    pass
+                        except Exception:
+                            profile_by_uid, profile_by_carte = {}, {}
+
+                        def _parcel_contact(p):
+                            prof = profile_by_uid.get(str(p.get("user_id") or ""), {}) or {}
+                            carte_key = str(p.get("carte_num") or "").strip().upper()
+                            if not prof and carte_key:
+                                prof = profile_by_carte.get(carte_key, {}) or {}
+                            # Prefer profile match by carte even when user_id profile exists but has empty phone
+                            if carte_key and profile_by_carte.get(carte_key):
+                                alt = profile_by_carte[carte_key]
+                                if not (prof.get("phone_number") or "").strip() and (alt.get("phone_number") or "").strip():
+                                    prof = {**prof, **{k: alt.get(k) for k in ("phone_number", "email", "full_name", "carte_num") if alt.get(k)}}
+                            carte = p.get("carte_num") or prof.get("carte_num") or "—"
+                            email = str(prof.get("email") or p.get("email") or "").strip()
+                            phone = phone_from_profile_or_email(
+                                phone=prof.get("phone_number") or p.get("phone_number"),
+                                email=email,
+                            )
+                            display_email = email
+                            if display_email.lower().endswith("@phone.felah.auth"):
+                                display_email = ""
+                            contact = phone or display_email or "—"
+                            return {
+                                "Farm": f"#{p.get('id')} {p.get('parcel_name') or p.get('crop') or 'Farm'}",
+                                "Farmer": p.get("farmer_name") or prof.get("full_name") or "—",
+                                "Carte Fellah": carte,
+                                "Phone / Email": contact,
+                                "Phone": phone or "—",
+                                "Email": display_email or "—",
+                            }
+
+                        # Always show farmer contacts (even before running satellite check)
+                        contact_rows = [_parcel_contact(p) for p in parcels]
+                        st.markdown("##### Farmers on these parcels")
+                        st.dataframe(
+                            pd.DataFrame([
+                                {
+                                    "Farm": r["Farm"],
+                                    "Farmer": r["Farmer"],
+                                    "Carte Fellah": r["Carte Fellah"],
+                                    "Phone": r["Phone"],
+                                    "Email": r["Email"],
+                                }
+                                for r in contact_rows
+                            ]),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
                         n_parcels = len(parcels)
                         if n_parcels <= 1:
                             max_check = n_parcels
@@ -7371,39 +7549,15 @@ on public.wilaya_logistics_constraints (wilaya);
                         if st.button("🛰️ Check satellite indicators", key="wilaya_sat_check", type="primary"):
                             alerts = []
                             rows_out = []
-                            # Enrich with phone/email from farmer_profiles when available
-                            profile_by_uid = {}
-                            try:
-                                uids = list({str(p.get("user_id")) for p in parcels if p.get("user_id")})
-                                if uids:
-                                    prof_rows = (
-                                        admin_supabase_client.table("farmer_profiles")
-                                        .select("user_id,phone_number,email,carte_num,full_name")
-                                        .in_("user_id", uids)
-                                        .execute()
-                                        .data
-                                        or []
-                                    )
-                                    profile_by_uid = {str(r.get("user_id")): r for r in prof_rows}
-                            except Exception:
-                                profile_by_uid = {}
-
                             for p in parcels[:max_check]:
                                 plat, plon = p.get("pin_lat"), p.get("pin_lon")
-                                label = f"#{p.get('id')} {p.get('parcel_name') or p.get('crop') or 'Farm'}"
-                                prof = profile_by_uid.get(str(p.get("user_id") or ""), {}) or {}
-                                carte = p.get("carte_num") or prof.get("carte_num") or "—"
-                                phone = prof.get("phone_number") or p.get("phone_number") or ""
-                                email = prof.get("email") or p.get("email") or ""
-                                # Hide synthetic phone-auth emails in the officer view
-                                if isinstance(email, str) and email.endswith("@phone.felah.auth"):
-                                    email = ""
-                                contact = phone or email or "—"
+                                base_cols = _parcel_contact(p)
+                                label = base_cols["Farm"]
                                 base_cols = {
-                                    "Farm": label,
-                                    "Farmer": p.get("farmer_name") or prof.get("full_name") or "—",
-                                    "Carte Fellah": carte,
-                                    "Phone / Email": contact,
+                                    "Farm": base_cols["Farm"],
+                                    "Farmer": base_cols["Farmer"],
+                                    "Carte Fellah": base_cols["Carte Fellah"],
+                                    "Phone / Email": base_cols["Phone / Email"],
                                 }
                                 if plat is None or plon is None:
                                     rows_out.append({**base_cols, "Status": "No pin", "NDVI": "—", "NDWI": "—"})
