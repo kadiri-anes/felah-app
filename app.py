@@ -2882,6 +2882,224 @@ def login_phone_carte(phone: str, carte: str):
     return res
 
 
+# ---------------------------------------------------------
+# CROP GROWTH STAGE / LIVE CYCLE ENGINE
+# ---------------------------------------------------------
+# Planning phenology only: days-after-planting windows, expected NDVI bands,
+# and yield fractions for live production estimates. Official MADR calendars
+# can replace these later without changing the dashboard logic.
+
+CROP_CYCLE_DAYS = {
+    # vegetables (typical open-field planning length)
+    "potato": 110, "potatoes": 110, "بطاطا": 110,
+    "tomato": 120, "tomatoes": 120, "طماطم": 120,
+    "onion": 130, "onions": 130, "بصل": 130,
+    "garlic": 150, "ثوم": 150,
+    "carrot": 100, "carrots": 100, "جزر": 100,
+    "pepper": 110, "peppers": 110, "فلفل": 110,
+    "zucchini": 70, "كوسة": 70,
+    "cucumber": 70, "cucumbers": 70, "خيار": 70,
+    "lettuce": 60, "خس": 60,
+    "eggplant": 110, "باذنجان": 110,
+    "melon": 90, "melons": 90, "شمام": 90,
+    "watermelon": 90, "watermelons": 90, "بطيخ": 90,
+    "cabbage": 100, "ملفوف": 100,
+    "cauliflower": 100, "قرنبيط": 100,
+    "pea": 90, "peas": 90, "جلبانة": 90,
+    "bean": 80, "beans": 80, "فاصوليا": 80,
+    "artichoke": 180, "artichokes": 180, "خرشوف": 180,
+    # fruits / trees — long cycle; stage is coarser
+    "olive": 365, "olives": 365, "زيتون": 365,
+    "date": 365, "dates": 365, "تمور": 365,
+    "citrus": 365, "موالح": 365,
+    "grape": 240, "grapes": 240, "عنب": 240,
+    "apple": 240, "apples": 240, "تفاح": 240,
+    "apricot": 200, "apricots": 200, "مشمش": 200,
+    "peach": 200, "peaches": 200, "خوخ": 200,
+    "almond": 240, "almonds": 240, "لوز": 240,
+}
+
+# stage_key, start_frac, end_frac of cycle, yield_factor, ndvi_min_ok, ndvi_max_ok
+_STAGE_TEMPLATE_ANNUAL = [
+    ("sowing_emergence", 0.00, 0.15, 0.05, 0.05, 0.35),
+    ("vegetative",       0.15, 0.45, 0.35, 0.30, 0.65),
+    ("reproductive",     0.45, 0.70, 0.70, 0.45, 0.80),
+    ("maturity",         0.70, 0.95, 0.95, 0.35, 0.70),
+    ("harvest_window",   0.95, 1.15, 1.00, 0.15, 0.55),
+]
+
+_STAGE_TEMPLATE_TREE = [
+    ("dormant_early", 0.00, 0.20, 0.10, 0.15, 0.45),
+    ("flowering",     0.20, 0.35, 0.30, 0.25, 0.55),
+    ("fruit_set",     0.35, 0.60, 0.55, 0.35, 0.70),
+    ("fruit_fill",    0.60, 0.85, 0.85, 0.40, 0.75),
+    ("maturity",      0.85, 1.10, 1.00, 0.25, 0.60),
+]
+
+STAGE_LABELS = {
+    "sowing_emergence": "Sowing / emergence",
+    "vegetative": "Vegetative growth",
+    "reproductive": "Flowering / filling",
+    "maturity": "Maturity",
+    "harvest_window": "Harvest window",
+    "dormant_early": "Early / dormant",
+    "flowering": "Flowering",
+    "fruit_set": "Fruit set",
+    "fruit_fill": "Fruit fill",
+    "harvested": "Harvested",
+    "overdue_confirm": "Overdue — confirm harvest",
+    "unknown": "Unknown stage",
+}
+
+
+def _crop_token(crop_name: str) -> str:
+    t = str(crop_name or "").lower()
+    for key in CROP_CYCLE_DAYS:
+        if key in t:
+            return key
+    return ""
+
+
+def crop_is_tree(crop_name: str) -> bool:
+    return any(k in str(crop_name or "").lower() for k in [
+        "olive", "date", "citrus", "grape", "apple", "apricot", "peach", "nectarine",
+        "almond", "fig", "plum", "pear", "cherry", "pomegranate", "quince",
+        "زيتون", "تمور", "موالح", "عنب", "تفاح", "مشمش", "خوخ", "لوز", "تين",
+    ])
+
+
+def crop_cycle_length_days(crop_name: str) -> int:
+    tok = _crop_token(crop_name)
+    if tok and tok in CROP_CYCLE_DAYS:
+        return int(CROP_CYCLE_DAYS[tok])
+    return 365 if crop_is_tree(crop_name) else 100
+
+
+def estimate_crop_stage(crop_name: str, planting_date, status: str = None, as_of=None):
+    """Return stage dict from planting date + optional explicit status."""
+    as_of = as_of or date.today()
+    if isinstance(as_of, str):
+        as_of = pd.to_datetime(as_of, errors="coerce")
+        as_of = as_of.date() if not pd.isna(as_of) else date.today()
+
+    st_status = str(status or "").strip().lower()
+    if st_status in {"harvested", "reaped", "محصود", "done"}:
+        return {
+            "stage_key": "harvested",
+            "stage_label": STAGE_LABELS["harvested"],
+            "days_after_planting": None,
+            "yield_factor": 0.0,
+            "ndvi_min": None,
+            "ndvi_max": None,
+            "is_active": False,
+            "alert_ndvi": False,
+        }
+
+    plant = pd.to_datetime(planting_date, errors="coerce")
+    if pd.isna(plant):
+        return {
+            "stage_key": "unknown",
+            "stage_label": STAGE_LABELS["unknown"],
+            "days_after_planting": None,
+            "yield_factor": 0.5,
+            "ndvi_min": 0.15,
+            "ndvi_max": 0.85,
+            "is_active": True,
+            "alert_ndvi": True,
+        }
+    plant_d = plant.date() if hasattr(plant, "date") else plant
+    dap = (as_of - plant_d).days
+    cycle = crop_cycle_length_days(crop_name)
+    templates = _STAGE_TEMPLATE_TREE if crop_is_tree(crop_name) else _STAGE_TEMPLATE_ANNUAL
+
+    if dap < 0:
+        stage_key, yf, nmin, nmax = "sowing_emergence", 0.0, 0.05, 0.30
+    elif dap > int(cycle * 1.15):
+        stage_key, yf, nmin, nmax = "overdue_confirm", 1.0, 0.10, 0.50
+    else:
+        frac = dap / float(cycle) if cycle else 0
+        stage_key, yf, nmin, nmax = "vegetative", 0.35, 0.30, 0.65
+        for sk, a, b, y, lo, hi in templates:
+            if a <= frac < b:
+                stage_key, yf, nmin, nmax = sk, y, lo, hi
+                break
+
+    # NDVI alerts only when canopy should be substantial
+    alert_ndvi = stage_key in {
+        "vegetative", "reproductive", "maturity", "fruit_set", "fruit_fill", "flowering"
+    }
+
+    return {
+        "stage_key": stage_key,
+        "stage_label": STAGE_LABELS.get(stage_key, stage_key),
+        "days_after_planting": dap,
+        "yield_factor": float(yf),
+        "ndvi_min": nmin,
+        "ndvi_max": nmax,
+        "is_active": stage_key != "harvested",
+        "alert_ndvi": alert_ndvi,
+        "cycle_days": cycle,
+    }
+
+
+def annotate_live_declarations(df):
+    """Add stage / active flags to a declarations dataframe."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    work = df.copy()
+    if "area" in work.columns:
+        work["area"] = pd.to_numeric(work["area"], errors="coerce").fillna(0.0)
+    plant_col = "start_date" if "start_date" in work.columns else (
+        "planting_date" if "planting_date" in work.columns else None
+    )
+    stages = []
+    for _, row in work.iterrows():
+        plant = row.get(plant_col) if plant_col else None
+        status = row.get("status") or row.get("cycle_status")
+        info = estimate_crop_stage(row.get("crop"), plant, status=status)
+        stages.append(info)
+    work["growth_stage"] = [s["stage_key"] for s in stages]
+    work["growth_stage_label"] = [s["stage_label"] for s in stages]
+    work["days_after_planting"] = [s["days_after_planting"] for s in stages]
+    work["yield_factor"] = [s["yield_factor"] for s in stages]
+    work["is_live_active"] = [
+        (s["stage_key"] not in {"harvested"} and str(row.get("status") or "").lower() not in {"harvested", "reaped", "محصود"})
+        for s, (_, row) in zip(stages, work.iterrows())
+    ]
+    # overdue stays on live board but flagged
+    return work
+
+
+def filter_live_active(df):
+    """Keep only non-harvested cycles for the live dashboard."""
+    if df is None or df.empty:
+        return df if df is not None else pd.DataFrame()
+    work = annotate_live_declarations(df)
+    return work[work["is_live_active"]].copy()
+
+
+def ndvi_stage_assessment(ndvi, stage_info):
+    """Stage-aware NDVI interpretation for satellite monitoring."""
+    if ndvi is None:
+        return "No NDVI", False
+    try:
+        v = float(ndvi)
+    except (TypeError, ValueError):
+        return "No NDVI", False
+    if not stage_info or not stage_info.get("alert_ndvi"):
+        sk = (stage_info or {}).get("stage_key")
+        if sk in {"harvested", "harvest_window", "overdue_confirm", "sowing_emergence", "dormant_early"}:
+            return f"OK for stage ({(stage_info or {}).get('stage_label', sk)})", False
+        return "OK (stage not alert-sensitive)", False
+    lo = stage_info.get("ndvi_min")
+    hi = stage_info.get("ndvi_max")
+    if lo is not None and v < float(lo) - 0.05:
+        return f"⚠️ Low for stage (expected ≥ {lo:.2f})", True
+    if hi is not None and v > float(hi) + 0.15:
+        return f"High vs stage band (>{hi:.2f})", False
+    return "OK for growth stage", False
+
+
 def get_admin_password() -> str:
     # Read the admin code from Streamlit Secrets without a hard-coded fallback.
     # If the secret is missing, return an empty value so the app does not crash.
@@ -4903,6 +5121,7 @@ if st.session_state.active_tab == "home":
                                 "category": cat_choice,
                                 "area_ha": float(area_ha),
                                 "planting_date": str(start_date),
+                                "status": "active",
                                 "pin_lat": float(pin_lat) if pin_lat is not None else None,
                                 "pin_lon": float(pin_lon) if pin_lon is not None else None,
                                 "boundary_status": "pin_received" if pin_lat is not None and pin_lon is not None else "pin_pending",
@@ -4931,10 +5150,15 @@ if st.session_state.active_tab == "home":
                             "crop": selected_c,
                             "area": area_ha,
                             "start_date": str(start_date),
+                            "status": "active",
                         }
                         if parcel_id is not None:
                             declaration_payload["parcel_id"] = parcel_id
-                        supabase_client.table("declarations").insert(declaration_payload).execute()
+                        try:
+                            supabase_client.table("declarations").insert(declaration_payload).execute()
+                        except Exception:
+                            declaration_payload.pop("status", None)
+                            supabase_client.table("declarations").insert(declaration_payload).execute()
 
                         st.success("Farm parcel and declaration registered successfully!")
                         qr_payload = f"FELAH-PERMIT|{st.session_state.farmer_name}|{st.session_state.carte_num}|{selected_w}|{selected_c}|{area_ha}HA|START:{start_date}"
@@ -6244,30 +6468,45 @@ on public.admin_ai_alerts(status, created_at desc);
         with adm_tab7:
             st.markdown("#### 📊 Agricultural Intelligence & Database Management")
             st.caption(
-                "Live planning dashboard based on farmer crop declarations. "
-                "The first version measures declared cultivated area against the national planning targets."
+                "Live dashboard uses **active crop cycles only** (not harvested). "
+                "Growth stage is estimated from planting/start date. "
+                "Coverage = active declared area ÷ national planning target. "
+                "Production estimates apply a stage-based yield factor (planning estimate)."
             )
 
             # -------------------------------------------------
             # LIVE AGRICULTURAL BOARD
             # -------------------------------------------------
             try:
-                res_live = (
-                    admin_supabase_client.table("declarations")
-                    .select("crop, category, area, wilaya, start_date")
-                    .execute()
-                )
+                try:
+                    res_live = (
+                        admin_supabase_client.table("declarations")
+                        .select("id, crop, category, area, wilaya, start_date, status, farmer_name, carte_num")
+                        .execute()
+                    )
+                except Exception:
+                    res_live = (
+                        admin_supabase_client.table("declarations")
+                        .select("crop, category, area, wilaya, start_date")
+                        .execute()
+                    )
                 live_records = res_live.data if res_live.data else []
-                df_live = pd.DataFrame(live_records)
+                df_live_all = pd.DataFrame(live_records)
 
-                if not df_live.empty:
-                    df_live["area"] = pd.to_numeric(
-                        df_live["area"], errors="coerce"
+                if not df_live_all.empty:
+                    df_live_all["area"] = pd.to_numeric(
+                        df_live_all["area"], errors="coerce"
                     ).fillna(0.0)
+                    df_live_all = annotate_live_declarations(df_live_all)
+                    # Live pocket = not harvested (includes overdue-confirm for action)
+                    df_live = df_live_all[df_live_all["growth_stage"] != "harvested"].copy()
+                    df_harvested = df_live_all[df_live_all["growth_stage"] == "harvested"].copy()
                 else:
-                    df_live = pd.DataFrame(
+                    df_live_all = pd.DataFrame(
                         columns=["crop", "category", "area", "wilaya", "start_date"]
                     )
+                    df_live = df_live_all.copy()
+                    df_harvested = df_live_all.copy()
 
                 # Planning targets used by the declaration system.
                 # Fruits are shown as reference planning areas; they are not
@@ -6366,7 +6605,26 @@ on public.admin_ai_alerts(status, created_at desc);
                         hide_index=True,
                     )
 
-                    st.markdown("##### 📈 Highest Coverage Crops")
+                    st.markdown("##### 🌱 Live area by growth stage")
+                    if not df_live.empty and "growth_stage_label" in df_live.columns:
+                        stage_sum = (
+                            df_live.groupby("growth_stage_label", dropna=False)["area"]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .reset_index()
+                            .rename(columns={"area": "Active Area (Ha)", "growth_stage_label": "Stage"})
+                        )
+                        stage_sum["Active Area (Ha)"] = stage_sum["Active Area (Ha)"].map(lambda x: f"{float(x):,.1f}")
+                        st.dataframe(stage_sum, use_container_width=True, hide_index=True)
+                        overdue_n = int((df_live.get("growth_stage") == "overdue_confirm").sum()) if "growth_stage" in df_live.columns else 0
+                        if overdue_n:
+                            st.warning(f"⏰ {overdue_n} active declaration(s) are past the expected cycle — confirm harvest or update status.")
+                        harvested_ha = float(df_harvested["area"].sum()) if not df_harvested.empty else 0.0
+                        st.caption(f"Harvested (excluded from live pocket): {harvested_ha:,.1f} Ha")
+                    else:
+                        st.info("No active cycles to stage yet. Stages appear once planting/start dates exist.")
+
+                    st.markdown("##### 📈 Highest Coverage Crops (active only)")
                     top_crops = df_national.head(8).copy()
                     top_crops = top_crops.set_index("Crop")[["% of Target"]]
                     st.bar_chart(top_crops, y="% of Target")
@@ -6451,9 +6709,9 @@ on public.admin_ai_alerts(status, created_at desc);
                 with production_tab:
                     st.markdown("##### 🌾 Estimated Production & Supply Balance")
                     st.caption(
-                        "This phase converts declared area into estimated production using crop yield benchmarks. "
-                        "It is an analytical estimate, not measured farm production. Exact Wilaya surplus/deficit requires "
-                        "Wilaya-specific targets and yield benchmarks in Supabase."
+                        "Uses **active cycles only**. Estimated production = area × yield benchmark × stage yield factor "
+                        "(early stages contribute less than maturity). Harvested cycles are excluded. "
+                        "This is a planning estimate, not measured harvest."
                     )
 
                     # Optional Supabase benchmark table. The app continues to work if the table
@@ -6544,21 +6802,36 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         )
 
                         crop_declared_df = df_live[df_live["crop"] == selected_prod_crop].copy()
-                        wilaya_prod = (
-                            crop_declared_df.groupby("wilaya", dropna=False)["area"]
-                            .sum()
-                            .reset_index()
-                            .rename(columns={"area": "Declared Area (Ha)"})
-                        )
+                        if "yield_factor" not in crop_declared_df.columns:
+                            crop_declared_df = annotate_live_declarations(crop_declared_df)
 
                         def get_yield_for_wilaya(w):
                             w = "" if pd.isna(w) else str(w).strip()
                             return benchmark_map.get((selected_prod_crop, w), national_benchmarks.get(selected_prod_crop))
 
-                        wilaya_prod["Yield (t/Ha)"] = wilaya_prod["wilaya"].apply(get_yield_for_wilaya)
-                        wilaya_prod["Estimated Production (t)"] = (
-                            wilaya_prod["Declared Area (Ha)"] * wilaya_prod["Yield (t/Ha)"].fillna(0)
-                        )
+                        # Stage-aware production at declaration level, then aggregate by Wilaya
+                        if not crop_declared_df.empty:
+                            crop_declared_df = crop_declared_df.copy()
+                            crop_declared_df["_yld"] = crop_declared_df["wilaya"].apply(get_yield_for_wilaya)
+                            crop_declared_df["_yf"] = pd.to_numeric(crop_declared_df.get("yield_factor"), errors="coerce").fillna(0.5)
+                            crop_declared_df["_est_t"] = (
+                                pd.to_numeric(crop_declared_df["area"], errors="coerce").fillna(0.0)
+                                * crop_declared_df["_yld"].fillna(0.0)
+                                * crop_declared_df["_yf"]
+                            )
+                            wilaya_prod = (
+                                crop_declared_df.groupby("wilaya", dropna=False)
+                                .agg(
+                                    **{
+                                        "Declared Area (Ha)": ("area", "sum"),
+                                        "Estimated Production (t)": ("_est_t", "sum"),
+                                    }
+                                )
+                                .reset_index()
+                            )
+                            wilaya_prod["Yield (t/Ha)"] = wilaya_prod["wilaya"].apply(get_yield_for_wilaya)
+                        else:
+                            wilaya_prod = pd.DataFrame(columns=["wilaya", "Declared Area (Ha)", "Yield (t/Ha)", "Estimated Production (t)"])
                         wilaya_prod["Benchmark Source"] = wilaya_prod["wilaya"].apply(
                             lambda w: (
                                 "Wilaya benchmark (Supabase)"
@@ -6583,7 +6856,7 @@ on public.crop_yield_benchmarks (crop, wilaya);
                         if national_yield is None:
                             national_yield = get_builtin_base_yield(selected_prod_crop)
                         if national_yield:
-                            national_declared_prod = float(wilaya_prod["Declared Area (Ha)"].sum()) * national_yield
+                            national_declared_prod = float(wilaya_prod["Estimated Production (t)"].sum()) if "Estimated Production (t)" in wilaya_prod.columns else float(wilaya_prod["Declared Area (Ha)"].sum()) * national_yield
                             national_target_prod = float(all_crop_targets[selected_prod_crop]) * national_yield
                             production_coverage = (national_declared_prod / national_target_prod * 100) if national_target_prod else 0.0
 
@@ -7357,15 +7630,60 @@ on public.wilaya_logistics_constraints (wilaya);
                 st.warning("Regional records require SUPABASE_SERVICE_ROLE_KEY and SUPABASE_URL in Streamlit Secrets.")
             else:
                 try:
-                    regional_decs = (
-                        admin_supabase_client.table("declarations")
-                        .select("id,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id")
-                        .eq("wilaya", regional_wilaya)
-                        .order("id", desc=True).limit(1000).execute().data or []
-                    )
+                    try:
+                        regional_decs = (
+                            admin_supabase_client.table("declarations")
+                            .select("id,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id,status")
+                            .eq("wilaya", regional_wilaya)
+                            .order("id", desc=True).limit(1000).execute().data or []
+                        )
+                    except Exception:
+                        regional_decs = (
+                            admin_supabase_client.table("declarations")
+                            .select("id,farmer_name,carte_num,user_id,crop,category,area,wilaya,start_date,parcel_id")
+                            .eq("wilaya", regional_wilaya)
+                            .order("id", desc=True).limit(1000).execute().data or []
+                        )
                     st.metric("Declarations in this Wilaya", len(regional_decs))
                     if regional_decs:
-                        st.dataframe(pd.DataFrame(regional_decs), use_container_width=True, hide_index=True)
+                        rdf = pd.DataFrame(regional_decs)
+                        rdf = annotate_live_declarations(rdf)
+                        show_cols = [c for c in [
+                            "id", "farmer_name", "carte_num", "crop", "area", "start_date",
+                            "growth_stage_label", "days_after_planting", "status"
+                        ] if c in rdf.columns]
+                        st.dataframe(rdf[show_cols], use_container_width=True, hide_index=True)
+
+                        st.markdown("##### Mark harvest (remove from live pocket)")
+                        active_ids = [
+                            int(r["id"]) for _, r in rdf.iterrows()
+                            if r.get("id") is not None and r.get("growth_stage") != "harvested"
+                        ]
+                        if active_ids:
+                            pick_id = st.selectbox("Declaration ID to mark harvested", active_ids, key="wilaya_mark_harvest_id")
+                            if st.button("✅ Mark as harvested", key="wilaya_mark_harvest_btn", type="primary"):
+                                try:
+                                    admin_supabase_client.table("declarations").update({
+                                        "status": "harvested",
+                                    }).eq("id", pick_id).eq("wilaya", regional_wilaya).execute()
+                                    # Best-effort: also mark linked parcel
+                                    try:
+                                        row = rdf[rdf["id"] == pick_id].iloc[0]
+                                        pid = row.get("parcel_id")
+                                        if pid is not None:
+                                            admin_supabase_client.table("farm_parcels").update({
+                                                "status": "harvested",
+                                            }).eq("id", pid).execute()
+                                    except Exception:
+                                        pass
+                                    st.success(f"Declaration {pick_id} marked harvested — excluded from live dashboard.")
+                                    st.rerun()
+                                except Exception as he:
+                                    st.error(
+                                        f"Could not update status (add column `status text` on declarations if missing): {he}"
+                                    )
+                        else:
+                            st.info("All listed declarations are already harvested or have no id.")
                     else:
                         st.info("No declarations found for this Wilaya yet.")
                 except Exception as e:
@@ -7504,8 +7822,9 @@ on public.wilaya_logistics_constraints (wilaya);
             st.markdown(f"#### Satellite indicators per farm — {regional_wilaya}")
             st.caption(
                 "Uses Copernicus NDVI/NDWI when credentials are configured. "
-                "Farms with a pin are checked; abnormal vegetation drop is flagged. "
-                "Phone / email are loaded from farmer profiles (by user or Carte Fellah)."
+                "**NDVI alerts are stage-aware**: low NDVI is normal at sowing or after harvest; "
+                "alerts fire mainly in vegetative/reproductive stages. "
+                "Harvested / non-active cycles are not treated as vegetation stress."
             )
             if admin_supabase_client is None:
                 st.warning("Service-role connection required.")
@@ -7668,24 +7987,39 @@ on public.wilaya_logistics_constraints (wilaya);
                                     rows_out.append({**base_cols, "Status": "No pin", "NDVI": "—", "NDWI": "—"})
                                     continue
                                 try:
+                                    plant = p.get("planting_date") or p.get("start_date")
+                                    stage_info = estimate_crop_stage(
+                                        p.get("crop"), plant, status=p.get("status")
+                                    )
+                                    if stage_info.get("stage_key") == "harvested":
+                                        rows_out.append({
+                                            **base_cols,
+                                            "Stage": stage_info.get("stage_label"),
+                                            "Status": "Harvested — skipped",
+                                            "NDVI": "—",
+                                            "NDWI": "—",
+                                            "Source": "—",
+                                        })
+                                        continue
                                     sat_rows, sat_src, sat_stats = ai_fetch_copernicus_satellite(
                                         regional_wilaya, float(plat), float(plon), days_back=60
                                     )
                                     ndvi = sat_stats.get("ndvi_mean") if isinstance(sat_stats, dict) else None
                                     ndwi = sat_stats.get("ndwi_mean") if isinstance(sat_stats, dict) else None
-                                    status = "OK"
-                                    if ndvi is not None and float(ndvi) < 0.25:
-                                        status = "⚠️ Low NDVI"
+                                    status, is_alert = ndvi_stage_assessment(ndvi, stage_info)
+                                    if is_alert:
                                         alerts.append((label, ndvi, p))
                                     rows_out.append({
                                         **base_cols,
+                                        "Stage": stage_info.get("stage_label"),
+                                        "DAP": stage_info.get("days_after_planting"),
                                         "Status": status,
                                         "NDVI": f"{float(ndvi):.3f}" if ndvi is not None else "—",
                                         "NDWI": f"{float(ndwi):.3f}" if ndwi is not None else "—",
                                         "Source": str(sat_src)[:60],
                                     })
                                 except Exception as se:
-                                    rows_out.append({**base_cols, "Status": f"Error: {se}", "NDVI": "—", "NDWI": "—"})
+                                    rows_out.append({**base_cols, "Stage": "—", "Status": f"Error: {se}", "NDVI": "—", "NDWI": "—"})
                             if rows_out:
                                 st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
                             if alerts:
@@ -8128,3 +8462,4 @@ on public.wilaya_logistics_constraints (wilaya);
                         st.info(f"No rows in `{w_table}` for this Wilaya.")
                 except Exception as e:
                     st.error(f"Could not query `{w_table}`: {e}")
+
