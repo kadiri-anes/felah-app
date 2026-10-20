@@ -2522,6 +2522,7 @@ def _secrets_status():
 
 
 def _get_admin_supabase_client():
+    """Build a service-role client. Intended only for privileged sessions."""
     try:
         admin_service_key = _get_supabase_service_role_key()
         admin_supabase_url = _get_supabase_connection_url()
@@ -2532,11 +2533,74 @@ def _get_admin_supabase_client():
         return None
 
 
+@st.cache_resource
+def _privileged_auth_fail_store():
+    """Process-wide failed login counters (resets on app reboot)."""
+    return {}
+
+
+AUTH_MAX_FAILURES = 5
+AUTH_LOCK_SECONDS = 15 * 60  # 15 minutes
+
+
+def _auth_lock_key(scope: str, detail: str = "") -> str:
+    return f"{scope}|{detail}".strip("|")
+
+
+def auth_is_locked(scope: str, detail: str = ""):
+    """Return (locked: bool, seconds_remaining: int, failures: int)."""
+    import time as _time
+    store = _privileged_auth_fail_store()
+    key = _auth_lock_key(scope, detail)
+    row = store.get(key) or {"failures": 0, "locked_until": 0.0}
+    now = _time.time()
+    locked_until = float(row.get("locked_until") or 0)
+    if locked_until > now:
+        return True, int(locked_until - now), int(row.get("failures") or 0)
+    return False, 0, int(row.get("failures") or 0)
+
+
+def auth_register_failure(scope: str, detail: str = ""):
+    """Record a failed password attempt. Returns (locked, seconds_remaining, failures)."""
+    import time as _time
+    store = _privileged_auth_fail_store()
+    key = _auth_lock_key(scope, detail)
+    row = store.get(key) or {"failures": 0, "locked_until": 0.0}
+    now = _time.time()
+    if float(row.get("locked_until") or 0) > now:
+        return True, int(float(row["locked_until"]) - now), int(row.get("failures") or 0)
+    failures = int(row.get("failures") or 0) + 1
+    locked_until = 0.0
+    if failures >= AUTH_MAX_FAILURES:
+        locked_until = now + AUTH_LOCK_SECONDS
+        failures = AUTH_MAX_FAILURES
+    store[key] = {"failures": failures, "locked_until": locked_until}
+    if locked_until:
+        return True, AUTH_LOCK_SECONDS, failures
+    return False, 0, failures
+
+
+def auth_register_success(scope: str, detail: str = "") -> None:
+    store = _privileged_auth_fail_store()
+    key = _auth_lock_key(scope, detail)
+    if key in store:
+        del store[key]
+
+
+def resolve_privileged_supabase_client():
+    """Service-role client ONLY after national admin or Wilaya officer login."""
+    if st.session_state.get("admin_authenticated") or st.session_state.get("wilaya_admin_authenticated"):
+        return _get_admin_supabase_client()
+    return None
+
+
 def _resolve_admin_supabase_client():
-    return _get_admin_supabase_client()
+    """Backward-compatible: no service-role for anonymous visitors."""
+    return resolve_privileged_supabase_client()
 
 
-admin_supabase_client = _resolve_admin_supabase_client()
+# None until a privileged console is unlocked (set again on each rerun below).
+admin_supabase_client = resolve_privileged_supabase_client()
 
 
 # ---------------------------------------------------------
@@ -5456,43 +5520,56 @@ elif st.session_state.active_tab == "account":
             key="admin_pwd",
         )
         status = _secrets_status()
-        with st.expander("🔎 Secrets diagnostic (safe)", expanded=True):
+        with st.expander("🔎 Secrets diagnostic (safe)", expanded=False):
             st.write(
                 {
                     "ADMIN_SECRET_KEY set": "✅" if status["admin_password_set"] else "❌ missing — add ADMIN_SECRET_KEY in Secrets",
                     "SUPABASE_URL set": ("✅ " + status["url_host"]) if status["url_set"] else "❌ missing",
-                    "SUPABASE_SERVICE_ROLE_KEY set": "✅" if status["service_role_set"] else "❌ missing",
-                    "service_role length": status["service_role_length"],
-                    "service_role looks like JWT (eyJ...)": "✅" if status["service_role_looks_like_jwt"] else "❌",
+                    "service_role configured": "✅" if status["service_role_set"] else "❌ missing",
                 }
             )
             st.caption(
                 "To unlock: type the value of ADMIN_SECRET_KEY only (not the Supabase service_role key). "
                 "After changing Secrets, always Reboot the app."
             )
-        if st.button("Unlock Admin Panel"):
+        locked, wait_s, fails = auth_is_locked("national_admin")
+        if locked:
+            st.error(
+                f"🔒 National admin login is locked after too many failed attempts. "
+                f"Try again in about {max(1, wait_s // 60)} min ({wait_s}s)."
+            )
+        if st.button("Unlock Admin Panel", disabled=locked):
             expected = get_admin_password()
-            live_client = _resolve_admin_supabase_client()
             if not expected:
                 st.error(
                     "ADMIN_SECRET_KEY is missing in Streamlit Secrets. "
-                    "Add at top level: ADMIN_SECRET_KEY = \"your-password\" then Reboot the app. "
-                    "That password is what you type here."
+                    "Add at top level: ADMIN_SECRET_KEY = \"your-long-random-password\" then Reboot."
                 )
+            elif not admin_input_pass:
+                st.error("Enter the admin password.")
             elif admin_input_pass != expected:
-                st.error(
-                    "Invalid password. Type exactly the value of ADMIN_SECRET_KEY from Secrets "
-                    "(this is NOT the Supabase service_role / anon key)."
-                )
+                now_locked, wait_s, fails = auth_register_failure("national_admin")
+                if now_locked:
+                    st.error(
+                        f"Invalid password. Login locked for {AUTH_LOCK_SECONDS // 60} minutes "
+                        f"after {AUTH_MAX_FAILURES} failures."
+                    )
+                else:
+                    st.error(
+                        f"Invalid password ({fails}/{AUTH_MAX_FAILURES} failures). "
+                        "This is NOT the Supabase service_role / anon key."
+                    )
             else:
+                auth_register_success("national_admin")
                 st.session_state.admin_authenticated = True
+                live_client = _get_admin_supabase_client()
                 if live_client is not None:
                     globals()["admin_supabase_client"] = live_client
-                st.success("Access Granted to Portal Admin Console.")
+                st.success("Access granted. Service-role DB client is active for this session only.")
                 st.rerun()
     else:
         st.success("🔓 Authenticated as System Administrator")
-        live_client = _resolve_admin_supabase_client()
+        live_client = _get_admin_supabase_client()
         if live_client is not None:
             globals()["admin_supabase_client"] = live_client
         if live_client is None:
@@ -7459,6 +7536,8 @@ on public.wilaya_logistics_constraints (wilaya);
 
         if st.button("🔒 Lock Admin Console"):
             st.session_state.admin_authenticated = False
+            if not st.session_state.get("wilaya_admin_authenticated"):
+                globals()["admin_supabase_client"] = None
             st.rerun()
 
     # ---------------------------------------------------------
@@ -7491,23 +7570,57 @@ on public.wilaya_logistics_constraints (wilaya);
             )
             wilaya_login_submit = st.form_submit_button("Open Wilaya Console / دخول منصة الولاية", use_container_width=True)
         if wilaya_login_submit:
-            expected_wilaya_password = wilaya_passwords.get(chosen_wilaya, "")
-            if not expected_wilaya_password:
-                st.error(f"No password is configured for {chosen_wilaya}. Add it under [wilaya_admin_passwords] in Streamlit Secrets.")
-            elif officer_password != expected_wilaya_password:
-                st.error("Incorrect Wilaya password.")
+            lock_detail = str(chosen_wilaya)
+            locked, wait_s, fails = auth_is_locked("wilaya_officer", lock_detail)
+            if locked:
+                st.error(
+                    f"🔒 Login for {chosen_wilaya} is locked after too many failed attempts. "
+                    f"Try again in about {max(1, wait_s // 60)} min."
+                )
             else:
-                st.session_state.wilaya_admin_authenticated = True
-                st.session_state.wilaya_admin_wilaya = chosen_wilaya
-                st.session_state.wilaya_admin_name = sanitize(officer_name) or f"{chosen_wilaya} Officer"
-                st.rerun()
+                expected_wilaya_password = wilaya_passwords.get(chosen_wilaya, "")
+                if not expected_wilaya_password:
+                    st.error(
+                        f"No password is configured for {chosen_wilaya}. "
+                        "Add it under [wilaya_admin_passwords] in Streamlit Secrets."
+                    )
+                elif not officer_password:
+                    st.error("Enter the Wilaya password.")
+                elif officer_password != expected_wilaya_password:
+                    now_locked, wait_s, fails = auth_register_failure("wilaya_officer", lock_detail)
+                    if now_locked:
+                        st.error(
+                            f"Incorrect password. {chosen_wilaya} locked for "
+                            f"{AUTH_LOCK_SECONDS // 60} min after {AUTH_MAX_FAILURES} failures."
+                        )
+                    else:
+                        st.error(f"Incorrect Wilaya password ({fails}/{AUTH_MAX_FAILURES} failures).")
+                else:
+                    auth_register_success("wilaya_officer", lock_detail)
+                    st.session_state.wilaya_admin_authenticated = True
+                    st.session_state.wilaya_admin_wilaya = chosen_wilaya
+                    st.session_state.wilaya_admin_name = sanitize(officer_name) or f"{chosen_wilaya} Officer"
+                    live_client = _get_admin_supabase_client()
+                    if live_client is not None:
+                        globals()["admin_supabase_client"] = live_client
+                    st.rerun()
     else:
         regional_wilaya = st.session_state.wilaya_admin_wilaya
+        if admin_supabase_client is None:
+            live_client = _get_admin_supabase_client()
+            if live_client is not None:
+                globals()["admin_supabase_client"] = live_client
         st.success(f"Signed in: {st.session_state.wilaya_admin_name} — {regional_wilaya}")
+        st.caption(
+            "Service-role DB access is active only while this console is unlocked. "
+            "Lock the console when finished."
+        )
         if st.button("🔒 Lock Wilaya Console", key="lock_wilaya_console"):
             st.session_state.wilaya_admin_authenticated = False
             st.session_state.wilaya_admin_wilaya = ""
             st.session_state.wilaya_admin_name = ""
+            if not st.session_state.get("admin_authenticated"):
+                globals()["admin_supabase_client"] = None
             st.rerun()
 
         # Count parcels still waiting for a verified boundary drawing
@@ -8462,4 +8575,3 @@ on public.wilaya_logistics_constraints (wilaya);
                         st.info(f"No rows in `{w_table}` for this Wilaya.")
                 except Exception as e:
                     st.error(f"Could not query `{w_table}`: {e}")
-
