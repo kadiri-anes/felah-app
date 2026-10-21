@@ -2587,6 +2587,99 @@ def auth_register_success(scope: str, detail: str = "") -> None:
         del store[key]
 
 
+def log_officer_activity(action: str, detail: str = "", wilaya: str = "", officer_name: str = ""):
+    """Write an officer/admin activity row (best-effort; needs officer_activity_log table)."""
+    try:
+        db = _get_admin_supabase_client()
+        if db is None:
+            return False
+        payload = {
+            "role": "wilaya_officer" if wilaya else "national_admin",
+            "officer_name": (officer_name or st.session_state.get("wilaya_admin_name") or st.session_state.get("farmer_name") or "admin")[:120],
+            "wilaya": (wilaya or st.session_state.get("wilaya_admin_wilaya") or "")[:80],
+            "action": str(action or "unknown")[:80],
+            "detail": str(detail or "")[:500],
+            "session_id": str(st.session_state.get("officer_session_id") or "")[:64],
+        }
+        db.table("officer_activity_log").insert(payload).execute()
+        return True
+    except Exception:
+        return False
+
+
+def officer_session_heartbeat():
+    """Refresh last_seen for the current Wilaya officer session."""
+    try:
+        if not st.session_state.get("wilaya_admin_authenticated"):
+            return
+        db = _get_admin_supabase_client()
+        if db is None:
+            return
+        sid = st.session_state.get("officer_session_id")
+        if not sid:
+            return
+        # Touch session row
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        db.table("officer_sessions").update({
+            "last_seen_at": now,
+            "is_active": True,
+            "current_action": st.session_state.get("officer_current_action") or "console_open",
+        }).eq("session_id", sid).execute()
+    except Exception:
+        pass
+
+
+def officer_session_start(officer_name: str, wilaya: str):
+    """Register a new Wilaya officer presence session."""
+    import uuid
+    from datetime import datetime, timezone
+    sid = str(uuid.uuid4())[:36]
+    st.session_state.officer_session_id = sid
+    st.session_state.officer_current_action = "login"
+    try:
+        db = _get_admin_supabase_client()
+        if db is None:
+            return sid
+        now = datetime.now(timezone.utc).isoformat()
+        db.table("officer_sessions").insert({
+            "session_id": sid,
+            "officer_name": (officer_name or "Officer")[:120],
+            "wilaya": (wilaya or "")[:80],
+            "is_active": True,
+            "logged_in_at": now,
+            "last_seen_at": now,
+            "current_action": "login",
+        }).execute()
+        log_officer_activity("login", "Wilaya console unlocked", wilaya=wilaya, officer_name=officer_name)
+    except Exception:
+        pass
+    return sid
+
+
+def officer_session_end():
+    """Mark the current officer session offline."""
+    try:
+        sid = st.session_state.get("officer_session_id")
+        wilaya = st.session_state.get("wilaya_admin_wilaya") or ""
+        name = st.session_state.get("wilaya_admin_name") or ""
+        db = _get_admin_supabase_client()
+        if db is not None and sid:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            db.table("officer_sessions").update({
+                "is_active": False,
+                "last_seen_at": now,
+                "current_action": "logout",
+                "logged_out_at": now,
+            }).eq("session_id", sid).execute()
+        log_officer_activity("logout", "Wilaya console locked", wilaya=wilaya, officer_name=name)
+    except Exception:
+        pass
+    st.session_state.officer_session_id = ""
+    st.session_state.officer_current_action = ""
+
+
 def resolve_privileged_supabase_client():
     """Service-role client ONLY after national admin or Wilaya officer login."""
     if st.session_state.get("admin_authenticated") or st.session_state.get("wilaya_admin_authenticated"):
@@ -5585,7 +5678,7 @@ elif st.session_state.active_tab == "account":
                 + ". Reboot after fixing Secrets."
             )
 
-        adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5, adm_tab6, adm_tab7 = st.tabs([
+        adm_tab1, adm_tab2, adm_tab3, adm_tab4, adm_tab5, adm_tab6, adm_tab7, adm_tab8 = st.tabs([
             "📰 Post News",
             "🚨 Weather Alerts",
             "📨 Send Farmer Notifications",
@@ -5593,6 +5686,7 @@ elif st.session_state.active_tab == "account":
             "🦠 Disease Reports",
             "🤖 AI Agricultural Analyst",
             "🗃️ Manage Database",
+            "👁️ Officers online",
         ])
 
         with adm_tab1:
@@ -7534,6 +7628,118 @@ on public.wilaya_logistics_constraints (wilaya);
             except Exception as e:
                 st.error(f"Unable to load the agricultural live board: {e}")
 
+        # ---------- Officers online / activity ----------
+        with adm_tab8:
+            st.markdown("#### 👁️ Wilaya officers — who is online and recent actions")
+            st.caption(
+                "Shows active Wilaya console sessions (heartbeat while the console is open) "
+                "and a recent activity log (login, harvest mark, boundary verify, warnings, …). "
+                "Requires the SQL tables below once."
+            )
+            if admin_supabase_client is None:
+                st.warning("Service-role client not available.")
+            else:
+                online_minutes = st.slider("Consider online if last seen within (minutes)", 5, 60, 15, key="officer_online_min")
+                try:
+                    sessions = (
+                        admin_supabase_client.table("officer_sessions")
+                        .select("*")
+                        .order("last_seen_at", desc=True)
+                        .limit(200)
+                        .execute()
+                        .data
+                        or []
+                    )
+                except Exception as e:
+                    sessions = []
+                    st.warning(
+                        "Table `officer_sessions` is missing or not readable. Run the SQL below in Supabase."
+                    )
+                    with st.expander("SQL — officer presence & activity"):
+                        st.code(
+                            """create table if not exists public.officer_sessions (
+  id bigint generated by default as identity primary key,
+  session_id text not null unique,
+  officer_name text,
+  wilaya text,
+  is_active boolean default true,
+  logged_in_at timestamptz default now(),
+  last_seen_at timestamptz default now(),
+  logged_out_at timestamptz,
+  current_action text,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.officer_activity_log (
+  id bigint generated by default as identity primary key,
+  role text,
+  officer_name text,
+  wilaya text,
+  action text,
+  detail text,
+  session_id text,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_officer_sessions_last_seen on public.officer_sessions (last_seen_at desc);
+create index if not exists idx_officer_activity_created on public.officer_activity_log (created_at desc);
+""",
+                            language="sql",
+                        )
+                    st.caption(f"Details: {e}")
+
+                if sessions:
+                    from datetime import datetime, timezone, timedelta
+                    now = datetime.now(timezone.utc)
+                    online_rows = []
+                    for s in sessions:
+                        last = s.get("last_seen_at")
+                        try:
+                            last_dt = pd.to_datetime(last, utc=True)
+                            if hasattr(last_dt, "to_pydatetime"):
+                                last_dt = last_dt.to_pydatetime()
+                            if last_dt.tzinfo is None:
+                                last_dt = last_dt.replace(tzinfo=timezone.utc)
+                            age_min = (now - last_dt).total_seconds() / 60.0
+                        except Exception:
+                            age_min = 9999
+                        is_on = bool(s.get("is_active")) and age_min <= float(online_minutes)
+                        online_rows.append({
+                            "Online": "🟢 Yes" if is_on else "⚪ No",
+                            "Officer": s.get("officer_name") or "—",
+                            "Wilaya": s.get("wilaya") or "—",
+                            "Last action": s.get("current_action") or "—",
+                            "Last seen": s.get("last_seen_at") or "—",
+                            "Logged in": s.get("logged_in_at") or "—",
+                            "Minutes ago": None if age_min >= 9999 else round(age_min, 1),
+                        })
+                    st.markdown("##### Active / recent sessions")
+                    st.dataframe(pd.DataFrame(online_rows), use_container_width=True, hide_index=True)
+                    n_on = sum(1 for r in online_rows if r["Online"].startswith("🟢"))
+                    st.metric("Officers online now", n_on)
+                elif sessions is not None and sessions == []:
+                    st.info("No officer sessions recorded yet. A row appears when a Wilaya officer unlocks the console.")
+
+                try:
+                    logs = (
+                        admin_supabase_client.table("officer_activity_log")
+                        .select("*")
+                        .order("created_at", desc=True)
+                        .limit(150)
+                        .execute()
+                        .data
+                        or []
+                    )
+                    if logs:
+                        st.markdown("##### Recent activity log")
+                        ldf = pd.DataFrame(logs)
+                        cols = [c for c in ["created_at", "officer_name", "wilaya", "action", "detail"] if c in ldf.columns]
+                        st.dataframe(ldf[cols], use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("No activity log rows yet (or table missing).")
+                except Exception as e:
+                    st.caption(f"Activity log unavailable: {e}")
+
         if st.button("🔒 Lock Admin Console"):
             st.session_state.admin_authenticated = False
             if not st.session_state.get("wilaya_admin_authenticated"):
@@ -7603,6 +7809,10 @@ on public.wilaya_logistics_constraints (wilaya);
                     live_client = _get_admin_supabase_client()
                     if live_client is not None:
                         globals()["admin_supabase_client"] = live_client
+                    officer_session_start(
+                        st.session_state.wilaya_admin_name,
+                        chosen_wilaya,
+                    )
                     st.rerun()
     else:
         regional_wilaya = st.session_state.wilaya_admin_wilaya
@@ -7613,9 +7823,11 @@ on public.wilaya_logistics_constraints (wilaya);
         st.success(f"Signed in: {st.session_state.wilaya_admin_name} — {regional_wilaya}")
         st.caption(
             "Service-role DB access is active only while this console is unlocked. "
-            "Lock the console when finished."
+            "Lock the console when finished. Activity is visible to national admin."
         )
+        officer_session_heartbeat()
         if st.button("🔒 Lock Wilaya Console", key="lock_wilaya_console"):
+            officer_session_end()
             st.session_state.wilaya_admin_authenticated = False
             st.session_state.wilaya_admin_wilaya = ""
             st.session_state.wilaya_admin_name = ""
@@ -7699,6 +7911,12 @@ on public.wilaya_logistics_constraints (wilaya);
                                 wilaya=regional_wilaya,
                                 opened_by=st.session_state.wilaya_admin_name,
                             )
+                            st.session_state.officer_current_action = "open_farmer_account"
+                            log_officer_activity(
+                                "open_farmer_account",
+                                f"carte={created.get('carte_num')} phone={created.get('phone')}",
+                                wilaya=regional_wilaya,
+                            )
                             st.success(
                                 f"Account opened for **{created['full_name']}** — "
                                 f"phone `{created['phone']}` — carte `{created['carte_num']}`. "
@@ -7779,6 +7997,12 @@ on public.wilaya_logistics_constraints (wilaya);
                                     admin_supabase_client.table("declarations").update({
                                         "status": "harvested",
                                     }).eq("id", pick_id).eq("wilaya", regional_wilaya).execute()
+                                    st.session_state.officer_current_action = "mark_harvested"
+                                    log_officer_activity(
+                                        "mark_harvested",
+                                        f"declaration_id={pick_id}",
+                                        wilaya=regional_wilaya,
+                                    )
                                     # Best-effort: also mark linked parcel
                                     try:
                                         row = rdf[rdf["id"] == pick_id].iloc[0]
@@ -8163,6 +8387,12 @@ on public.wilaya_logistics_constraints (wilaya);
                                 "severity": w_severity,
                                 "message": sanitize(w_msg),
                             }).execute()
+                            st.session_state.officer_current_action = "publish_warning"
+                            log_officer_activity(
+                                "publish_warning",
+                                sanitize(w_title)[:120],
+                                wilaya=regional_wilaya,
+                            )
                             st.success("Regional warning published.")
                         except Exception as e:
                             st.error(f"Could not publish warning: {e}")
@@ -8338,6 +8568,12 @@ on public.wilaya_logistics_constraints (wilaya);
                                         "boundary_verified_by": st.session_state.wilaya_admin_name,
                                         "boundary_verified_at": date.today().isoformat(),
                                     }).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
+                                    st.session_state.officer_current_action = "verify_boundary"
+                                    log_officer_activity(
+                                        "verify_boundary",
+                                        f"parcel_id={selected_parcel.get('id')}",
+                                        wilaya=regional_wilaya,
+                                    )
                                     st.success("Boundary saved. It will stay visible on the map with other parcels.")
                                     st.rerun()
                                 except Exception as e:
