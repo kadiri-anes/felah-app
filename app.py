@@ -8877,6 +8877,116 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         n_saved = sum(1 for r in overview_rows if r["Boundary"].startswith("✅"))
                         st.caption(f"**{n_saved}** / {len(parcels)} parcels have a saved boundary on the map.")
 
+                        # ---- Easy clear / reset boundaries (status → pin_received or pin_pending) ----
+                        st.markdown("##### 🗑️ Clear saved boundaries")
+                        st.caption(
+                            "If a parcel was saved with the **whole Wilaya** as its shape, clear it here. "
+                            "The farm row stays; only the boundary is removed and status goes back to "
+                            "**pin_received** (or pin_pending if there is no pin)."
+                        )
+
+                        def _reset_boundary_fields(parcel_row):
+                            has_pin = (
+                                parcel_row.get("pin_lat") is not None
+                                and parcel_row.get("pin_lon") is not None
+                            )
+                            return {
+                                "boundary_geojson": None,
+                                "boundary_status": "pin_received" if has_pin else "pin_pending",
+                                "boundary_verified_by": None,
+                                "boundary_verified_at": None,
+                            }
+
+                        parcels_with_boundary = [
+                            p for p in parcels
+                            if _normalize_boundary_geojson(p.get("boundary_geojson")) is not None
+                        ]
+                        clr1, clr2 = st.columns(2)
+                        with clr1:
+                            if parcels_with_boundary:
+                                id_options = {
+                                    f"#{p.get('id')} — {p.get('farmer_name') or 'Farmer'} — "
+                                    f"{p.get('parcel_name') or p.get('crop') or 'Farm'}": p
+                                    for p in parcels_with_boundary
+                                }
+                                pick_clear = st.selectbox(
+                                    "Parcel with saved boundary to clear",
+                                    list(id_options.keys()),
+                                    key="wilaya_clear_one_parcel_label",
+                                )
+                                confirm_one = st.checkbox(
+                                    "Confirm clear this boundary",
+                                    key="wilaya_confirm_clear_one",
+                                )
+                                if st.button(
+                                    "🗑️ Clear this parcel boundary",
+                                    key="wilaya_clear_one_boundary_btn",
+                                    type="primary",
+                                    disabled=not confirm_one,
+                                    use_container_width=True,
+                                ):
+                                    target = id_options[pick_clear]
+                                    try:
+                                        admin_supabase_client.table("farm_parcels").update(
+                                            _reset_boundary_fields(target)
+                                        ).eq("id", target.get("id")).eq(
+                                            "wilaya", regional_wilaya
+                                        ).execute()
+                                        log_officer_activity(
+                                            "clear_boundary",
+                                            f"parcel_id={target.get('id')}",
+                                            wilaya=regional_wilaya,
+                                        )
+                                        st.success(
+                                            f"Boundary cleared for parcel #{target.get('id')}. "
+                                            "Status is pin_received / pin_pending again."
+                                        )
+                                        st.rerun()
+                                    except Exception as ce:
+                                        st.error(f"Could not clear boundary: {ce}")
+                            else:
+                                st.info("No saved boundaries to clear in this Wilaya.")
+
+                        with clr2:
+                            confirm_all = st.checkbox(
+                                f"Confirm clear ALL {n_saved} saved boundary(ies) in {regional_wilaya}",
+                                key="wilaya_confirm_clear_all_boundaries",
+                            )
+                            if st.button(
+                                "🗑️ Clear ALL saved boundaries in this Wilaya",
+                                key="wilaya_clear_all_boundaries_btn",
+                                disabled=not confirm_all or n_saved == 0,
+                                use_container_width=True,
+                            ):
+                                cleared = 0
+                                errors = []
+                                for p in parcels_with_boundary:
+                                    try:
+                                        admin_supabase_client.table("farm_parcels").update(
+                                            _reset_boundary_fields(p)
+                                        ).eq("id", p.get("id")).eq(
+                                            "wilaya", regional_wilaya
+                                        ).execute()
+                                        cleared += 1
+                                    except Exception as e:
+                                        errors.append(f"#{p.get('id')}: {e}")
+                                log_officer_activity(
+                                    "clear_all_boundaries",
+                                    f"cleared={cleared}",
+                                    wilaya=regional_wilaya,
+                                )
+                                if cleared:
+                                    st.success(
+                                        f"Cleared **{cleared}** boundary(ies) in {regional_wilaya}. "
+                                        "Parcels remain; status reset to pin_received / pin_pending."
+                                    )
+                                if errors:
+                                    st.error("Some failed: " + "; ".join(errors[:5]))
+                                if cleared:
+                                    st.rerun()
+
+                        st.divider()
+
                         parcel_labels = {
                             f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'} — {p.get('carte_num') or 'no carte'} — "
                             f"{'✅' if _normalize_boundary_geojson(p.get('boundary_geojson')) else '⏳'}": p
@@ -9111,11 +9221,11 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                         st.error(f"Could not save boundary: {e}")
                         with col_clear:
                             confirm_del = st.checkbox(
-                                "Confirm delete of this saved boundary",
+                                "Confirm clear boundary → pin_received",
                                 key=f"confirm_del_boundary_{sel_id}",
                             )
                             if st.button(
-                                "🗑️ Delete saved boundary",
+                                "🗑️ Clear this boundary",
                                 key=f"clear_boundary_{sel_id}",
                                 use_container_width=True,
                                 disabled=not confirm_del,
@@ -9123,15 +9233,22 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                 try:
                                     admin_supabase_client.table("farm_parcels").update({
                                         "boundary_geojson": None,
-                                        "boundary_status": "pin_received" if parcel_pin_lat is not None else "pin_pending",
+                                        "boundary_status": (
+                                            "pin_received"
+                                            if parcel_pin_lat is not None
+                                            else "pin_pending"
+                                        ),
                                         "boundary_verified_by": None,
                                         "boundary_verified_at": None,
                                     }).eq("id", sel_id).eq("wilaya", regional_wilaya).execute()
                                     st.session_state.pop(draft_key, None)
-                                    st.success("Saved boundary deleted. It is removed from the map.")
+                                    st.success(
+                                        f"Parcel #{sel_id}: boundary removed. "
+                                        "Status is pin_received / pin_pending (not verified)."
+                                    )
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Could not delete boundary: {e}")
+                                    st.error(f"Could not clear boundary: {e}")
                         with col_clear_draft:
                             if st.button(
                                 "↺ Clear draft shape",
