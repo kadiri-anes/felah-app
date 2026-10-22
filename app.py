@@ -2607,8 +2607,55 @@ def log_officer_activity(action: str, detail: str = "", wilaya: str = "", office
         return False
 
 
+def officer_is_blocked(officer_name: str = "", wilaya: str = "", session_id: str = "") -> tuple:
+    """Return (blocked: bool, reason: str) for session or officer name."""
+    try:
+        db = _get_admin_supabase_client()
+        if db is None:
+            return False, ""
+        sid = str(session_id or st.session_state.get("officer_session_id") or "").strip()
+        if sid:
+            try:
+                rows = (
+                    db.table("officer_sessions")
+                    .select("session_id,is_blocked,block_reason")
+                    .eq("session_id", sid)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if rows and rows[0].get("is_blocked"):
+                    return True, str(rows[0].get("block_reason") or "Session blocked by national admin")
+            except Exception:
+                pass
+        name = str(officer_name or st.session_state.get("wilaya_admin_name") or "").strip()
+        w = str(wilaya or st.session_state.get("wilaya_admin_wilaya") or "").strip()
+        if name:
+            try:
+                q = (
+                    db.table("officer_blocks")
+                    .select("*")
+                    .eq("is_active", True)
+                    .eq("officer_name", name)
+                    .limit(20)
+                    .execute()
+                    .data
+                    or []
+                )
+                for b in q:
+                    bw = str(b.get("wilaya") or "").strip()
+                    if not bw or bw == w:
+                        return True, str(b.get("reason") or "Officer blocked by national admin")
+            except Exception:
+                pass
+        return False, ""
+    except Exception:
+        return False, ""
+
+
 def officer_session_heartbeat():
-    """Refresh last_seen for the current Wilaya officer session."""
+    """Refresh last_seen; force logout if session/officer was blocked by admin."""
     try:
         if not st.session_state.get("wilaya_admin_authenticated"):
             return
@@ -2618,7 +2665,22 @@ def officer_session_heartbeat():
         sid = st.session_state.get("officer_session_id")
         if not sid:
             return
-        # Touch session row
+        blocked, reason = officer_is_blocked(
+            st.session_state.get("wilaya_admin_name") or "",
+            st.session_state.get("wilaya_admin_wilaya") or "",
+            sid,
+        )
+        if blocked:
+            st.session_state.wilaya_admin_authenticated = False
+            st.session_state.wilaya_admin_wilaya = ""
+            st.session_state.wilaya_admin_name = ""
+            st.session_state.officer_session_id = ""
+            st.session_state.officer_current_action = ""
+            if not st.session_state.get("admin_authenticated"):
+                globals()["admin_supabase_client"] = None
+            st.error(f"🚫 Your Wilaya session was blocked by national admin. {reason}")
+            st.rerun()
+            return
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         db.table("officer_sessions").update({
@@ -2631,9 +2693,12 @@ def officer_session_heartbeat():
 
 
 def officer_session_start(officer_name: str, wilaya: str):
-    """Register a new Wilaya officer presence session."""
+    """Register a new Wilaya officer presence session. Returns session_id or raises if blocked."""
     import uuid
     from datetime import datetime, timezone
+    blocked, reason = officer_is_blocked(officer_name, wilaya, "")
+    if blocked:
+        raise PermissionError(reason or "This officer name is blocked for this Wilaya.")
     sid = str(uuid.uuid4())[:36]
     st.session_state.officer_session_id = sid
     st.session_state.officer_current_action = "login"
@@ -2642,16 +2707,24 @@ def officer_session_start(officer_name: str, wilaya: str):
         if db is None:
             return sid
         now = datetime.now(timezone.utc).isoformat()
-        db.table("officer_sessions").insert({
+        payload = {
             "session_id": sid,
             "officer_name": (officer_name or "Officer")[:120],
             "wilaya": (wilaya or "")[:80],
             "is_active": True,
+            "is_blocked": False,
             "logged_in_at": now,
             "last_seen_at": now,
             "current_action": "login",
-        }).execute()
+        }
+        try:
+            db.table("officer_sessions").insert(payload).execute()
+        except Exception:
+            payload.pop("is_blocked", None)
+            db.table("officer_sessions").insert(payload).execute()
         log_officer_activity("login", "Wilaya console unlocked", wilaya=wilaya, officer_name=officer_name)
+    except PermissionError:
+        raise
     except Exception:
         pass
     return sid
@@ -7663,12 +7736,18 @@ on public.wilaya_logistics_constraints (wilaya);
   officer_name text,
   wilaya text,
   is_active boolean default true,
+  is_blocked boolean default false,
+  block_reason text,
   logged_in_at timestamptz default now(),
   last_seen_at timestamptz default now(),
   logged_out_at timestamptz,
   current_action text,
   created_at timestamptz default now()
 );
+
+-- If table already exists:
+alter table public.officer_sessions add column if not exists is_blocked boolean default false;
+alter table public.officer_sessions add column if not exists block_reason text;
 
 create table if not exists public.officer_activity_log (
   id bigint generated by default as identity primary key,
@@ -7678,6 +7757,16 @@ create table if not exists public.officer_activity_log (
   action text,
   detail text,
   session_id text,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.officer_blocks (
+  id bigint generated by default as identity primary key,
+  officer_name text not null,
+  wilaya text default '',
+  is_active boolean default true,
+  reason text,
+  blocked_by text,
   created_at timestamptz default now()
 );
 
@@ -7703,9 +7792,11 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                             age_min = (now - last_dt).total_seconds() / 60.0
                         except Exception:
                             age_min = 9999
-                        is_on = bool(s.get("is_active")) and age_min <= float(online_minutes)
+                        is_blocked = bool(s.get("is_blocked"))
+                        is_on = bool(s.get("is_active")) and age_min <= float(online_minutes) and not is_blocked
                         online_rows.append({
-                            "Online": "🟢 Yes" if is_on else "⚪ No",
+                            "Online": "🟢 Yes" if is_on else ("🚫 Blocked" if is_blocked else "⚪ No"),
+                            "Session ID": s.get("session_id") or "—",
                             "Officer": s.get("officer_name") or "—",
                             "Wilaya": s.get("wilaya") or "—",
                             "Last action": s.get("current_action") or "—",
@@ -7717,6 +7808,130 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                     st.dataframe(pd.DataFrame(online_rows), use_container_width=True, hide_index=True)
                     n_on = sum(1 for r in online_rows if r["Online"].startswith("🟢"))
                     st.metric("Officers online now", n_on)
+
+                    st.markdown("##### 🚫 Block or unblock by Session ID")
+                    st.caption(
+                        "Each connection has a **Session ID**. Blocking it kicks that connection on the next page refresh. "
+                        "You can also block an **officer name** so they cannot log in again until unblocked."
+                    )
+                    session_ids = [str(s.get("session_id")) for s in sessions if s.get("session_id")]
+                    if session_ids:
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
+                            pick_sid = st.selectbox("Session ID to manage", session_ids, key="admin_block_sid")
+                            block_reason = st.text_input("Reason (optional)", key="admin_block_reason", placeholder="e.g. suspicious activity")
+                            if st.button("🚫 Block this session (kick)", key="admin_block_session_btn", type="primary"):
+                                try:
+                                    admin_supabase_client.table("officer_sessions").update({
+                                        "is_blocked": True,
+                                        "is_active": False,
+                                        "block_reason": (block_reason or "Blocked by national admin")[:300],
+                                        "current_action": "blocked",
+                                    }).eq("session_id", pick_sid).execute()
+                                    # Also name-block if we know the officer
+                                    match = next((s for s in sessions if str(s.get("session_id")) == pick_sid), {})
+                                    oname = match.get("officer_name") or ""
+                                    owil = match.get("wilaya") or ""
+                                    if oname:
+                                        try:
+                                            admin_supabase_client.table("officer_blocks").upsert({
+                                                "officer_name": oname,
+                                                "wilaya": owil,
+                                                "is_active": True,
+                                                "reason": (block_reason or "Blocked via session")[:300],
+                                                "blocked_by": "national_admin",
+                                            }, on_conflict="officer_name,wilaya").execute()
+                                        except Exception:
+                                            try:
+                                                admin_supabase_client.table("officer_blocks").insert({
+                                                    "officer_name": oname,
+                                                    "wilaya": owil,
+                                                    "is_active": True,
+                                                    "reason": (block_reason or "Blocked via session")[:300],
+                                                    "blocked_by": "national_admin",
+                                                }).execute()
+                                            except Exception:
+                                                pass
+                                    log_officer_activity(
+                                        "admin_block_session",
+                                        f"session={pick_sid} reason={block_reason}",
+                                        wilaya=owil,
+                                        officer_name="national_admin",
+                                    )
+                                    st.success(f"Session `{pick_sid}` blocked. Officer will be disconnected on next refresh.")
+                                    st.rerun()
+                                except Exception as be:
+                                    st.error(
+                                        f"Could not block session (add columns is_blocked / block_reason if missing): {be}"
+                                    )
+                        with bc2:
+                            un_sid = st.selectbox("Session ID to unblock", session_ids, key="admin_unblock_sid")
+                            if st.button("✅ Unblock this session", key="admin_unblock_session_btn"):
+                                try:
+                                    admin_supabase_client.table("officer_sessions").update({
+                                        "is_blocked": False,
+                                        "block_reason": None,
+                                    }).eq("session_id", un_sid).execute()
+                                    match = next((s for s in sessions if str(s.get("session_id")) == un_sid), {})
+                                    oname = match.get("officer_name") or ""
+                                    owil = match.get("wilaya") or ""
+                                    if oname:
+                                        try:
+                                            admin_supabase_client.table("officer_blocks").update({
+                                                "is_active": False,
+                                            }).eq("officer_name", oname).eq("wilaya", owil).execute()
+                                        except Exception:
+                                            pass
+                                    st.success(f"Session `{un_sid}` unblocked.")
+                                    st.rerun()
+                                except Exception as ue:
+                                    st.error(f"Could not unblock: {ue}")
+
+                        st.markdown("##### Block by officer name (prevent new logins)")
+                        bn1, bn2 = st.columns(2)
+                        with bn1:
+                            block_name = st.text_input("Officer name to block", key="admin_block_name")
+                            block_w = st.text_input("Wilaya (optional, empty = all)", key="admin_block_name_wilaya")
+                            if st.button("🚫 Block officer name", key="admin_block_name_btn"):
+                                if not block_name.strip():
+                                    st.error("Enter an officer name.")
+                                else:
+                                    try:
+                                        admin_supabase_client.table("officer_blocks").insert({
+                                            "officer_name": sanitize(block_name),
+                                            "wilaya": sanitize(block_w) if block_w.strip() else "",
+                                            "is_active": True,
+                                            "reason": (block_reason or "Name blocked by admin")[:300],
+                                            "blocked_by": "national_admin",
+                                        }).execute()
+                                        st.success(f"Blocked officer name: {block_name}")
+                                        st.rerun()
+                                    except Exception as ne:
+                                        st.error(f"Need table officer_blocks — see SQL below. {ne}")
+                        with bn2:
+                            try:
+                                blocks = (
+                                    admin_supabase_client.table("officer_blocks")
+                                    .select("*")
+                                    .eq("is_active", True)
+                                    .limit(100)
+                                    .execute()
+                                    .data
+                                    or []
+                                )
+                            except Exception:
+                                blocks = []
+                            if blocks:
+                                st.dataframe(pd.DataFrame(blocks), use_container_width=True, hide_index=True)
+                                b_ids = [b.get("id") for b in blocks if b.get("id") is not None]
+                                if b_ids:
+                                    ub = st.selectbox("Active block row id to clear", b_ids, key="admin_clear_block_id")
+                                    if st.button("Clear name block", key="admin_clear_name_block"):
+                                        admin_supabase_client.table("officer_blocks").update({
+                                            "is_active": False,
+                                        }).eq("id", ub).execute()
+                                        st.success("Name block cleared.")
+                                        st.rerun()
                 elif sessions is not None and sessions == []:
                     st.info("No officer sessions recorded yet. A row appears when a Wilaya officer unlocks the console.")
 
@@ -7760,14 +7975,21 @@ create index if not exists idx_officer_activity_created on public.officer_activi
             )
         with st.form("wilaya_admin_login_form", clear_on_submit=False):
             pilot_wilayas = [
-                "16 - Alger", "44 - Aïn Defla", "68 - Bou Saada",
-                "35 - Boumerdès", "09 - Blida",
+                "16 - Alger",
+                "44 - Aïn Defla",
+                "68 - Bou Saada",
+                "35 - Boumerdès",
+                "09 - Blida",
+                "43 - Mila",
             ]
-            configured_wilayas = [w for w in pilot_wilayas if w in wilaya_passwords]
-            # Still display the five pilot Wilayas even before Secrets are filled in.
+            # Prefer every Wilaya that has a password in Secrets, plus pilot list (incl. Mila)
+            configured_wilayas = sorted(
+                set(list(wilaya_passwords.keys()) + pilot_wilayas),
+                key=lambda x: (str(x).split("-")[0].strip().zfill(2), str(x)),
+            )
             chosen_wilaya = st.selectbox(
                 "Select your Wilaya / اختر الولاية",
-                configured_wilayas or pilot_wilayas,
+                configured_wilayas,
                 key="wilaya_admin_login_select",
             )
             officer_name = st.text_input("Officer name / اسم المسؤول", key="wilaya_admin_login_name")
@@ -7803,17 +8025,19 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         st.error(f"Incorrect Wilaya password ({fails}/{AUTH_MAX_FAILURES} failures).")
                 else:
                     auth_register_success("wilaya_officer", lock_detail)
-                    st.session_state.wilaya_admin_authenticated = True
-                    st.session_state.wilaya_admin_wilaya = chosen_wilaya
-                    st.session_state.wilaya_admin_name = sanitize(officer_name) or f"{chosen_wilaya} Officer"
+                    officer_display = sanitize(officer_name) or f"{chosen_wilaya} Officer"
                     live_client = _get_admin_supabase_client()
                     if live_client is not None:
                         globals()["admin_supabase_client"] = live_client
-                    officer_session_start(
-                        st.session_state.wilaya_admin_name,
-                        chosen_wilaya,
-                    )
-                    st.rerun()
+                    try:
+                        officer_session_start(officer_display, chosen_wilaya)
+                    except PermissionError as pe:
+                        st.error(f"🚫 Cannot open console: {pe}")
+                    else:
+                        st.session_state.wilaya_admin_authenticated = True
+                        st.session_state.wilaya_admin_wilaya = chosen_wilaya
+                        st.session_state.wilaya_admin_name = officer_display
+                        st.rerun()
     else:
         regional_wilaya = st.session_state.wilaya_admin_wilaya
         if admin_supabase_client is None:
