@@ -3455,7 +3455,69 @@ def get_wilaya_center(wilaya: str):
     return (36.7538, 3.0588)
 
 
+def _normalize_boundary_geojson(geom):
+    """Normalize stored boundary to a GeoJSON Feature (handles Feature, FeatureCollection, bare geometry, JSON string)."""
+    if geom is None or geom == "" or geom is False:
+        return None
+    if isinstance(geom, str):
+        try:
+            import json as _json
+            geom = _json.loads(geom)
+        except Exception:
+            return None
+    if not isinstance(geom, dict):
+        return None
+    gtype = geom.get("type")
+    if gtype == "FeatureCollection":
+        feats = [f for f in (geom.get("features") or []) if isinstance(f, dict)]
+        if not feats:
+            return None
+        geom = feats[-1]
+        gtype = geom.get("type")
+    if gtype == "Feature" and isinstance(geom.get("geometry"), dict):
+        return {
+            "type": "Feature",
+            "properties": geom.get("properties") or {},
+            "geometry": geom["geometry"],
+        }
+    if gtype in ("Polygon", "MultiPolygon"):
+        return {"type": "Feature", "properties": {}, "geometry": geom}
+    if isinstance(geom.get("geometry"), dict):
+        gt = (geom.get("geometry") or {}).get("type")
+        if gt in ("Polygon", "MultiPolygon"):
+            return {
+                "type": "Feature",
+                "properties": geom.get("properties") or {},
+                "geometry": geom["geometry"],
+            }
+    return None
+
+
+def _coords_from_boundary_feature(feat):
+    """Flatten lat/lon pairs from a boundary Feature for map fit-bounds."""
+    pts = []
+    if not feat or not isinstance(feat, dict):
+        return pts
+    geom = feat.get("geometry") or {}
+    coords = geom.get("coordinates") or []
+    gtype = geom.get("type")
+
+    def walk(c):
+        if not c:
+            return
+        if isinstance(c[0], (int, float)) and len(c) >= 2:
+            # GeoJSON is lon, lat
+            pts.append((float(c[1]), float(c[0])))
+            return
+        for x in c:
+            walk(x)
+
+    walk(coords)
+    return pts
+
+
 def add_satellite_basemap(m):
+
     """Satellite imagery first + readable place labels overlay."""
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -8754,24 +8816,70 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                     if not parcels:
                         st.info("No farm parcels are registered in this Wilaya yet. Farmers can add them through Crop Declaration after the SQL migration is applied.")
                     else:
+                        # Status overview — all parcels in this Wilaya
+                        overview_rows = []
+                        for p in parcels:
+                            feat = _normalize_boundary_geojson(p.get("boundary_geojson"))
+                            has_b = feat is not None
+                            overview_rows.append({
+                                "ID": p.get("id"),
+                                "Parcel": p.get("parcel_name") or p.get("crop") or "Farm",
+                                "Farmer": p.get("farmer_name") or "—",
+                                "Carte": p.get("carte_num") or "—",
+                                "Boundary": "✅ Saved" if has_b else "⏳ Not drawn",
+                                "Status": p.get("boundary_status") or "—",
+                            })
+                        st.dataframe(pd.DataFrame(overview_rows), use_container_width=True, hide_index=True)
+                        n_saved = sum(1 for r in overview_rows if r["Boundary"].startswith("✅"))
+                        st.caption(f"**{n_saved}** / {len(parcels)} parcels have a saved boundary on the map.")
+
                         parcel_labels = {
-                            f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'} — {p.get('carte_num') or 'no carte'}": p
+                            f"#{p.get('id')} — {p.get('parcel_name') or p.get('crop') or 'Farm'} — {p.get('farmer_name') or 'Farmer'} — {p.get('carte_num') or 'no carte'} — "
+                            f"{'✅' if _normalize_boundary_geojson(p.get('boundary_geojson')) else '⏳'}": p
                             for p in parcels
                         }
-                        parcel_label = st.selectbox("Parcel to verify / edit", list(parcel_labels.keys()), key="regional_parcel_choice")
+                        parcel_label = st.selectbox(
+                            "Parcel to draw / edit",
+                            list(parcel_labels.keys()),
+                            key="regional_parcel_choice",
+                        )
                         selected_parcel = parcel_labels[parcel_label]
+                        sel_id = selected_parcel.get("id")
                         parcel_pin_lat = selected_parcel.get("pin_lat")
                         parcel_pin_lon = selected_parcel.get("pin_lon")
+
+                        # Collect map focus from pins + all saved polygons
+                        all_pts = []
+                        for p in parcels:
+                            feat = _normalize_boundary_geojson(p.get("boundary_geojson"))
+                            all_pts.extend(_coords_from_boundary_feature(feat))
+                            try:
+                                if p.get("pin_lat") is not None and p.get("pin_lon") is not None:
+                                    all_pts.append((float(p["pin_lat"]), float(p["pin_lon"])))
+                            except Exception:
+                                pass
                         try:
                             if parcel_pin_lat is not None and parcel_pin_lon is not None:
                                 map_center = [float(parcel_pin_lat), float(parcel_pin_lon)]
                                 map_zoom = 16
+                            elif all_pts:
+                                map_center = [
+                                    sum(pt[0] for pt in all_pts) / len(all_pts),
+                                    sum(pt[1] for pt in all_pts) / len(all_pts),
+                                ]
+                                map_zoom = 14
                             else:
                                 map_center = list(get_wilaya_center(regional_wilaya))
                                 map_zoom = 13
                         except Exception:
                             map_center = list(get_wilaya_center(regional_wilaya))
                             map_zoom = 13
+
+                        st.markdown(
+                            "**How to draw:** ① polygon tool (left) → ② click corners of the field → "
+                            "③ click the **first point again** to close → ④ **Save**. "
+                            "Green = other saved parcels · Orange = selected. Use trash on the left to delete a draft shape."
+                        )
 
                         boundary_map = folium.Map(
                             location=map_center,
@@ -8782,56 +8890,58 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         add_satellite_basemap(boundary_map)
                         add_wilaya_focus_ring(boundary_map, regional_wilaya, radius_m=12000)
 
-                        # Show ALL saved parcel boundaries in this Wilaya (stay on the map)
-                        other_group = folium.FeatureGroup(name="Other saved parcels", show=True)
-                        selected_group = folium.FeatureGroup(name="Selected parcel boundary", show=True)
-                        for p in parcels:
-                            geom = p.get("boundary_geojson")
-                            if not geom:
-                                continue
-                            is_selected = str(p.get("id")) == str(selected_parcel.get("id"))
-                            style = {
-                                "color": "#f97316" if is_selected else "#22c55e",
-                                "weight": 3 if is_selected else 2,
-                                "fillColor": "#f97316" if is_selected else "#22c55e",
-                                "fillOpacity": 0.25 if is_selected else 0.15,
-                            }
-                            try:
-                                gj = folium.GeoJson(
-                                    geom,
-                                    name=f"Parcel #{p.get('id')}",
-                                    style_function=lambda _f, s=style: s,
-                                    tooltip=(
-                                        f"#{p.get('id')} · {p.get('parcel_name') or p.get('crop') or 'Farm'} · "
-                                        f"{p.get('farmer_name') or ''} · {p.get('carte_num') or ''}"
-                                    ),
-                                )
-                                (selected_group if is_selected else other_group).add_child(gj)
-                            except Exception:
-                                pass
-                        other_group.add_to(boundary_map)
-                        selected_group.add_to(boundary_map)
+                        saved_group = folium.FeatureGroup(name="All saved boundaries", show=True)
+                        pins_group = folium.FeatureGroup(name="Pins", show=True)
 
-                        # Pins for context
                         for p in parcels:
+                            feat = _normalize_boundary_geojson(p.get("boundary_geojson"))
+                            is_selected = str(p.get("id")) == str(sel_id)
+                            if feat is not None:
+                                style = {
+                                    "color": "#f97316" if is_selected else "#22c55e",
+                                    "weight": 4 if is_selected else 2,
+                                    "fillColor": "#f97316" if is_selected else "#22c55e",
+                                    "fillOpacity": 0.30 if is_selected else 0.18,
+                                }
+                                try:
+                                    folium.GeoJson(
+                                        feat,
+                                        name=f"Parcel #{p.get('id')}",
+                                        style_function=lambda _f, s=style: s,
+                                        tooltip=(
+                                            f"#{p.get('id')} · {p.get('parcel_name') or p.get('crop') or 'Farm'} · "
+                                            f"{p.get('farmer_name') or ''} · {p.get('carte_num') or ''}"
+                                        ),
+                                    ).add_to(saved_group)
+                                except Exception:
+                                    pass
                             plat, plon = p.get("pin_lat"), p.get("pin_lon")
-                            if plat is None or plon is None:
-                                continue
-                            is_selected = str(p.get("id")) == str(selected_parcel.get("id"))
+                            if plat is not None and plon is not None:
+                                try:
+                                    folium.CircleMarker(
+                                        location=[float(plat), float(plon)],
+                                        radius=7 if is_selected else 5,
+                                        color="#ef4444" if is_selected else "#3b82f6",
+                                        fill=True,
+                                        fill_opacity=0.9,
+                                        tooltip=f"#{p.get('id')} pin · {p.get('farmer_name') or ''}",
+                                    ).add_to(pins_group)
+                                except Exception:
+                                    pass
+
+                        saved_group.add_to(boundary_map)
+                        pins_group.add_to(boundary_map)
+
+                        # Fit map to show every saved boundary + pins when possible
+                        if len(all_pts) >= 2:
                             try:
-                                folium.Marker(
-                                    [float(plat), float(plon)],
-                                    tooltip=f"#{p.get('id')} pin · {p.get('farmer_name') or ''}",
-                                    icon=folium.Icon(
-                                        color="red" if is_selected else "blue",
-                                        icon="map-marker",
-                                        prefix="fa",
-                                    ),
-                                ).add_to(boundary_map)
+                                boundary_map.fit_bounds(all_pts, padding=(30, 30))
                             except Exception:
                                 pass
+                        elif len(all_pts) == 1:
+                            boundary_map.location = list(all_pts[0])
+                            boundary_map.zoom_start = 16
 
-                        # Google-Earth-like draw: polygon only, easy edit/delete
                         Draw(
                             export=False,
                             position="topleft",
@@ -8847,72 +8957,86 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                     "shapeOptions": {
                                         "color": "#f97316",
                                         "fillColor": "#f97316",
-                                        "fillOpacity": 0.25,
+                                        "fillOpacity": 0.28,
                                         "weight": 3,
                                     },
                                 },
                             },
                             edit_options={"edit": True, "remove": True},
                         ).add_to(boundary_map)
-                        folium.LayerControl(collapsed=True).add_to(boundary_map)
+                        folium.LayerControl(collapsed=False).add_to(boundary_map)
 
+                        # Stable key per Wilaya so switching parcel does not wipe other layers / bug the map
                         boundary_map_data = st_folium(
                             boundary_map,
-                            height=560,
+                            height=580,
                             width=None,
-                            returned_objects=["all_drawings", "last_active_drawing"],
-                            key=f"wilaya_boundary_map_{selected_parcel.get('id')}",
-                            center=map_center,
-                            zoom=map_zoom,
+                            returned_objects=["all_drawings", "last_active_drawing", "last_object_clicked"],
+                            key=f"wilaya_boundary_map_stable_{regional_wilaya}",
                         )
 
-                        drawing = (boundary_map_data or {}).get("last_active_drawing")
-                        if not drawing:
-                            drawings = (boundary_map_data or {}).get("all_drawings") or []
-                            if drawings:
-                                drawing = drawings[-1]
+                        # Prefer newest drawing from the map interaction
+                        drawing = None
+                        if isinstance(boundary_map_data, dict):
+                            drawing = boundary_map_data.get("last_active_drawing")
+                            if not drawing:
+                                drawings = boundary_map_data.get("all_drawings") or []
+                                if drawings:
+                                    drawing = drawings[-1]
+                        # Keep last draft in session for this parcel (st_folium can drop it on rerun)
+                        draft_key = f"boundary_draft_{regional_wilaya}_{sel_id}"
+                        norm_drawing = _normalize_boundary_geojson(drawing)
+                        if norm_drawing is not None:
+                            st.session_state[draft_key] = norm_drawing
+                        elif st.session_state.get(draft_key):
+                            norm_drawing = st.session_state.get(draft_key)
 
                         status_now = selected_parcel.get("boundary_status", "pin_pending")
+                        existing = _normalize_boundary_geojson(selected_parcel.get("boundary_geojson"))
                         st.caption(
-                            f"Selected parcel status: **{status_now}** · "
+                            f"Selected **#{sel_id}** · status: **{status_now}** · "
                             f"Carte: `{selected_parcel.get('carte_num') or '—'}` · "
-                            f"Farmer: {selected_parcel.get('farmer_name') or '—'}"
+                            f"Farmer: {selected_parcel.get('farmer_name') or '—'} · "
+                            f"{'Has saved boundary' if existing else 'No saved boundary yet'}"
                         )
 
-                        has_polygon = (
-                            isinstance(drawing, dict)
-                            and (drawing.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon")
+                        has_polygon = norm_drawing is not None and (
+                            (norm_drawing.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon")
                         )
-                        col_save, col_clear = st.columns(2)
+
+                        col_save, col_clear, col_clear_draft = st.columns(3)
                         with col_save:
                             if st.button(
                                 "💾 Save & verify boundary",
-                                key=f"save_boundary_{selected_parcel.get('id')}",
+                                key=f"save_boundary_{sel_id}",
                                 type="primary",
                                 use_container_width=True,
-                                disabled=not has_polygon,
                             ):
-                                try:
-                                    admin_supabase_client.table("farm_parcels").update({
-                                        "boundary_geojson": drawing,
-                                        "boundary_status": "verified",
-                                        "boundary_verified_by": st.session_state.wilaya_admin_name,
-                                        "boundary_verified_at": date.today().isoformat(),
-                                    }).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
-                                    st.session_state.officer_current_action = "verify_boundary"
-                                    log_officer_activity(
-                                        "verify_boundary",
-                                        f"parcel_id={selected_parcel.get('id')}",
-                                        wilaya=regional_wilaya,
-                                    )
-                                    st.success("Boundary saved. It will stay visible on the map with other parcels.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Could not save boundary: {e}")
+                                if not has_polygon:
+                                    st.error("Draw a closed polygon (or rectangle) on the map first, then Save.")
+                                else:
+                                    try:
+                                        admin_supabase_client.table("farm_parcels").update({
+                                            "boundary_geojson": norm_drawing,
+                                            "boundary_status": "verified",
+                                            "boundary_verified_by": st.session_state.wilaya_admin_name,
+                                            "boundary_verified_at": date.today().isoformat(),
+                                        }).eq("id", sel_id).eq("wilaya", regional_wilaya).execute()
+                                        st.session_state.pop(draft_key, None)
+                                        st.session_state.officer_current_action = "verify_boundary"
+                                        log_officer_activity(
+                                            "verify_boundary",
+                                            f"parcel_id={sel_id}",
+                                            wilaya=regional_wilaya,
+                                        )
+                                        st.success("Boundary saved. It stays on the map (green/orange) with the other parcels.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Could not save boundary: {e}")
                         with col_clear:
                             if st.button(
-                                "🗑️ Clear saved boundary",
-                                key=f"clear_boundary_{selected_parcel.get('id')}",
+                                "🗑️ Delete saved boundary",
+                                key=f"clear_boundary_{sel_id}",
                                 use_container_width=True,
                             ):
                                 try:
@@ -8921,16 +9045,28 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                         "boundary_status": "pin_received" if parcel_pin_lat is not None else "pin_pending",
                                         "boundary_verified_by": None,
                                         "boundary_verified_at": None,
-                                    }).eq("id", selected_parcel.get("id")).eq("wilaya", regional_wilaya).execute()
-                                    st.success("Saved boundary cleared. You can draw again.")
+                                    }).eq("id", sel_id).eq("wilaya", regional_wilaya).execute()
+                                    st.session_state.pop(draft_key, None)
+                                    st.success("Saved boundary deleted. Draw again if needed.")
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Could not clear boundary: {e}")
+                                    st.error(f"Could not delete boundary: {e}")
+                        with col_clear_draft:
+                            if st.button(
+                                "↺ Clear draft shape",
+                                key=f"clear_draft_{sel_id}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.pop(draft_key, None)
+                                st.info("Draft cleared. Use the trash icon on the map to remove the drawn shape, then draw again.")
+                                st.rerun()
 
-                        if not has_polygon:
+                        if has_polygon:
+                            st.success("Draft shape ready — click **Save & verify boundary**.")
+                        else:
                             st.info(
-                                "Draw a polygon (or rectangle) around the field, then Save. "
-                                "Green shapes = other saved parcels · Orange = selected parcel."
+                                "Draw a polygon or rectangle around the selected field, then Save. "
+                                "All previously saved parcels stay visible (green)."
                             )
                 except Exception as e:
                     st.warning(f"Could not load farm parcels. Run `felah_phase1_migration.sql` first. Details: {e}")
@@ -9142,3 +9278,4 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         st.info(f"No rows in `{w_table}` for this Wilaya.")
                 except Exception as e:
                     st.error(f"Could not query `{w_table}`: {e}")
+k
