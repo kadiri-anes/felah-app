@@ -8088,11 +8088,11 @@ create index if not exists idx_officer_activity_created on public.officer_activi
             else "🗺️ Parcel boundary"
         )
 
-        regional_tab_accounts, regional_tab1, regional_tab2, regional_tab3, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
+        # Investigate wilaya tab hidden until the investigation workflow is finished
+        regional_tab_accounts, regional_tab1, regional_tab2, regional_tab4, regional_tab5, regional_tab6, regional_tab7, regional_tab8 = st.tabs([
             "👤 Open farmer accounts",
             "📋 Local declarations",
             "📨 Notify farmers",
-            "🔍 Investigate wilaya",
             "🛰️ Farm satellite monitor",
             "⚠️ Regional warnings",
             parcel_tab_label,
@@ -8141,17 +8141,181 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                 f"carte={created.get('carte_num')} phone={created.get('phone')}",
                                 wilaya=regional_wilaya,
                             )
+                            # Stay in this tab and open declaration form for this farmer
+                            st.session_state.wilaya_pending_farmer = {
+                                "user_id": created.get("user_id"),
+                                "full_name": created.get("full_name") or oa_name,
+                                "phone": created.get("phone") or normalize_phone(oa_phone),
+                                "carte_num": created.get("carte_num") or sanitize(oa_carte),
+                                "wilaya": regional_wilaya,
+                            }
                             st.success(
-                                f"Account opened for **{created['full_name']}** — "
-                                f"phone `{created['phone']}` — carte `{created['carte_num']}`. "
-                                "They can log in from the sidebar with **Phone + Carte Fellah**."
+                                f"Account opened for **{created['full_name']}**. "
+                                "Complete the crop declaration below (no need to leave this console)."
                             )
+                            st.rerun()
                         except Exception as e:
                             err = str(e)
                             if "already" in err.lower() or "registered" in err.lower() or "exists" in err.lower():
                                 st.error("An account with this phone number already exists.")
                             else:
                                 st.error(f"Could not open account: {e}")
+
+                # ---- Inline declaration for the farmer just opened ----
+                pending = st.session_state.get("wilaya_pending_farmer")
+                if pending and str(pending.get("wilaya") or "") == str(regional_wilaya):
+                    st.divider()
+                    st.markdown("#### 📋 Crop declaration for this farmer")
+                    st.info(
+                        f"**{pending.get('full_name')}** · Carte `{pending.get('carte_num')}` · "
+                        f"Phone `{pending.get('phone')}` · {regional_wilaya}"
+                    )
+                    if st.button("✖ Close declaration (register another farmer)", key="wilaya_close_pending_farmer"):
+                        st.session_state.wilaya_pending_farmer = None
+                        st.rerun()
+
+                    crop_options = sorted(set(list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys())))
+                    od_parcel = st.text_input(
+                        "Farm / parcel name",
+                        value=f"{pending.get('full_name') or 'Farm'} field",
+                        key="wilaya_od_parcel",
+                    )
+                    od_cat = st.radio(
+                        "Category",
+                        ["Vegetables (خضروات)", "Fruits (فواكه)"],
+                        key="wilaya_od_cat",
+                        horizontal=True,
+                    )
+                    veg = sorted(VEGETABLE_LIMITS.keys())
+                    fru = sorted(FRUIT_TARGETS_KHA.keys())
+                    od_crop = st.selectbox(
+                        "Crop",
+                        veg if "Vegetable" in od_cat or "خضروات" in od_cat else fru,
+                        key="wilaya_od_crop",
+                    )
+                    od_area = st.number_input(
+                        "Area (hectares)",
+                        min_value=0.1,
+                        value=1.0,
+                        max_value=10000.0,
+                        key="wilaya_od_area",
+                    )
+                    od_start = st.date_input(
+                        "Planting / start date",
+                        value=date.today(),
+                        key="wilaya_od_start",
+                    )
+                    st.caption("Optional: drop a pin on the field (same as farmer declaration).")
+                    od_pin_key = f"wilaya_od_pin_{pending.get('user_id')}"
+                    if od_pin_key not in st.session_state:
+                        st.session_state[od_pin_key] = None
+                    pin_center = get_wilaya_center(regional_wilaya)
+                    saved_od_pin = st.session_state.get(od_pin_key)
+                    map_loc = (
+                        [float(saved_od_pin["lat"]), float(saved_od_pin["lng"])]
+                        if saved_od_pin and saved_od_pin.get("lat") is not None
+                        else list(pin_center)
+                    )
+                    map_z = 16 if saved_od_pin and saved_od_pin.get("lat") is not None else 13
+                    od_map = folium.Map(location=map_loc, zoom_start=map_z, control_scale=True, tiles=None)
+                    add_satellite_basemap(od_map)
+                    add_wilaya_focus_ring(od_map, regional_wilaya)
+                    if saved_od_pin and saved_od_pin.get("lat") is not None:
+                        folium.Marker(
+                            [float(saved_od_pin["lat"]), float(saved_od_pin["lng"])],
+                            tooltip="Farm pin",
+                            icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
+                        ).add_to(od_map)
+                    od_map_data = st_folium(
+                        od_map,
+                        height=360,
+                        width=None,
+                        returned_objects=["last_clicked"],
+                        key=f"wilaya_od_map_{pending.get('user_id')}",
+                        center=map_loc,
+                        zoom=map_z,
+                    )
+                    clicked = (od_map_data or {}).get("last_clicked") or {}
+                    if clicked.get("lat") is not None and clicked.get("lng") is not None:
+                        st.session_state[od_pin_key] = {
+                            "lat": float(clicked["lat"]),
+                            "lng": float(clicked["lng"]),
+                        }
+                        st.rerun()
+                    pin_lat = (st.session_state.get(od_pin_key) or {}).get("lat")
+                    pin_lon = (st.session_state.get(od_pin_key) or {}).get("lng")
+                    if pin_lat is not None:
+                        st.caption(f"Pin: {float(pin_lat):.5f}, {float(pin_lon):.5f}")
+
+                    if st.button(
+                        "✅ Submit declaration for this farmer",
+                        key="wilaya_od_submit",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        db = admin_supabase_client or supabase_client
+                        if db is None:
+                            st.error("Supabase connection required.")
+                        else:
+                            try:
+                                parcel_id = None
+                                parcel_payload = {
+                                    "user_id": pending.get("user_id"),
+                                    "farmer_name": pending.get("full_name"),
+                                    "carte_num": pending.get("carte_num"),
+                                    "phone_number": pending.get("phone"),
+                                    "parcel_name": sanitize(od_parcel) or f"{od_crop} parcel",
+                                    "wilaya": regional_wilaya,
+                                    "crop": od_crop,
+                                    "category": od_cat,
+                                    "area_ha": float(od_area),
+                                    "planting_date": str(od_start),
+                                    "status": "active",
+                                    "pin_lat": float(pin_lat) if pin_lat is not None else None,
+                                    "pin_lon": float(pin_lon) if pin_lon is not None else None,
+                                    "boundary_status": (
+                                        "pin_received" if pin_lat is not None else "pin_pending"
+                                    ),
+                                }
+                                try:
+                                    pres = db.table("farm_parcels").insert(parcel_payload).execute()
+                                except Exception:
+                                    parcel_payload.pop("phone_number", None)
+                                    parcel_payload.pop("status", None)
+                                    pres = db.table("farm_parcels").insert(parcel_payload).execute()
+                                if pres.data:
+                                    parcel_id = pres.data[0].get("id")
+                                decl = {
+                                    "user_id": pending.get("user_id"),
+                                    "farmer_name": pending.get("full_name"),
+                                    "carte_num": pending.get("carte_num"),
+                                    "wilaya": regional_wilaya,
+                                    "category": od_cat,
+                                    "crop": od_crop,
+                                    "area": float(od_area),
+                                    "start_date": str(od_start),
+                                    "status": "active",
+                                }
+                                if parcel_id is not None:
+                                    decl["parcel_id"] = parcel_id
+                                try:
+                                    db.table("declarations").insert(decl).execute()
+                                except Exception:
+                                    decl.pop("status", None)
+                                    db.table("declarations").insert(decl).execute()
+                                st.session_state.officer_current_action = "officer_declaration"
+                                log_officer_activity(
+                                    "officer_declaration",
+                                    f"crop={od_crop} area={od_area} carte={pending.get('carte_num')}",
+                                    wilaya=regional_wilaya,
+                                )
+                                st.success(
+                                    f"Declaration saved for **{pending.get('full_name')}** "
+                                    f"({od_crop}, {od_area} ha). You can close this form or add another crop below."
+                                )
+                                # Keep pending open so officer can declare another crop for same farmer
+                            except Exception as de:
+                                st.error(f"Could not save declaration: {de}")
 
                 st.divider()
                 st.markdown("##### Recent profiles linked to this Wilaya")
@@ -8318,65 +8482,8 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         except Exception as e:
                             st.error(f"Could not send notifications: {e}")
 
-        # ---------- TAB 3: Investigate wilaya ----------
-        with regional_tab3:
-            st.markdown(f"#### Investigate crops in {regional_wilaya}")
-            st.caption("Runs the same AI investigation engine, limited to this Wilaya.")
-            inv_crops = sorted(set(list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys())))
-            inv_crop = st.selectbox("Crop to investigate", inv_crops, key="wilaya_inv_crop")
-            if st.button("🔍 Run investigation", key="wilaya_run_inv", type="primary"):
-                try:
-                    with st.spinner("Investigating..."):
-                        # Load local declarations as the live board for this Wilaya
-                        live_rows = []
-                        if admin_supabase_client is not None:
-                            live_rows = (
-                                admin_supabase_client.table("declarations")
-                                .select("crop,area,wilaya,start_date,farmer_name")
-                                .eq("wilaya", regional_wilaya)
-                                .execute().data or []
-                            )
-                        df_live = pd.DataFrame(live_rows) if live_rows else pd.DataFrame(columns=["crop", "area", "wilaya"])
-                        # Benchmarks: builtin wilaya yields
-                        national_benchmarks = {}
-                        benchmark_map = {}
-                        for cname in list(VEGETABLE_LIMITS.keys()) + list(FRUIT_TARGETS_KHA.keys()):
-                            y = get_builtin_wilaya_yield(cname, regional_wilaya)
-                            if y is not None:
-                                national_benchmarks[cname] = y
-                                benchmark_map[(cname, regional_wilaya)] = y
-                        # Optional live weather + satellite for this wilaya centre
-                        wlat, wlon = get_wilaya_center(regional_wilaya)
-                        weather_rows = ai_fetch_external_weather(regional_wilaya, wlat, wlon, days_back=120)
-                        sat_rows, sat_src, sat_stats = ai_fetch_copernicus_satellite(regional_wilaya, wlat, wlon, days_back=90)
-                        disease_rows = []
-                        try:
-                            disease_rows = (
-                                admin_supabase_client.table("disease_reports")
-                                .select("*").eq("wilaya", regional_wilaya).execute().data or []
-                            ) if admin_supabase_client else []
-                        except Exception:
-                            disease_rows = []
-                        result = ai_investigate_crop_wilaya(
-                            inv_crop, regional_wilaya, df_live, benchmark_map, national_benchmarks,
-                            weather_rows=weather_rows, satellite_rows=sat_rows or [],
-                            disease_rows=disease_rows,
-                        )
-                        result["satellite_source_label"] = sat_src
-                    primary = result.get("primary_label", "Unknown")
-                    conf = float(result.get("confidence") or 0) * 100
-                    st.info(f"Finding — {inv_crop} / {regional_wilaya} — {primary} — confidence {conf:.0f}%")
-                    impact = result.get("impact") or {}
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Declared area", f"{result.get('declared_area_ha', 0):,.1f} ha")
-                    c2.metric("Expected", "—" if impact.get("expected_t") is None else f"{impact['expected_t']:,.0f} t")
-                    c3.metric("Potential impact", "—" if impact.get("loss_t") is None else f"-{impact['loss_t']:,.0f} t")
-                    if result.get("recommendations"):
-                        st.markdown("**Recommendations**")
-                        for rec in result.get("recommendations") or []:
-                            st.write(f"- {rec}")
-                except Exception as e:
-                    st.error(f"Investigation failed: {e}")
+        # ---------- TAB 3: Investigate wilaya (hidden until finished) ----------
+        # regional_tab3 removed from st.tabs — restore when investigation UI is ready.
 
         # ---------- TAB 4: Farm satellite monitor ----------
         with regional_tab4:
