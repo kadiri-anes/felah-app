@@ -3576,7 +3576,42 @@ def _wilaya_name_key(name: str) -> str:
     return t
 
 
+def _wilaya_map_bounds(wilaya: str):
+    """Return [[south, west], [north, east]] for the Wilaya polygon, or None."""
+    short = re.sub(r"^\d+\s*-\s*", "", str(wilaya).strip())
+    key = _wilaya_name_key(short)
+    geo = _load_algeria_adm1_geojson()
+    if not isinstance(geo, dict):
+        return None
+    matched = None
+    for feat in geo.get("features") or []:
+        props = feat.get("properties") or {}
+        for c in (props.get("NAME_1"), props.get("VARNAME_1"), props.get("name")):
+            if not c:
+                continue
+            for part in str(c).split("|")[0].split(","):
+                sk = _wilaya_name_key(part)
+                if sk and (sk == key or key in sk or sk in key):
+                    matched = feat
+                    break
+            if matched is not None:
+                break
+        if matched is not None:
+            break
+    if matched is None:
+        return None
+    pts = _coords_from_boundary_feature(
+        {"type": "Feature", "geometry": matched.get("geometry"), "properties": {}}
+    )
+    if not pts:
+        return None
+    lats = [p[0] for p in pts]
+    lons = [p[1] for p in pts]
+    return [[min(lats), min(lons)], [max(lats), max(lons)]]
+
+
 def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
+
     """Highlight the actual Wilaya border polygon. Never draws a circle."""
     short = re.sub(r"^\d+\s*-\s*", "", str(wilaya).strip())
     key = _wilaya_name_key(short)
@@ -3641,14 +3676,15 @@ def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
                 break
 
     if matched is not None:
+        # Outline only — never fill the whole Wilaya in green
         folium.GeoJson(
             matched,
             name=f"Wilaya border — {short}",
             style_function=lambda _f: {
                 "color": "#38bdf8",
                 "weight": 3,
-                "fillColor": "#38bdf8",
-                "fillOpacity": 0.08,
+                "fillColor": "#000000",
+                "fillOpacity": 0.0,
                 "opacity": 0.95,
             },
             tooltip=str(wilaya),
@@ -3665,7 +3701,7 @@ def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
             )
         ),
     ).add_to(m)
-    return m
+    return matched
 
 
 def get_unread_notif_count() -> int:
@@ -8853,14 +8889,16 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         parcel_pin_lat = selected_parcel.get("pin_lat")
                         parcel_pin_lon = selected_parcel.get("pin_lon")
 
-                        # Overview of the whole Wilaya (no tight zoom on one pin)
+                        # Full Wilaya view (not zoomed on one pin in the middle)
                         map_center = list(get_wilaya_center(regional_wilaya))
-                        map_zoom = 11
+                        map_zoom = 10
 
                         st.markdown(
-                            "**Map legend:** 🟩 green area = saved boundary · 📍 red pin = no boundary yet. "
+                            "**Map legend:** cyan **line** = Wilaya border only (no fill) · "
+                            "🟩 **green shapes** = saved parcel boundaries · "
+                            "📍 **red pins** = parcels still waiting for a boundary. "
                             "Click a pin or green shape for farmer info. "
-                            "**Draw:** polygon tool → click corners → close on first point → **Save**."
+                            "**Draw:** polygon tool → corners → close → **Save**."
                         )
 
                         boundary_map = folium.Map(
@@ -8870,7 +8908,14 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                             tiles=None,
                         )
                         add_satellite_basemap(boundary_map)
-                        # No Wilaya border highlight — only parcels
+                        # Border outline only (no green fill over the whole Wilaya)
+                        add_wilaya_focus_ring(boundary_map, regional_wilaya)
+                        wb = _wilaya_map_bounds(regional_wilaya)
+                        if wb is not None:
+                            try:
+                                boundary_map.fit_bounds(wb, padding=(20, 20))
+                            except Exception:
+                                pass
 
                         saved_group = folium.FeatureGroup(name="Saved boundaries (green)", show=True)
                         pending_group = folium.FeatureGroup(name="No boundary yet (red pins)", show=True)
@@ -9057,10 +9102,15 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                     except Exception as e:
                                         st.error(f"Could not save boundary: {e}")
                         with col_clear:
+                            confirm_del = st.checkbox(
+                                "Confirm delete of this saved boundary",
+                                key=f"confirm_del_boundary_{sel_id}",
+                            )
                             if st.button(
                                 "🗑️ Delete saved boundary",
                                 key=f"clear_boundary_{sel_id}",
                                 use_container_width=True,
+                                disabled=not confirm_del,
                             ):
                                 try:
                                     admin_supabase_client.table("farm_parcels").update({
@@ -9070,7 +9120,7 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                         "boundary_verified_at": None,
                                     }).eq("id", sel_id).eq("wilaya", regional_wilaya).execute()
                                     st.session_state.pop(draft_key, None)
-                                    st.success("Saved boundary deleted. Draw again if needed.")
+                                    st.success("Saved boundary deleted. It is removed from the map.")
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Could not delete boundary: {e}")
