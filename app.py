@@ -3691,17 +3691,20 @@ def add_wilaya_focus_ring(m, wilaya: str, radius_m: int = 18000):
         ).add_to(m)
     # No circle fallback — only real borders (or nothing if border data missing)
 
-    folium.Marker(
-        location=get_wilaya_center(wilaya),
-        tooltip=wilaya,
-        icon=folium.DivIcon(
-            html=(
-                f'<div style="font-size:11px;font-weight:700;color:#fff;'
-                f'text-shadow:0 0 4px #000;white-space:nowrap;">{short}</div>'
-            )
-        ),
-    ).add_to(m)
-    return matched
+    try:
+        folium.Marker(
+            location=get_wilaya_center(wilaya),
+            tooltip=wilaya,
+            icon=folium.DivIcon(
+                html=(
+                    f'<div style="font-size:11px;font-weight:700;color:#fff;'
+                    f'text-shadow:0 0 4px #000;white-space:nowrap;">{short}</div>'
+                )
+            ),
+        ).add_to(m)
+    except Exception:
+        pass
+    return m
 
 
 def get_unread_notif_count() -> int:
@@ -8889,159 +8892,164 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         parcel_pin_lat = selected_parcel.get("pin_lat")
                         parcel_pin_lon = selected_parcel.get("pin_lon")
 
-                        # Full Wilaya view (not zoomed on one pin in the middle)
+                        # Full Wilaya view — always render a map (defensive against blank iframe)
                         map_center = list(get_wilaya_center(regional_wilaya))
                         map_zoom = 10
 
                         st.markdown(
-                            "**Map legend:** cyan **line** = Wilaya border only (no fill) · "
-                            "🟩 **green shapes** = saved parcel boundaries · "
-                            "📍 **red pins** = parcels still waiting for a boundary. "
-                            "Click a pin or green shape for farmer info. "
-                            "**Draw:** polygon tool → corners → close → **Save**."
+                            "**Legend:** cyan line = Wilaya border (no fill) · "
+                            "green = saved boundary · red pin = waiting for boundary. "
+                            "Click a pin/shape for farmer info."
                         )
 
-                        boundary_map = folium.Map(
-                            location=map_center,
-                            zoom_start=map_zoom,
-                            control_scale=True,
-                            tiles=None,
-                        )
-                        add_satellite_basemap(boundary_map)
-                        # Border outline only (no green fill over the whole Wilaya)
-                        add_wilaya_focus_ring(boundary_map, regional_wilaya)
-                        wb = _wilaya_map_bounds(regional_wilaya)
-                        if wb is not None:
+                        try:
+                            boundary_map = folium.Map(
+                                location=map_center,
+                                zoom_start=map_zoom,
+                                control_scale=True,
+                                tiles=None,
+                            )
+                            add_satellite_basemap(boundary_map)
                             try:
-                                boundary_map.fit_bounds(wb, padding=(20, 20))
+                                add_wilaya_focus_ring(boundary_map, regional_wilaya)
+                            except Exception:
+                                pass
+                            try:
+                                wb = _wilaya_map_bounds(regional_wilaya)
+                                if wb is not None and len(wb) == 2:
+                                    boundary_map.fit_bounds(wb, padding=(24, 24))
                             except Exception:
                                 pass
 
-                        saved_group = folium.FeatureGroup(name="Saved boundaries (green)", show=True)
-                        pending_group = folium.FeatureGroup(name="No boundary yet (red pins)", show=True)
+                            saved_group = folium.FeatureGroup(name="Saved boundaries (green)", show=True)
+                            pending_group = folium.FeatureGroup(name="No boundary yet (red pins)", show=True)
 
-                        def _farmer_popup_html(p, has_boundary: bool):
-                            name = str(p.get("farmer_name") or "—")
-                            carte = str(p.get("carte_num") or "—")
-                            phone = str(p.get("phone_number") or "—")
-                            crop = str(p.get("crop") or "—")
-                            pname = str(p.get("parcel_name") or "—")
-                            area = p.get("area_ha")
-                            area_s = f"{float(area):.2f} ha" if area is not None else "—"
-                            status = "Boundary saved" if has_boundary else "Waiting for boundary"
-                            pid = p.get("id")
-                            return (
-                                f"<div style='font-family:Arial,sans-serif;min-width:180px;color:#111;'>"
-                                f"<b>Parcel #{pid}</b><br/>"
-                                f"<b>Farmer:</b> {name}<br/>"
-                                f"<b>Carte:</b> {carte}<br/>"
-                                f"<b>Phone:</b> {phone}<br/>"
-                                f"<b>Crop:</b> {crop}<br/>"
-                                f"<b>Parcel:</b> {pname}<br/>"
-                                f"<b>Area:</b> {area_s}<br/>"
-                                f"<b>Status:</b> {status}"
-                                f"</div>"
-                            )
-
-                        for p in parcels:
-                            feat = _normalize_boundary_geojson(p.get("boundary_geojson"))
-                            has_b = feat is not None
-                            popup = folium.Popup(_farmer_popup_html(p, has_b), max_width=260)
-                            tooltip = (
-                                f"#{p.get('id')} · {p.get('farmer_name') or 'Farmer'} · "
-                                f"{p.get('carte_num') or ''} · "
-                                f"{'saved' if has_b else 'no boundary'}"
-                            )
-                            if has_b:
-                                style = {
-                                    "color": "#16a34a",
-                                    "weight": 2.5,
-                                    "fillColor": "#22c55e",
-                                    "fillOpacity": 0.28,
-                                }
+                            def _farmer_popup_html(p, has_boundary: bool) -> str:
+                                name = str(p.get("farmer_name") or "—")
+                                carte = str(p.get("carte_num") or "—")
+                                phone = str(p.get("phone_number") or "—")
+                                crop = str(p.get("crop") or "—")
+                                pname = str(p.get("parcel_name") or "—")
+                                area = p.get("area_ha")
                                 try:
-                                    folium.GeoJson(
-                                        feat,
-                                        name=f"Parcel #{p.get('id')}",
-                                        style_function=lambda _f, s=style: s,
-                                        tooltip=tooltip,
-                                        popup=popup,
-                                    ).add_to(saved_group)
+                                    area_s = f"{float(area):.2f} ha" if area is not None else "—"
                                 except Exception:
-                                    pass
-                                # Small green center marker for clickability when polygon is hard to hit
-                                plat, plon = p.get("pin_lat"), p.get("pin_lon")
-                                if plat is None or plon is None:
-                                    pts = _coords_from_boundary_feature(feat)
-                                    if pts:
-                                        plat = sum(x[0] for x in pts) / len(pts)
-                                        plon = sum(x[1] for x in pts) / len(pts)
-                                if plat is not None and plon is not None:
-                                    try:
-                                        folium.CircleMarker(
-                                            location=[float(plat), float(plon)],
-                                            radius=5,
-                                            color="#16a34a",
-                                            fill=True,
-                                            fill_color="#22c55e",
-                                            fill_opacity=0.95,
-                                            tooltip=tooltip,
-                                            popup=popup,
-                                        ).add_to(saved_group)
-                                    except Exception:
-                                        pass
-                            else:
-                                plat, plon = p.get("pin_lat"), p.get("pin_lon")
-                                if plat is not None and plon is not None:
-                                    try:
-                                        folium.Marker(
-                                            location=[float(plat), float(plon)],
-                                            tooltip=tooltip,
-                                            popup=popup,
-                                            icon=folium.Icon(
-                                                color="red",
-                                                icon="map-marker",
-                                                prefix="fa",
-                                            ),
-                                        ).add_to(pending_group)
-                                    except Exception:
-                                        pass
+                                    area_s = "—"
+                                status = "Boundary saved" if has_boundary else "Waiting for boundary"
+                                pid = p.get("id")
+                                return (
+                                    "<div style='font-family:Arial,sans-serif;min-width:180px;color:#111;'>"
+                                    f"<b>Parcel #{pid}</b><br/>"
+                                    f"<b>Farmer:</b> {name}<br/>"
+                                    f"<b>Carte:</b> {carte}<br/>"
+                                    f"<b>Phone:</b> {phone}<br/>"
+                                    f"<b>Crop:</b> {crop}<br/>"
+                                    f"<b>Parcel:</b> {pname}<br/>"
+                                    f"<b>Area:</b> {area_s}<br/>"
+                                    f"<b>Status:</b> {status}"
+                                    "</div>"
+                                )
 
-                        saved_group.add_to(boundary_map)
-                        pending_group.add_to(boundary_map)
+                            for p in parcels:
+                                try:
+                                    feat = _normalize_boundary_geojson(p.get("boundary_geojson"))
+                                    has_b = feat is not None
+                                    tooltip = (
+                                        f"#{p.get('id')} · {p.get('farmer_name') or 'Farmer'} · "
+                                        f"{p.get('carte_num') or ''} · "
+                                        f"{'saved' if has_b else 'no boundary'}"
+                                    )
+                                    html = _farmer_popup_html(p, has_b)
+                                    if has_b:
+                                        style = {
+                                            "color": "#16a34a",
+                                            "weight": 2.5,
+                                            "fillColor": "#22c55e",
+                                            "fillOpacity": 0.28,
+                                        }
+                                        try:
+                                            folium.GeoJson(
+                                                feat,
+                                                name=f"Parcel #{p.get('id')}",
+                                                style_function=lambda _f, s=style: s,
+                                                tooltip=tooltip,
+                                                popup=folium.Popup(html, max_width=280),
+                                            ).add_to(saved_group)
+                                        except Exception:
+                                            pass
+                                        plat, plon = p.get("pin_lat"), p.get("pin_lon")
+                                        if plat is None or plon is None:
+                                            pts = _coords_from_boundary_feature(feat)
+                                            if pts:
+                                                plat = sum(x[0] for x in pts) / len(pts)
+                                                plon = sum(x[1] for x in pts) / len(pts)
+                                        if plat is not None and plon is not None:
+                                            folium.CircleMarker(
+                                                location=[float(plat), float(plon)],
+                                                radius=5,
+                                                color="#16a34a",
+                                                fill=True,
+                                                fill_color="#22c55e",
+                                                fill_opacity=0.95,
+                                                tooltip=tooltip,
+                                                popup=folium.Popup(html, max_width=280),
+                                            ).add_to(saved_group)
+                                    else:
+                                        plat, plon = p.get("pin_lat"), p.get("pin_lon")
+                                        if plat is not None and plon is not None:
+                                            folium.Marker(
+                                                location=[float(plat), float(plon)],
+                                                tooltip=tooltip,
+                                                popup=folium.Popup(html, max_width=280),
+                                                icon=folium.Icon(color="red", icon="info-sign"),
+                                            ).add_to(pending_group)
+                                except Exception:
+                                    continue
 
-                        Draw(
-                            export=False,
-                            position="topleft",
-                            draw_options={
-                                "polyline": False,
-                                "rectangle": True,
-                                "circle": False,
-                                "circlemarker": False,
-                                "marker": False,
-                                "polygon": {
-                                    "allowIntersection": False,
-                                    "showArea": True,
-                                    "shapeOptions": {
-                                        "color": "#2563eb",
-                                        "fillColor": "#3b82f6",
-                                        "fillOpacity": 0.25,
-                                        "weight": 3,
+                            saved_group.add_to(boundary_map)
+                            pending_group.add_to(boundary_map)
+
+                            try:
+                                Draw(
+                                    export=False,
+                                    position="topleft",
+                                    draw_options={
+                                        "polyline": False,
+                                        "rectangle": True,
+                                        "circle": False,
+                                        "circlemarker": False,
+                                        "marker": False,
+                                        "polygon": {
+                                            "allowIntersection": False,
+                                            "showArea": True,
+                                            "shapeOptions": {
+                                                "color": "#2563eb",
+                                                "fillColor": "#3b82f6",
+                                                "fillOpacity": 0.25,
+                                                "weight": 3,
+                                            },
+                                        },
                                     },
-                                },
-                            },
-                            edit_options={"edit": True, "remove": True},
-                        ).add_to(boundary_map)
-                        folium.LayerControl(collapsed=True).add_to(boundary_map)
+                                    edit_options={"edit": True, "remove": True},
+                                ).add_to(boundary_map)
+                            except Exception:
+                                pass
+                            try:
+                                folium.LayerControl(collapsed=True).add_to(boundary_map)
+                            except Exception:
+                                pass
 
-                        # Stable key per Wilaya so switching parcel does not wipe other layers / bug the map
-                        boundary_map_data = st_folium(
-                            boundary_map,
-                            height=580,
-                            width=None,
-                            returned_objects=["all_drawings", "last_active_drawing", "last_object_clicked"],
-                            key=f"wilaya_boundary_map_stable_{regional_wilaya}",
-                        )
+                            boundary_map_data = st_folium(
+                                boundary_map,
+                                height=520,
+                                use_container_width=True,
+                                returned_objects=["all_drawings", "last_active_drawing"],
+                                key=f"wilaya_boundary_map_v3_{regional_wilaya}",
+                            )
+                        except Exception as map_err:
+                            st.error(f"Map could not load: {map_err}")
+                            boundary_map_data = None
+
 
                         # Prefer newest drawing from the map interaction
                         drawing = None
