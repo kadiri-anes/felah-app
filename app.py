@@ -9278,4 +9278,3 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                         st.info(f"No rows in `{w_table}` for this Wilaya.")
                 except Exception as e:
                     st.error(f"Could not query `{w_table}`: {e}")
-k
