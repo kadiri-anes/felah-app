@@ -227,6 +227,138 @@ BUILTIN_OFFICIAL_BENCHMARKS = {
     "Potatoes / بطاطا", "Tomatoes / طماطم", "Onions / بصل"
 }
 
+# Seasonal / Wilaya-specific planning yields (t/ha).
+# Keyed by crop aliases + Wilaya. Used when planting (start_date) is known.
+# Bou Saada potato: early-year season vs last-4-months season (officer-provided local targets).
+SEASONAL_WILAYA_YIELD_BENCHMARKS = {
+    "Potatoes / بطاطا": {
+        "68 - Bou Saada": {
+            # Planting in the beginning of the year (Jan–Apr)
+            "early_year": {"months": (1, 2, 3, 4), "yield_t_ha": 55.0, "label": "Early-year season (Jan–Apr)"},
+            # Planting in the last 4 months of the year (Sep–Dec)
+            "late_year": {"months": (9, 10, 11, 12), "yield_t_ha": 20.0, "label": "Late-year season (Sep–Dec)"},
+        },
+    },
+}
+
+# Aliases so "Potatoes (بطاطا)" resolves the same seasonal table
+SEASONAL_WILAYA_YIELD_BENCHMARKS["Potatoes (بطاطا)"] = SEASONAL_WILAYA_YIELD_BENCHMARKS["Potatoes / بطاطا"]
+
+
+def ai_is_potato_crop(crop_name) -> bool:
+    n = str(crop_name or "").strip().lower()
+    return "potato" in n or "بطاطا" in n or "بطاطا" in n
+
+
+def ai_resolve_crop_alias_key(crop_name: str) -> str:
+    """Normalize crop label toward the slash form used in benchmark tables."""
+    name = str(crop_name or "").strip()
+    if name in SEASONAL_WILAYA_YIELD_BENCHMARKS:
+        return name
+    if "(" in name and name.endswith(")"):
+        left, arabic = name.rsplit("(", 1)
+        alias = f"{left.strip()} / {arabic[:-1].strip()}"
+        if alias in SEASONAL_WILAYA_YIELD_BENCHMARKS:
+            return alias
+    if " / " in name:
+        left, arabic = name.split(" / ", 1)
+        alias = f"{left.strip()} ({arabic.strip()})"
+        if alias in SEASONAL_WILAYA_YIELD_BENCHMARKS:
+            return name
+    return name
+
+
+def ai_potato_season_from_planting(planting_date):
+    """Return season key for potato from planting month, or None if unknown/off-season."""
+    dt = pd.to_datetime(planting_date, errors="coerce")
+    if pd.isna(dt):
+        return None, None
+    month = int(dt.month)
+    if month in (1, 2, 3, 4):
+        return "early_year", month
+    if month in (9, 10, 11, 12):
+        return "late_year", month
+    # May–Aug: not one of the two Bou Saada seasons — no forced seasonal yield
+    return None, month
+
+
+def get_seasonal_wilaya_yield(crop_name, wilaya_name, planting_date=None):
+    """Return (yield_t_ha, season_label) if a seasonal rule exists, else (None, None)."""
+    crop_key = ai_resolve_crop_alias_key(crop_name)
+    table = SEASONAL_WILAYA_YIELD_BENCHMARKS.get(crop_key) or SEASONAL_WILAYA_YIELD_BENCHMARKS.get(
+        str(crop_name or "").strip()
+    )
+    if not table:
+        return None, None
+    w = str(wilaya_name or "").strip()
+    # Match exact or by Bou Saada code 68
+    rules = table.get(w)
+    if rules is None:
+        for k, v in table.items():
+            if k.startswith("68") or "bou saada" in k.lower() or "bousaada" in k.lower().replace(" ", ""):
+                if "68" in w or "bou saada" in w.lower() or "bousaada" in w.lower().replace(" ", ""):
+                    rules = v
+                    break
+    if not rules:
+        return None, None
+    season_key, _month = ai_potato_season_from_planting(planting_date)
+    if season_key and season_key in rules:
+        rule = rules[season_key]
+        return float(rule["yield_t_ha"]), str(rule.get("label") or season_key)
+    return None, None
+
+
+def ai_earliest_planting_date(df_live, crop, wilaya):
+    """Earliest start_date / planting_date for this crop×Wilaya from declarations."""
+    if df_live is None or getattr(df_live, "empty", True):
+        return None
+    work = df_live.copy()
+    crop_aliases = {str(crop).strip()}
+    if ai_is_potato_crop(crop):
+        crop_aliases.update({"Potatoes / بطاطا", "Potatoes (بطاطا)", "Potatoes", "بطاطا"})
+    profile = AI_CROP_RISK_PROFILES.get(ai_crop_key(crop), {})
+    crop_aliases.update(profile.get("aliases") or set())
+    mask_c = work["crop"].astype(str).str.strip().isin(crop_aliases) if "crop" in work.columns else pd.Series([False] * len(work))
+    mask_w = work["wilaya"].astype(str).str.strip() == str(wilaya).strip() if "wilaya" in work.columns else pd.Series([False] * len(work))
+    sub = work.loc[mask_c & mask_w]
+    if sub.empty:
+        return None
+    for col in ("start_date", "planting_date"):
+        if col in sub.columns:
+            dts = pd.to_datetime(sub[col], errors="coerce").dropna()
+            if not dts.empty:
+                return dts.min().to_pydatetime().date() if hasattr(dts.min(), "to_pydatetime") else dts.min().date()
+    return None
+
+
+def ai_filter_rows_from_planting(rows, planting_date, date_fields=("observed_at", "reported_at", "created_at", "date")):
+    """Keep only observations on/after planting day (day-one of the crop cycle)."""
+    if planting_date is None:
+        return list(rows or [])
+    plant = pd.to_datetime(planting_date, errors="coerce")
+    if pd.isna(plant):
+        return list(rows or [])
+    plant = plant.normalize() if hasattr(plant, "normalize") else plant
+    out = []
+    for r in rows or []:
+        dt = None
+        for f in date_fields:
+            if r.get(f) is not None:
+                dt = pd.to_datetime(r.get(f), errors="coerce")
+                if not pd.isna(dt):
+                    break
+        if dt is None or pd.isna(dt):
+            continue
+        if hasattr(dt, "tz_localize"):
+            try:
+                dt = dt.tz_localize(None) if dt.tzinfo else dt
+            except Exception:
+                pass
+        if dt >= plant:
+            out.append(r)
+    return out
+
+
 # ------------------------------------------------------------------
 # Built-in Wilaya fallback benchmarks
 # ------------------------------------------------------------------
@@ -1613,11 +1745,18 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     wilaya = str(wilaya).strip()
     satellite_stats = {}
     declared_area = ai_declaration_area(df_live, crop, wilaya)
-    yield_benchmark = benchmark_map.get((crop, wilaya))
-    if yield_benchmark is None:
-        yield_benchmark = national_benchmarks.get(crop)
-    if yield_benchmark is None:
-        yield_benchmark = get_builtin_wilaya_yield(crop, wilaya)
+    planting_date = ai_earliest_planting_date(df_live, crop, wilaya)
+    season_label = None
+    # Seasonal Wilaya yield first (e.g. Bou Saada potato 55 vs 20 t/ha)
+    seasonal_y, season_label = get_seasonal_wilaya_yield(crop, wilaya, planting_date)
+    if seasonal_y is not None:
+        yield_benchmark = seasonal_y
+    else:
+        yield_benchmark = benchmark_map.get((crop, wilaya))
+        if yield_benchmark is None:
+            yield_benchmark = national_benchmarks.get(crop)
+        if yield_benchmark is None:
+            yield_benchmark = get_builtin_wilaya_yield(crop, wilaya)
 
     # Restrict crop-specific evidence to the selected crop/Wilaya. This is
     # critical: a disease in another crop must never become evidence for this
@@ -1648,6 +1787,10 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
     disease_windows = ai_disease_analysis_windows(selected_disease_rows, crop, wilaya)
     analysis_weather_rows = ai_filter_rows_to_windows(weather_rows or [], disease_windows) if disease_windows else list(weather_rows or [])
     analysis_satellite_rows = ai_filter_rows_to_windows(satellite_rows or [], disease_windows) if disease_windows else list(satellite_rows or [])
+    # From day one of planting: only weather/satellite on or after declared start_date
+    if planting_date is not None:
+        analysis_weather_rows = ai_filter_rows_from_planting(analysis_weather_rows, planting_date)
+        analysis_satellite_rows = ai_filter_rows_from_planting(analysis_satellite_rows, planting_date)
     weather_signal = ai_parse_weather_evidence(analysis_weather_rows, crop, wilaya)
     weather_signal["alert_matches"] = ai_parse_weather_alerts(weather_alert_rows or [], crop, wilaya)
     historical_signal = ai_historical_production_signal(
@@ -1759,6 +1902,8 @@ def ai_investigate_crop_wilaya(crop, wilaya, df_live, benchmark_map, national_be
         "wilaya": wilaya,
         "declared_area_ha": declared_area,
         "yield_benchmark_t_ha": _ai_float(yield_benchmark),
+        "planting_date": str(planting_date) if planting_date else None,
+        "season_label": season_label,
         "historical": historical_signal,
         "weather": weather_signal,
         "soil_estimate": soil_estimate,
@@ -6344,21 +6489,39 @@ elif st.session_state.active_tab == "account":
                             )
                             result["satellite_stats"] = ai_summarize_satellite_rows(investigation_satellite_rows, days_back=90)
                         else:
+                            # Weather + satellite window from declared planting day-1 when available
+                            _inv_plant = ai_earliest_planting_date(
+                                ai_df, selected_investigation_crop, selected_investigation_wilaya
+                            )
+                            _wx_days = 365
+                            _sat_days = 90
+                            if _inv_plant is not None:
+                                try:
+                                    _wx_days = max(21, min(420, (date.today() - _inv_plant).days + 1))
+                                    _sat_days = max(21, min(180, (date.today() - _inv_plant).days + 1))
+                                except Exception:
+                                    pass
                             if not investigation_weather_rows:
                                 wlat, wlon, coord_source = ai_resolve_wilaya_coordinates(
                                     selected_investigation_wilaya, location_rows
                                 )
                                 if wlat is not None and wlon is not None:
                                     external_rows = ai_fetch_external_weather(
-                                        selected_investigation_wilaya, wlat, wlon, days_back=365
+                                        selected_investigation_wilaya, wlat, wlon, days_back=_wx_days
                                     )
                                     if external_rows:
                                         investigation_weather_rows.extend(external_rows)
-                                        weather_source_label = "Open-Meteo historical weather (external planning source)"
+                                        weather_source_label = (
+                                            f"Open-Meteo from planting {_inv_plant} ({_wx_days}d)"
+                                            if _inv_plant
+                                            else "Open-Meteo historical weather (external planning source)"
+                                        )
                             if not investigation_satellite_rows:
                                 slat, slon, _sat_coord_source = ai_resolve_wilaya_coordinates(selected_investigation_wilaya, location_rows)
                                 if slat is not None and slon is not None:
-                                    live_sat_rows, live_sat_source, live_sat_stats = ai_fetch_copernicus_satellite(selected_investigation_wilaya, slat, slon, days_back=90)
+                                    live_sat_rows, live_sat_source, live_sat_stats = ai_fetch_copernicus_satellite(
+                                        selected_investigation_wilaya, slat, slon, days_back=_sat_days
+                                    )
                                     if live_sat_rows:
                                         investigation_satellite_rows.extend(live_sat_rows)
                                     satellite_source_label = live_sat_source
@@ -6390,6 +6553,12 @@ elif st.session_state.active_tab == "account":
                         confidence = result.get("confidence", 0.0) * 100
                         confidence_status = (result.get("confidence_info") or {}).get("status", "unconfirmed")
                         primary = result.get("primary_label", "Unknown")
+                        if result.get("season_label") or result.get("planting_date"):
+                            st.caption(
+                                f"Planting (earliest declaration): **{result.get('planting_date') or '—'}** · "
+                                f"Season / benchmark rule: **{result.get('season_label') or 'standard zone yield'}** · "
+                                f"Yield used: **{result.get('yield_benchmark_t_ha')} t/ha**"
+                            )
 
                         if result.get("notify_admin"):
                             st.error(
@@ -8515,6 +8684,113 @@ create index if not exists idx_officer_activity_created on public.officer_activi
                                     )
                         else:
                             st.info("All listed declarations are already harvested or have no id.")
+
+                        st.markdown("##### 🗑️ Delete declaration (and linked farm / boundary)")
+                        st.caption(
+                            "Deletes the declaration **and** its linked farm parcel (pin + boundary verification). "
+                            "This cannot be undone. Only rows in this Wilaya."
+                        )
+                        all_decl_ids = [
+                            int(r["id"]) for _, r in rdf.iterrows() if r.get("id") is not None
+                        ]
+                        if all_decl_ids:
+                            del_id = st.selectbox(
+                                "Declaration ID to delete",
+                                all_decl_ids,
+                                key="wilaya_delete_decl_id",
+                            )
+                            # Preview linked parcel
+                            try:
+                                del_row = rdf[rdf["id"] == del_id].iloc[0].to_dict()
+                            except Exception:
+                                del_row = {}
+                            linked_pid = del_row.get("parcel_id")
+                            st.write(
+                                f"Farmer: **{del_row.get('farmer_name') or '—'}** · "
+                                f"Crop: **{del_row.get('crop') or '—'}** · "
+                                f"Carte: `{del_row.get('carte_num') or '—'}` · "
+                                f"Linked parcel_id: **{linked_pid if linked_pid is not None else 'none'}**"
+                            )
+                            confirm_del_decl = st.checkbox(
+                                "I confirm permanent deletion of this declaration and its farm/boundary",
+                                key=f"wilaya_confirm_del_decl_{del_id}",
+                            )
+                            if st.button(
+                                "🗑️ Delete declaration + farm + boundary",
+                                key="wilaya_delete_decl_btn",
+                                type="primary",
+                                disabled=not confirm_del_decl,
+                            ):
+                                try:
+                                    # 1) Resolve parcel ids to remove (by parcel_id and by matching carte/user)
+                                    parcel_ids_to_delete = set()
+                                    if linked_pid is not None and str(linked_pid).strip() not in ("", "None", "nan"):
+                                        try:
+                                            parcel_ids_to_delete.add(int(linked_pid))
+                                        except Exception:
+                                            parcel_ids_to_delete.add(linked_pid)
+
+                                    # Also find parcels for same user/carte/crop in this Wilaya if no parcel_id
+                                    try:
+                                        pq = (
+                                            admin_supabase_client.table("farm_parcels")
+                                            .select("id,user_id,carte_num,crop,wilaya")
+                                            .eq("wilaya", regional_wilaya)
+                                            .limit(2000)
+                                            .execute()
+                                            .data
+                                            or []
+                                        )
+                                        uid = str(del_row.get("user_id") or "").strip()
+                                        carte = str(del_row.get("carte_num") or "").strip().upper()
+                                        crop = str(del_row.get("crop") or "").strip()
+                                        for p in pq:
+                                            if linked_pid is not None and str(p.get("id")) == str(linked_pid):
+                                                parcel_ids_to_delete.add(p.get("id"))
+                                                continue
+                                            same_user = uid and str(p.get("user_id") or "").strip() == uid
+                                            same_carte = carte and str(p.get("carte_num") or "").strip().upper() == carte
+                                            same_crop = (not crop) or str(p.get("crop") or "").strip() == crop
+                                            if (same_user or same_carte) and same_crop:
+                                                # Only auto-link if declaration had no parcel_id
+                                                if linked_pid is None or str(linked_pid).strip() in ("", "None", "nan"):
+                                                    parcel_ids_to_delete.add(p.get("id"))
+                                    except Exception:
+                                        pass
+
+                                    # 2) Delete parcels (boundary geojson goes with the row)
+                                    deleted_parcels = 0
+                                    for pid in list(parcel_ids_to_delete):
+                                        if pid is None:
+                                            continue
+                                        try:
+                                            admin_supabase_client.table("farm_parcels").delete().eq(
+                                                "id", pid
+                                            ).eq("wilaya", regional_wilaya).execute()
+                                            deleted_parcels += 1
+                                        except Exception as pe:
+                                            st.warning(f"Parcel {pid}: {pe}")
+
+                                    # 3) Delete declaration
+                                    admin_supabase_client.table("declarations").delete().eq(
+                                        "id", del_id
+                                    ).eq("wilaya", regional_wilaya).execute()
+
+                                    st.session_state.officer_current_action = "delete_declaration"
+                                    log_officer_activity(
+                                        "delete_declaration",
+                                        f"declaration_id={del_id} parcels={list(parcel_ids_to_delete)}",
+                                        wilaya=regional_wilaya,
+                                    )
+                                    st.success(
+                                        f"Deleted declaration **{del_id}** and **{deleted_parcels}** linked farm parcel(s) "
+                                        f"(including any saved boundary)."
+                                    )
+                                    st.rerun()
+                                except Exception as de:
+                                    st.error(f"Could not delete: {de}")
+                        else:
+                            st.info("No declaration ids available to delete.")
                     else:
                         st.info("No declarations found for this Wilaya yet.")
                 except Exception as e:
